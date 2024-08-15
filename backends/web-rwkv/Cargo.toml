@@ -1,0 +1,19 @@
+[package]
+edition = "2021"
+name = "web-rwkv-ffi"
+version = "0.1.1"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+anyhow = "1.0"
+fastrand = "2.0"
+half = { version = "2.2", features = ["bytemuck", "serde"] }
+itertools = "0.13"
+log = "0.4"
+memmap2 = "0.9"
+safetensors = "0.4"
+simple_logger = { version = "5.0.0", features = ["stderr"] }
+tokio = { version = "1.37", features = ["full"] }
+web-rwkv = "0.8.17"

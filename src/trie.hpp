@@ -365,10 +365,15 @@ class TRIE_TOKENIZER {
             return std::string(bytes.begin(), bytes.end());
         }
 
+        bool _inited = false;
+
     public:
         TRIE_TOKENIZER(const std::string& file_name) {
             root = std::make_shared<TRIE>();
             std::ifstream file(file_name);
+            if (!file.is_open()) {
+                return;
+            }
             std::string line;
             while (getline(file, line)) {
                 size_t firstSpace = line.find(' ');
@@ -382,6 +387,7 @@ class TRIE_TOKENIZER {
                 token2idx[x] = idx;
                 root->add(x, 0, idx);
             }
+            _inited = true;
         }
 
         void testStringToBytes(const std::string& str) {
@@ -436,6 +442,7 @@ class TRIE_TOKENIZER {
             return encodeBytes(stringToBytes(src));
         }
 
+#if 0
         std::vector<std::vector<int>> encodeBatch(const std::vector<std::string>& src) {
             std::vector<std::vector<int>> result(src.size());
             result.reserve(src.size());
@@ -449,6 +456,7 @@ class TRIE_TOKENIZER {
 
             return result;
         }
+#endif
 
         std::string decode(const std::vector<int>& tokens) {
             return bytesToString(decodeBytes(tokens));
@@ -460,6 +468,10 @@ class TRIE_TOKENIZER {
                 std::cout << bytesToString(s) << " ";
             }
             std::cout << std::endl;
+        }
+
+        bool inited() {
+            return _inited;
         }
     };
 

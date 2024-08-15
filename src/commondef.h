@@ -1,8 +1,6 @@
 #ifndef COMMONDEF_H
 #define COMMONDEF_H
 
-#include <string>
-
 namespace rwkvmobile {
 
 enum {
@@ -15,28 +13,9 @@ enum {
     RWKV_ERROR_MODEL = 1 << 5,
     RWKV_ERROR_TOKENIZER = 1 << 6,
     RWKV_ERROR_SAMPLER = 1 << 7,
+    RWKV_ERROR_RUNTIME = 1 << 8,
+    RWKV_ERROR_UNSUPPORTED = 1 << 9,
 };
-
-enum {
-    RWKV_BACKEND_RWKVCPP = 0,
-    RWKV_BACKEND_COUNT,
-};
-
-std::string backend_enum_to_str(int backend) {
-    switch (backend) {
-        case RWKV_BACKEND_RWKVCPP:
-            return "rwkv.cpp";
-        default:
-            return "unknown";
-    }
-}
-
-int backend_str_to_enum(std::string backend) {
-    if (backend == "rwkv.cpp") {
-        return RWKV_BACKEND_RWKVCPP;
-    }
-    return -1;
-}
 
 } // namespace rwkvmobile
 
