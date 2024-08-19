@@ -17,8 +17,15 @@ int main(int argc, char **argv) {
     ENSURE_SUCCESS_OR_LOG_EXIT(rumtime.load_model(argv[2]), "Failed to load model");
 
     std::cout << "Generating demo text..." << std::endl;
-    std::string response;
-    ENSURE_SUCCESS_OR_LOG_EXIT(rumtime.chat("User", "Assistant", "你好！", response), "Failed to generate chat message");
+    std::string result;
+    // generating one token per call so that it's not blocked when generating long text
+    ENSURE_SUCCESS_OR_LOG_EXIT(rumtime.gen_completion("\n我们发现，", result, 1), "Failed to generate chat message");
+    std::cout << result;
+    for (int i = 0; i < 100; i++ ) {
+        std::string input(result);
+        ENSURE_SUCCESS_OR_LOG_EXIT(rumtime.gen_completion(input, result, 1), "Failed to generate chat message");
+        std::cout << result;
+    }
 
-    std::cout << "User: Hello!\n\nAssistant:" << response << std::endl;
+    return 0;
 }
