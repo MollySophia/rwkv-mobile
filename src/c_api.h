@@ -5,6 +5,7 @@ typedef void * rwkvmobile_runtime_t;
 
 #ifdef __cplusplus
 extern "C" {
+#endif
 
 // ============================
 // init runtime with backend name
@@ -67,7 +68,8 @@ int rwkvmobile_runtime_gen_completion(rwkvmobile_runtime_t runtime, const char *
 // returns: Error codes
 int rwkvmobile_runtime_clear_state(rwkvmobile_runtime_t runtime);
 
+#ifdef __cplusplus
 }
 #endif
 
-#endif
+#endif // C_API_H

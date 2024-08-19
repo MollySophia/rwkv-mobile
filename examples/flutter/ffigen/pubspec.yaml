@@ -1,0 +1,16 @@
+name: rwkv_mobile_ffigen
+
+environment:
+  sdk: '>=2.12.0'
+
+dev_dependencies:
+  ffigen: 11.0.0
+  ffi: 2.1.2
+
+ffigen:
+  name: rwkv_mobile
+  description: rwkv_mobile c_api.h in dart
+  output: 'rwkv_mobile.dart'
+  headers:
+    entry-points:
+      - '../../../src/c_api.h'
