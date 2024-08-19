@@ -17,6 +17,7 @@ public:
     virtual int eval(std::vector<int> ids, std::vector<float> &logits) { return 0; };
     virtual int get_state(std::vector<float> &state) { return 0; }
     virtual int set_state(std::vector<float> state) { return 0; }
+    virtual int clear_state() { return 0; }
     virtual int release_model() { return 0; };
     virtual int release() { return 0; };
     virtual bool is_available() { return false; };

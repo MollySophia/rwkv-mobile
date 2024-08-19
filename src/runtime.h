@@ -21,10 +21,17 @@ public:
     int eval_logits(std::vector<int> ids, std::vector<float> &logits);
     int get_state(std::vector<float> &state);
     int set_state(std::vector<float> state);
+    int clear_state() {
+        if (_backend == nullptr) {
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+        _occurences.clear();
+        return _backend->clear_state();
+    }
     int release();
 
     int chat(std::string user_role, std::string response_role, std::string user_input, std::string &response);
-    int gen_completion(std::string user_input, std::string &response, int max_length);
+    int gen_completion(std::string prompt, std::string &completion, int length);
 
     int set_seed(int64_t seed);
     inline void set_sampler_params(float temperature, int top_k, float top_p) {

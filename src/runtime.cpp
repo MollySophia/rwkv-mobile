@@ -90,9 +90,6 @@ int runtime::chat(std::string user_role, std::string response_role, std::string 
     if (ret) {
         return ret;
     }
-    if (!logits.size()) {
-        return RWKV_ERROR_RUNTIME;
-    }
 
     // TODO: Better chat api
     const int max_length = 4096;
@@ -122,5 +119,39 @@ int runtime::chat(std::string user_role, std::string response_role, std::string 
     return RWKV_SUCCESS;
 }
 
+int runtime::gen_completion(std::string prompt, std::string &completion, int length) {
+    if (_backend == nullptr || _tokenizer == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    std::vector<int> ids = _tokenizer->encode(prompt);
+    std::vector<float> logits(_vocab_size);
+    completion = "";
+    int ret = eval_logits(ids, logits);
+    if (ret) {
+        return ret;
+    }
+
+    for (int i = 0; i < length; i++) {
+        for (auto &[id, occurence] : _occurences) {
+            logits[id] -=
+                _frequency_penalty * occurence + _presence_penalty;
+            occurence *= _penalty_decay;
+        }
+
+        int idx = _sampler->sample(logits.data(), logits.size(), _temperature, _top_k, _top_p);
+        if (idx == 0) {
+            break;
+        }
+        _occurences[idx]++;
+
+        completion += _tokenizer->decode(idx);
+        ret = eval_logits(idx, logits);
+        if (ret) {
+            return ret;
+        }
+    }
+
+    return RWKV_SUCCESS;
+}
 
 } // namespace rwkvmobile
