@@ -30,7 +30,7 @@ public:
     }
     int release();
 
-    int chat(std::string user_role, std::string response_role, std::string user_input, std::string &response);
+    int chat(std::string user_role, std::string response_role, std::string user_input, std::string &response, const int max_length);
     int gen_completion(std::string prompt, std::string &completion, int length);
 
     int set_seed(int64_t seed);

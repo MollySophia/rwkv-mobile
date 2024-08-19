@@ -78,7 +78,7 @@ int runtime::eval_logits(std::vector<int> ids, std::vector<float> &logits) {
     return _backend->eval(ids, logits);
 }
 
-int runtime::chat(std::string user_role, std::string response_role, std::string user_input, std::string &response) {
+int runtime::chat(std::string user_role, std::string response_role, std::string user_input, std::string &response, const int max_length) {
     if (_backend == nullptr || _tokenizer == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -91,8 +91,6 @@ int runtime::chat(std::string user_role, std::string response_role, std::string 
         return ret;
     }
 
-    // TODO: Better chat api
-    const int max_length = 4096;
     for (int i = 0; i < max_length; i++) {
         for (auto &[id, occurence] : _occurences) {
             logits[id] -=
