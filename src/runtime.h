@@ -103,6 +103,13 @@ public:
         return _tokenizer->decode(id);
     }
 
+    int sampler_sample(std::vector<float> logits) {
+        if (_sampler == nullptr) {
+            return -1;
+        }
+        return _sampler->sample(logits.data(), logits.size(), _temperature, _top_k, _top_p);
+    }
+
 private:
     std::unique_ptr<execution_provider> _backend;
     std::unique_ptr<tokenizer_base> _tokenizer;
