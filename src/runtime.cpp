@@ -64,6 +64,32 @@ int runtime::load_tokenizer(std::string vocab_file) {
     return _tokenizer->load(vocab_file);
 }
 
+int runtime::get_available_backend_ids(std::vector<int> &backend_ids) {
+    backend_ids = std::vector<int>();
+
+#ifdef ENABLE_RWKVCPP
+    // should work on all available platforms
+    backend_ids.push_back(RWKV_BACKEND_RWKVCPP);
+#endif
+
+#ifdef ENABLE_WEBRWKV
+    // TODO: Detect if the platform has Qualcomm Adreno proprietary vulkan driver
+    // (Doesn't work with WEBRWKV)
+    backend_ids.push_back(RWKV_BACKEND_WEBRWKV);
+#endif
+    return RWKV_SUCCESS;
+}
+
+std::string runtime::get_available_backends_str() {
+    std::vector<int> backend_ids;
+    get_available_backend_ids(backend_ids);
+    std::string ret = "";
+    for (auto id : backend_ids) {
+        ret += backend_enum_to_str(id) + ",";
+    }
+    return ret;
+}
+
 int runtime::eval_logits(int id, std::vector<float> &logits) {
     if (_backend == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
