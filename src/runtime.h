@@ -19,6 +19,9 @@ public:
     int load_tokenizer(std::string vocab_file);
     int eval_logits(int id, std::vector<float> &logits);
     int eval_logits(std::vector<int> ids, std::vector<float> &logits);
+    int chat(std::string user_role, std::string response_role, std::string user_input, std::string &response, const int max_length);
+    int gen_completion(std::string prompt, std::string &completion, int length);
+
     int get_state(std::vector<float> &state);
     int set_state(std::vector<float> state);
     int clear_state() {
@@ -28,12 +31,29 @@ public:
         _occurences.clear();
         return _backend->clear_state();
     }
-    int release();
 
-    int chat(std::string user_role, std::string response_role, std::string user_input, std::string &response, const int max_length);
-    int gen_completion(std::string prompt, std::string &completion, int length);
+    int release() {
+        if (_backend == nullptr) {
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+        int ret = _backend->release_model();
+        if (ret != RWKV_SUCCESS) {
+            return ret;
+        }
+        return _backend->release();
+    }
 
-    int set_seed(int64_t seed);
+    inline int set_seed(int64_t seed) {
+        if (_sampler == nullptr) {
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+        _sampler->set_seed(seed);
+        _seed = seed;
+        return 0;
+    }
+
+    inline int64_t get_seed() { return _seed; }
+
     inline void set_sampler_params(float temperature, int top_k, float top_p) {
         _temperature = temperature;
         _top_k = top_k;
@@ -62,6 +82,27 @@ public:
         return backend_str_to_enum(backend_str);
     }
 
+    std::vector<int> tokenizer_encode(std::string text) {
+        if (_tokenizer == nullptr) {
+            return {};
+        }
+        return _tokenizer->encode(text);
+    }
+
+    std::string tokenizer_decode(std::vector<int> ids) {
+        if (_tokenizer == nullptr) {
+            return "";
+        }
+        return _tokenizer->decode(ids);
+    }
+
+    std::string tokenizer_decode(int id) {
+        if (_tokenizer == nullptr) {
+            return "";
+        }
+        return _tokenizer->decode(id);
+    }
+
 private:
     std::unique_ptr<execution_provider> _backend;
     std::unique_ptr<tokenizer_base> _tokenizer;
@@ -75,6 +116,7 @@ private:
     float _presence_penalty = 0.0;
     float _frequency_penalty = 1.0;
     float _penalty_decay = 0.996;
+    int64_t _seed = 0;
 
     std::map<int, float> _occurences;
 };
