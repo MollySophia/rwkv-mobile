@@ -23,9 +23,9 @@ void web_rwkv_seed(uint64_t seed);
 /// # Safety
 ///
 /// The caller must ensure that `model` is valid.
-void web_rwkv_load(const char *model, uintptr_t quant, uintptr_t quant_nf4);
+int32_t web_rwkv_load(const char *model, uintptr_t quant, uintptr_t quant_nf4);
 
-void web_rwkv_load_with_rescale(const char *model, uintptr_t quant, uintptr_t quant_nf4, uintptr_t rescale);
+int32_t web_rwkv_load_with_rescale(const char *model, uintptr_t quant, uintptr_t quant_nf4, uintptr_t rescale);
 
 /// Clear the model state.
 void web_rwkv_clear_state();

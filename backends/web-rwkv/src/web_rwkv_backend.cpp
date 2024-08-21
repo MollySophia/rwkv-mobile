@@ -17,7 +17,18 @@ int web_rwkv_backend::load_model(std::string model_path) {
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
-    web_rwkv_load(model_path.c_str(), 999, 999);
+    int ret = 0;
+    if (model_path.find("ABC") != std::string::npos 
+        || model_path.find("abc") != std::string::npos
+        || model_path.find("MIDI") != std::string::npos
+        || model_path.find("midi") != std::string::npos) {
+        ret = web_rwkv_load_with_rescale(model_path.c_str(), 999, 999, 999);
+    } else {
+        ret = web_rwkv_load(model_path.c_str(), 999, 999);
+    }
+    if (ret) {
+        return RWKV_ERROR_MODEL;
+    }
     return RWKV_SUCCESS;
 }
 

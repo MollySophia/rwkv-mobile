@@ -142,14 +142,18 @@ pub extern "C" fn web_rwkv_seed(seed: u64) {
 ///
 /// The caller must ensure that `model` is valid.
 #[no_mangle]
-pub unsafe extern "C" fn web_rwkv_load(model: *const c_char, quant: usize, quant_nf4: usize) {
+pub unsafe extern "C" fn web_rwkv_load(model: *const c_char, quant: usize, quant_nf4: usize) -> i32 {
     let model = unsafe { CStr::from_ptr(model).to_string_lossy().to_string() };
     match load_runtime(model, quant, quant_nf4, None) {
         Ok(runtime) => {
             let mut rt = RUNTIME.write().unwrap();
             rt.replace(runtime);
+            return 0;
         }
-        Err(err) => log::error!("{err}"),
+        Err(err) => {
+            log::error!("{err}");
+            return -1;
+        }
     }
 }
 
@@ -164,14 +168,18 @@ pub unsafe extern "C" fn web_rwkv_load_with_rescale(
     quant: usize,
     quant_nf4: usize,
     rescale: usize,
-) {
+) -> i32 {
     let model = unsafe { CStr::from_ptr(model).to_string_lossy().to_string() };
     match load_runtime(model, quant, quant_nf4, Some(rescale)) {
         Ok(runtime) => {
             let mut rt = RUNTIME.write().unwrap();
             rt.replace(runtime);
+            return 0;
         }
-        Err(err) => log::error!("{err}"),
+        Err(err) => {
+            log::error!("{err}");
+            return -1;
+        }
     }
 }
 
