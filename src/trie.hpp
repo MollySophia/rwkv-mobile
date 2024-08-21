@@ -117,7 +117,7 @@ bool isHexadecimal(char c) {
 }
 
 std::vector<uint8_t> processEscapes(const std::string &input, bool utf8_string = false, int utf8_byte_length = -1, bool debug = false) {
-    if (utf8_string && utf8_byte_length > 0 && input.length() > 0 && input[0] == '\\' && (input[1] == 'u' or input[1] == 'x')){
+    if (utf8_string && utf8_byte_length > 0 && input.length() > 0 && input[0] == '\\' && (input[1] == 'u' || input[1] == 'x')){
         return processUTF8Escapes(input, utf8_byte_length);
     }
 
@@ -401,7 +401,7 @@ class TRIE_TOKENIZER {
             std::cout << "String: " << bytesToString(bytes) << std::endl;
         }
 
-        std::vector<u_int8_t> decodeBytes(const std::vector<int>& tokens) {
+        std::vector<uint8_t> decodeBytes(const std::vector<int>& tokens) {
             std::vector<uint8_t> resultBytes;
             for (int token : tokens) {
                 auto it = idx2token.find(token);

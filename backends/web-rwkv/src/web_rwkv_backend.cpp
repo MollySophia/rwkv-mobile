@@ -1,4 +1,5 @@
 #include <fstream>
+#include <filesystem>
 
 #include "backend.h"
 #include "web_rwkv_ffi.h"
