@@ -2377,6 +2377,14 @@ void runtime::set_eos_token(int model_id, std::string token) {
     model->stop_codes.push_back(token);
 }
 
+std::string runtime::get_thinking_token(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return "";
+    }
+    auto &model = _models.at(model_id);
+    return model->thinking_token;
+}
+
 void runtime::set_thinking_token(int model_id, std::string thinking_token) {
     if (_models.find(model_id) == _models.end()) {
         return;

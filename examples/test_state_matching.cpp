@@ -1,0 +1,56 @@
+#include <iostream>
+#include <chrono>
+
+#include "commondef.h"
+#include "runtime.h"
+#include "logger.h"
+
+#define ENSURE_SUCCESS_OR_LOG_EXIT(x, msg) if (x != rwkvmobile::RWKV_SUCCESS) { std::cout << msg << std::endl; return 1; }
+
+int main(int argc, char **argv) {
+    // set stdout to be unbuffered
+    setvbuf(stdout, NULL, _IONBF, 0);
+    if (argc != 4) {
+        std::cerr << "Usage: " << argv[0] << " <vocab_file> <model_file> <backend>" << std::endl;
+        return 1;
+    }
+
+    rwkvmobile::runtime runtime;
+    int model_id = runtime.load_model(argv[2], argv[3], argv[1], nullptr);
+    ENSURE_SUCCESS_OR_LOG_EXIT(model_id < 0 ? model_id : rwkvmobile::RWKV_SUCCESS, "Failed to load model");
+    if (model_id < 0) return 1;
+    runtime.set_sampler_params(model_id, 1.0, 1, 1.0);
+
+    std::cout << "Testing original input list" << std::endl << std::endl;
+    std::vector<std::string> input_list = {
+        "Hello!",
+        "Hello! I'm your AI assistant. I'm here to help you with various tasks, such as answering questions, brainstorming ideas, drafting emails, writing code, providing advice, and much more.",
+        "What's the weather like today?",
+    };
+    runtime.chat(model_id, input_list, 50, nullptr);
+    std::cout << "Response: " << runtime.get_response_buffer_content(model_id) << std::endl;
+
+    std::cout << "Testing new input list" << std::endl << std::endl;
+    input_list = {
+        "Hello!",
+        "Hello! I'm your AI assistant. I'm here to help you with various tasks, such as answering questions, brainstorming ideas, drafting emails, writing code, providing advice, and much more.",
+        "Write me a poem",
+    };
+    runtime.chat(model_id, input_list, 50, nullptr);
+    std::cout << "Response: " << runtime.get_response_buffer_content(model_id) << std::endl;
+
+    std::cout << "Testing original input list" << std::endl << std::endl;
+    input_list = {
+        "Hello!",
+        "Hello! I'm your AI assistant. I'm here to help you with various tasks, such as answering questions, brainstorming ideas, drafting emails, writing code, providing advice, and much more.",
+        "What's the weather like today?",
+    };
+    runtime.chat(model_id, input_list, 50, nullptr);
+    std::cout << "Response: " << runtime.get_response_buffer_content(model_id) << std::endl;
+
+    std::cout << std::endl;
+
+    runtime.release();
+
+    return 0;
+}

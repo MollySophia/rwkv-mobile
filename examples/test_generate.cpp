@@ -13,8 +13,8 @@ void callback(const char *msg, const int, const char *next) {
 int main(int argc, char **argv) {
     // set stdout to be unbuffered
     setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc != 4) {
-        std::cerr << "Usage: " << argv[0] << " <vocab_file> <model_file> <backend>" << std::endl;
+    if (argc != 4 && argc != 5) {
+        std::cerr << "Usage: " << argv[0] << " <vocab_file> <model_file> <backend> [prompt]" << std::endl;
         return 1;
     }
 
@@ -29,8 +29,11 @@ int main(int argc, char **argv) {
 
     // std::string prompt = "User: Write me a poem about a cat\n\nAssistant:";
     std::string prompt = "The Eiffel Tower is in the city of";
+    if (argc == 5) {
+        prompt = argv[4];
+    }
     std::cout << prompt;
-    ENSURE_SUCCESS_OR_LOG_EXIT(runtime.gen_completion(model_id, prompt, 1000, 261, callback), "Failed to generate chat message");
+    ENSURE_SUCCESS_OR_LOG_EXIT(runtime.gen_completion(model_id, prompt, 1000, 261, callback), "\nFailed to generate chat message");
     // std::cout << runtime.get_response_buffer_content(model_id);
 
     std::cout << std::endl;
