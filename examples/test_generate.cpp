@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
             free(buffer);
         }
         std::cout << "cwd: " << path << std::endl;
+        path = path + "/libQnnHtp.so";
         extra_data = (void *)path.c_str();
     }
 #endif
