@@ -282,7 +282,7 @@ int qnn_backend_context::qnn_create_power_config_id() {
     QnnDevice_Infrastructure_t deviceInfra = nullptr;
     Qnn_ErrorHandle_t devErr = qnnFunctionPointers.qnnInterface.deviceGetInfrastructure(&deviceInfra);
     if (devErr != QNN_SUCCESS) {
-        LOGE("deviceGetInfrastructure error");
+        // LOGE("deviceGetInfrastructure error");
         return RWKV_ERROR_BACKEND | RWKV_ERROR_INIT;
     }
     QnnHtpDevice_Infrastructure_t *htpInfra = static_cast<QnnHtpDevice_Infrastructure_t *>(deviceInfra);
@@ -299,7 +299,7 @@ int qnn_backend_context::qnn_destory_power_config_id() {
     QnnDevice_Infrastructure_t deviceInfra = nullptr;
     Qnn_ErrorHandle_t devErr = qnnFunctionPointers.qnnInterface.deviceGetInfrastructure(&deviceInfra);
     if (devErr != QNN_SUCCESS) {
-        LOGE("deviceGetInfrastructure error");
+        // LOGE("deviceGetInfrastructure error");
         return RWKV_ERROR_BACKEND | RWKV_ERROR_RELEASE;
     }
     QnnHtpDevice_Infrastructure_t *htpInfra = static_cast<QnnHtpDevice_Infrastructure_t *>(deviceInfra);
