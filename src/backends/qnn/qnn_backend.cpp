@@ -240,9 +240,6 @@ qnn_backend_context::~qnn_backend_context() {
         }
     }
 
-    if (qnnBackendLibraryHandle)
-        pal::dynamicloading::dlClose(qnnBackendLibraryHandle);
-
     if ((nullptr != qnnBackendHandle && nullptr != qnnFunctionPointers.qnnInterface.backendFree) &&
         QNN_BACKEND_NO_ERROR != qnnFunctionPointers.qnnInterface.backendFree(qnnBackendHandle)) {
         LOGE("Could not terminate QNN backend");
@@ -254,6 +251,9 @@ qnn_backend_context::~qnn_backend_context() {
             LOGW("Unable to terminate logging in the backend.");
         }
     }
+
+    if (qnnBackendLibraryHandle)
+        pal::dynamicloading::dlClose(qnnBackendLibraryHandle);
 }
 
 int qnn_backend_context::qnn_register_op_package(std::string package_path, std::string interface_provider) {
