@@ -2186,32 +2186,35 @@ int qnn_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_co
 
         std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
         int idx = 0;
-        uint16_t *buffer = (uint16_t*)qnnIOTensorUtils->getBuffer(tokenInputTensorEmbdPrefill);
+        uint16_t *buffer;
         uint16_t *emb_ptr = (uint16_t*)external_embeddings.get();
-        if (buffer == nullptr) {
-            LOGE("Failed to get tokenInputTensorEmbdPrefill");
-            return RWKV_ERROR_IO;
-        }
-        for (; idx + embdPrefillSequenceLength <= ids.size(); idx += embdPrefillSequenceLength) {
-            for (int i = 0; i < embdPrefillSequenceLength; i++) {
-                memcpy(buffer + i * hidden_size, emb_ptr + hidden_size * ids[idx + i], hidden_size * deep_embeddings_elembytes);
-            }
 
-            if (has_deep_embedding) {
+        if (embdPrefillSequenceLength > 0 && tokenInputTensorEmbdPrefill != nullptr) {
+            buffer = (uint16_t*)qnnIOTensorUtils->getBuffer(tokenInputTensorEmbdPrefill);
+            if (buffer == nullptr) {
+                LOGE("Failed to get tokenInputTensorEmbdPrefill");
+                return RWKV_ERROR_IO;
+            }
+            for (; idx + embdPrefillSequenceLength <= ids.size(); idx += embdPrefillSequenceLength) {
                 for (int i = 0; i < embdPrefillSequenceLength; i++) {
-                    if (RWKV_SUCCESS != copy_deep_embedding_to_qnn_tensor_prefill(ids[idx + i], i)) {
-                        LOGE("Failed to copy deep embedding to qnn tensor");
-                        return RWKV_ERROR_EVAL;
+                    memcpy(buffer + i * hidden_size, emb_ptr + hidden_size * ids[idx + i], hidden_size * deep_embeddings_elembytes);
+                }
+
+                if (has_deep_embedding) {
+                    for (int i = 0; i < embdPrefillSequenceLength; i++) {
+                        if (RWKV_SUCCESS != copy_deep_embedding_to_qnn_tensor_prefill(ids[idx + i], i)) {
+                            LOGE("Failed to copy deep embedding to qnn tensor");
+                            return RWKV_ERROR_EVAL;
+                        }
                     }
                 }
-            }
 
-            if (RWKV_SUCCESS != execute_emb_prefill_graph()) {
-                LOGE("Failed to execute emb prefill graph");
-                return RWKV_ERROR_EVAL;
+                if (RWKV_SUCCESS != execute_emb_prefill_graph()) {
+                    LOGE("Failed to execute emb prefill graph");
+                    return RWKV_ERROR_EVAL;
+                }
             }
         }
-
 
         buffer = (uint16_t*)qnnIOTensorUtils->getBuffer(tokenInputTensorEmbd);
         if (buffer == nullptr) {
