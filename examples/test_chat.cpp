@@ -1,6 +1,10 @@
 #include <iostream>
 #include <chrono>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include "commondef.h"
 #include "runtime.h"
 #include "logger.h"
@@ -19,6 +23,22 @@ int main(int argc, char **argv) {
         std::cerr << "use_reasoning: 0 or 1 (defaults to 1)" << std::endl;
         return 1;
     }
+
+#ifndef _WIN32
+    if (strcmp(argv[3], "qnn") == 0) {
+        char *buffer;
+        if ((buffer = getcwd(NULL, 0)) == NULL) {
+            perror("getcwd error");
+        }
+        std::string path = std::string(buffer);
+        setenv("LD_LIBRARY_PATH", path.c_str(), 1);
+        setenv("ADSP_LIBRARY_PATH", path.c_str(), 1);
+        if (buffer) {
+            free(buffer);
+        }
+        std::cout << "cwd: " << path << std::endl;
+    }
+#endif
 
     bool use_reasoning = true;
     if (argc == 6) {

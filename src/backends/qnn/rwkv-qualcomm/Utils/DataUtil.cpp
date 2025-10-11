@@ -18,6 +18,7 @@
 #include "PAL/FileOp.hpp"
 #include "PAL/Path.hpp"
 #endif
+#include <cstring>
 #include <fcntl.h>
 #include <sys/types.h>
 using namespace qnn;
