@@ -24,19 +24,23 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    void *extra_data = nullptr;
+
 #ifndef _WIN32
+    std::string path;
     if (strcmp(argv[3], "qnn") == 0) {
         char *buffer;
         if ((buffer = getcwd(NULL, 0)) == NULL) {
             perror("getcwd error");
         }
-        std::string path = std::string(buffer);
+        path = std::string(buffer);
         setenv("LD_LIBRARY_PATH", path.c_str(), 1);
         setenv("ADSP_LIBRARY_PATH", path.c_str(), 1);
         if (buffer) {
             free(buffer);
         }
         std::cout << "cwd: " << path << std::endl;
+        extra_data = (void *)path.c_str();
     }
 #endif
 
@@ -46,7 +50,7 @@ int main(int argc, char **argv) {
     }
 
     rwkvmobile::runtime runtime;
-    int model_id = runtime.load_model(argv[2], argv[3], argv[1], nullptr);
+    int model_id = runtime.load_model(argv[2], argv[3], argv[1], extra_data);
     ENSURE_SUCCESS_OR_LOG_EXIT(model_id < 0 ? model_id : rwkvmobile::RWKV_SUCCESS, "Failed to load model");
     if (model_id < 0) return 1;
     // runtime.set_sampler_params(model_id, 1.0, 1, 1.0);
