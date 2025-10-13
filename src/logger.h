@@ -38,7 +38,21 @@ public:
         static std::string log;
         log.clear();
         for (int i = _buffer_start; i != _buffer_end; i = (i + 1) % LOG_RING_BUFFER_SIZE) {
-            log += _buffer[i];
+            int loglevel_this;
+            if (_buffer[i].find("[DEBUG]") != std::string::npos) {
+                loglevel_this = RWKV_LOG_LEVEL_DEBUG;
+            } else if (_buffer[i].find("[INFO]") != std::string::npos) {
+                loglevel_this = RWKV_LOG_LEVEL_INFO;
+            } else if (_buffer[i].find("[WARN]") != std::string::npos) {
+                loglevel_this = RWKV_LOG_LEVEL_WARN;
+            } else if (_buffer[i].find("[ERROR]") != std::string::npos) {
+                loglevel_this = RWKV_LOG_LEVEL_ERROR;
+            } else {
+                loglevel_this = RWKV_LOG_LEVEL_INFO;
+            }
+            if (loglevel_this >= _level) {
+                log += _buffer[i];
+            }
         }
         return log;
     }
