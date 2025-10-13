@@ -944,6 +944,28 @@ late final _rwkvmobile_dump_logPtr = _lookup<
     ffi.NativeFunction<ffi.Pointer<ffi.Char> Function()>>('rwkvmobile_dump_log');
 late final _rwkvmobile_dump_log = _rwkvmobile_dump_logPtr.asFunction<ffi.Pointer<ffi.Char> Function()>();
 
+ffi.Pointer<ffi.Char> rwkvmobile_get_state_cache_info(rwkvmobile_runtime_t runtime,
+int model_id,
+) {
+  return _rwkvmobile_get_state_cache_info(runtime,
+model_id,
+);
+}
+
+late final _rwkvmobile_get_state_cache_infoPtr = _lookup<
+    ffi.NativeFunction<ffi.Pointer<ffi.Char> Function(rwkvmobile_runtime_t , ffi.Int )>>('rwkvmobile_get_state_cache_info');
+late final _rwkvmobile_get_state_cache_info = _rwkvmobile_get_state_cache_infoPtr.asFunction<ffi.Pointer<ffi.Char> Function(rwkvmobile_runtime_t , int )>();
+
+void rwkvmobile_free_state_cache_info(ffi.Pointer<ffi.Char> state_cache_info,
+) {
+  return _rwkvmobile_free_state_cache_info(state_cache_info,
+);
+}
+
+late final _rwkvmobile_free_state_cache_infoPtr = _lookup<
+    ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Char> )>>('rwkvmobile_free_state_cache_info');
+late final _rwkvmobile_free_state_cache_info = _rwkvmobile_free_state_cache_infoPtr.asFunction<void Function(ffi.Pointer<ffi.Char> )>();
+
 void rwkvmobile_set_loglevel(int loglevel,
 ) {
   return _rwkvmobile_set_loglevel(loglevel,

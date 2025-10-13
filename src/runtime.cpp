@@ -2226,7 +2226,7 @@ int runtime::clear_state(int model_id) {
     return RWKV_SUCCESS;
 }
 
-int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts, int max_length, int batch_size, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **)) {
+int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts, int batch_size, int max_length, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **)) {
     if (_models.find(model_id) == _models.end()) {
         LOGE("gen_completion_batch: Model ID %d not found", model_id);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
