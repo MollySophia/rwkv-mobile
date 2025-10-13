@@ -24,7 +24,7 @@ jobs:
     - name: build
       run: |
         mkdir build && cd build
-        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=ON
+        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=ON -DBUILD_EXAMPLES=OFF 
         cmake --build . --config Release -j 8
     
     - name: package
@@ -49,7 +49,7 @@ jobs:
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
-        cmake -S . -B build -G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake\arm64-windows-llvm.cmake -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=OFF -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=OFF -DENABLE_TTS=OFF -DENABLE_QNN_BACKEND=ON
+        cmake -S . -B build -G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake\arm64-windows-llvm.cmake -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=OFF -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=OFF -DENABLE_TTS=OFF -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF
         cmake --build build --config Release -j 8
 
     - name: package
@@ -129,12 +129,12 @@ jobs:
         rm -rf build-arm64 build-arm64-debug
         mkdir build-arm64 && cd build-arm64
         cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON \
-          -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_COREML_BACKEND=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_COREML_BACKEND=OFF -DBUILD_EXAMPLES=OFF  -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         cmake --build . -j 8
         cd ..
         mkdir build-arm64-debug && cd build-arm64-debug
         cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON \
-          -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_COREML_BACKEND=OFF -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_COREML_BACKEND=OFF -DBUILD_EXAMPLES=OFF  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         cmake --build . -j 8
     - name: package
       run: |
@@ -179,7 +179,7 @@ jobs:
         rm -rf build
         mkdir build && cd build
         cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKEND=ON \
-          -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON \
+          -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DBUILD_EXAMPLES=OFF \
           -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r25c \
           -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/android-ndk-r25c/build/cmake/android.toolchain.cmake -DCMAKE_BUILD_TYPE=Release \
           -G Ninja
@@ -187,7 +187,7 @@ jobs:
         cd ..
         mkdir build-debug && cd build-debug
         cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKEND=ON \
-          -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON \
+          -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DBUILD_EXAMPLES=OFF \
           -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r25c \
           -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/android-ndk-r25c/build/cmake/android.toolchain.cmake -DCMAKE_BUILD_TYPE=Debug \
           -G Ninja
@@ -222,7 +222,7 @@ jobs:
       run: |
         rm -rf build
         mkdir build && cd build
-        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_TTS=ON
+        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_TTS=ON -DBUILD_EXAMPLES=OFF
         cmake --build . -j 8
         mv librwkv_mobile.so librwkv_mobile-linux-x86_64.so
     - name: package
@@ -247,7 +247,7 @@ jobs:
       run: |
         rm -rf build
         mkdir build && cd build
-        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_QNN_BACKEND=ON
+        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF 
         cmake --build . -j 8
         mv librwkv_mobile.so librwkv_mobile-linux-aarch64.so
     - name: package
