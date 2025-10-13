@@ -217,6 +217,10 @@ enum {
 
 const char * rwkvmobile_dump_log();
 
+const char * rwkvmobile_get_state_cache_info(rwkvmobile_runtime_t runtime, int model_id);
+
+void rwkvmobile_free_state_cache_info(const char * state_cache_info);
+
 void rwkvmobile_set_loglevel(int loglevel);
 
 void rwkvmobile_set_cache_dir(rwkvmobile_runtime_t runtime, const char * cache_dir);

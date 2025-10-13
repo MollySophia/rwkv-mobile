@@ -865,6 +865,24 @@ const char * rwkvmobile_dump_log() {
     return logger_get_log().c_str();
 }
 
+const char * rwkvmobile_get_state_cache_info(rwkvmobile_runtime_t runtime, int model_id) {
+    if (runtime == nullptr) {
+        return nullptr;
+    }
+    auto rt = static_cast<class runtime *>(runtime);
+    auto state_cache_info = rt->get_state_cache_info(model_id);
+    char * state_cache_info_str = (char *)malloc(state_cache_info.size() + 1);
+    strcpy(state_cache_info_str, state_cache_info.c_str());
+    return (const char *)state_cache_info_str;
+}
+
+void rwkvmobile_free_state_cache_info(const char * state_cache_info) {
+    if (state_cache_info == nullptr) {
+        return;
+    }
+    free((void *)state_cache_info);
+}
+
 void rwkvmobile_set_loglevel(int loglevel) {
     logger_set_loglevel(loglevel);
 }

@@ -809,6 +809,28 @@ int runtime::load_history_state_to_memory(int model_id, std::string state_path) 
     return RWKV_SUCCESS;
 }
 
+std::string runtime::get_state_cache_info(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return "";
+    }
+    auto &model = _models.at(model_id);
+    auto state_root = model->backend->state_root.get();
+
+    std::string state_cache_info;
+    std::vector<state_node*> tmp;
+    tmp.push_back(state_root);
+    // traverse the state tree
+    while (!tmp.empty()) {
+        auto node = tmp.back();
+        tmp.pop_back();
+        state_cache_info += "text = \"" + escape_special_chars(model->tokenizer->decode(node->ids)) + "\", remaining lifespan = " + std::to_string(node->activation_count) + "\n";
+        for (auto &child : node->children) {
+            tmp.push_back(child.get());
+        }
+    }
+    return state_cache_info;
+}
+
 int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *), bool enable_reasoning) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;

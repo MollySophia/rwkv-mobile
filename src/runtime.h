@@ -261,6 +261,8 @@ public:
     double get_avg_prefill_speed(int model_id);
     double get_prefill_progress(int model_id);
 
+    std::string get_state_cache_info(int model_id);
+
 #ifdef ENABLE_LLAMACPP
     int load_embedding_model(std::string model_path) {
         if (_embedding == nullptr) {
