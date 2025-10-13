@@ -108,6 +108,10 @@ int rwkvmobile_runtime_load_initial_state(rwkvmobile_runtime_t runtime, int mode
 
 void rwkvmobile_runtime_unload_initial_state(rwkvmobile_runtime_t runtime, int model_id, const char * state_path);
 
+int rwkvmobile_runtime_save_history_to_state(rwkvmobile_runtime_t runtime, int model_id, const char ** history, const int num_history, const char * state_path);
+
+int rwkvmobile_runtime_load_history_state_to_memory(rwkvmobile_runtime_t runtime, int model_id, const char * state_path);
+
 struct sampler_params rwkvmobile_runtime_get_sampler_params(rwkvmobile_runtime_t runtime, int model_id);
 
 void rwkvmobile_runtime_set_sampler_params(rwkvmobile_runtime_t runtime, int model_id, struct sampler_params params);

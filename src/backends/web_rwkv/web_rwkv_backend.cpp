@@ -211,18 +211,20 @@ int web_rwkv_backend::release() {
 int web_rwkv_backend::serialize_runtime_state(std::any state, std::vector<uint8_t> &data) {
     if (!state.has_value()) return RWKV_ERROR_IO;
     auto new_state = std::any_cast<std::shared_ptr<web_rwkv_state>>(state);
-    data.insert(data.end(), new_state->raw.state, new_state->raw.state + new_state->raw.len);
+    data.insert(data.end(), (uint8_t *)new_state->raw.state, (uint8_t *)new_state->raw.state + new_state->raw.len * sizeof(float));
     return RWKV_SUCCESS;
 }
 
 int web_rwkv_backend::deserialize_runtime_state(std::vector<uint8_t> &data, std::any &state) {
-    auto new_state = ::get_state(0);
-    if (new_state.len != data.size()) {
-        LOGE("state size mismatch, expected %d, got %d", new_state.len, data.size());
+    std::any new_state;
+    get_state(new_state);
+    StateRaw new_state_raw = std::any_cast<std::shared_ptr<web_rwkv_state>>(new_state)->raw;
+    if (new_state_raw.len * sizeof(float) != data.size()) {
+        LOGE("state size mismatch, expected %d, got %d", new_state_raw.len, data.size());
         return RWKV_ERROR_IO;
     }
-    memcpy(new_state.state, data.data(), data.size());
-    state = std::any(std::shared_ptr<web_rwkv_state>(new web_rwkv_state(new_state)));
+    memcpy(new_state_raw.state, data.data(), data.size());
+    state = std::move(new_state);
     return RWKV_SUCCESS;
 }
 

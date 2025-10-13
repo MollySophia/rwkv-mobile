@@ -290,6 +290,32 @@ void rwkvmobile_runtime_unload_initial_state(rwkvmobile_runtime_t handle, int mo
     rt->unload_initial_state(model_id, state_path);
 }
 
+int rwkvmobile_runtime_save_history_to_state(
+    rwkvmobile_runtime_t handle,
+    int model_id,
+    const char ** history,
+    const int num_history,
+    const char * state_path) {
+    if (handle == nullptr || history == nullptr || num_history <= 0 || state_path == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    std::vector<std::string> inputs_vec;
+    for (int i = 0; i < num_history; i++) {
+        inputs_vec.push_back(std::string(history[i]));
+    }
+    auto rt = static_cast<class runtime *>(handle);
+    return rt->save_state_by_history(model_id, inputs_vec, state_path);
+}
+
+int rwkvmobile_runtime_load_history_state_to_memory(rwkvmobile_runtime_t handle, int model_id, const char * state_path) {
+    if (handle == nullptr || state_path == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto rt = static_cast<class runtime *>(handle);
+    return rt->load_history_state_to_memory(model_id, state_path);
+}
+
 int rwkvmobile_runtime_get_available_backend_names(char * backend_names_buffer, int buffer_size) {
     if (backend_names_buffer == nullptr || buffer_size <= 0) {
         return RWKV_ERROR_INVALID_PARAMETERS;

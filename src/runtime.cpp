@@ -635,8 +635,178 @@ std::vector<runtime::TokenChunk> runtime::split_text_by_image_and_token_num(cons
 }
 
 int runtime::save_state_by_history(int model_id, std::vector<std::string> history, std::string state_path) {
-    // TODO
-    return RWKV_ERROR_RUNTIME | RWKV_ERROR_UNSUPPORTED;
+    if (_models.find(model_id) == _models.end()) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto &model = _models.at(model_id);
+    if (model->backend == nullptr || model->tokenizer == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    if (history.size() % 2 != 0) {
+        history.pop_back();
+    }
+
+    auto input_text = apply_chat_template(model_id, history, false);
+    std::vector<int> text_ids = model->tokenizer->encode(input_text);
+
+    std::vector<int> tokens_to_prefill;
+    auto node = model->backend->match_and_load_state(text_ids, tokens_to_prefill);
+    auto matched_ids = node->ids;
+
+    LOGI("saving state cache for model \"%s\" and backend: \"%s\" for prefix: \"%s\" ", model->model_path.c_str(), model->backend_name.c_str(), escape_special_chars(model->tokenizer->decode(matched_ids)).c_str());
+
+    std::vector<uint8_t> state_data;
+    int ret = model->backend->serialize_runtime_state(node->state, state_data);
+    if (ret) {
+        LOGE("failed to serialize runtime state\n");
+        return ret;
+    }
+
+    // Prepare ids data
+    const auto& ids_data = matched_ids;
+    uint32_t state_size = static_cast<uint32_t>(state_data.size());
+    uint32_t ids_size = static_cast<uint32_t>(ids_data.size() * sizeof(int));
+    uint32_t logits_size = static_cast<uint32_t>(node->logits.size() * sizeof(float));
+
+    // Write to file
+    FILE* f = fopen(state_path.c_str(), "wb");
+    if (!f) {
+        LOGE("failed to open state_path for writing: %s\n", state_path.c_str());
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+
+    size_t write_cnt = 0;
+    // Write [state_size_in_bytes]
+    write_cnt = fwrite(&state_size, sizeof(uint32_t), 1, f);
+    if (write_cnt != 1) {
+        LOGE("failed to write state size\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+    // Write [state_data]
+    if (!state_data.empty()) {
+        write_cnt = fwrite(state_data.data(), 1, state_data.size(), f);
+        if (write_cnt != state_data.size()) {
+            LOGE("failed to write state data\n");
+            fclose(f);
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+        }
+    }
+    // Write [ids_size_in_bytes]
+    write_cnt = fwrite(&ids_size, sizeof(uint32_t), 1, f);
+    if (write_cnt != 1) {
+        LOGE("failed to write ids size\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+    // Write [ids_data]
+    if (!ids_data.empty()) {
+        write_cnt = fwrite(ids_data.data(), sizeof(int), ids_data.size(), f);
+        if (write_cnt != ids_data.size()) {
+            LOGE("failed to write ids data\n");
+            fclose(f);
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+        }
+    }
+    // Write [logits_size_in_bytes]
+    write_cnt = fwrite(&logits_size, sizeof(uint32_t), 1, f);
+    if (write_cnt != 1) {
+        LOGE("failed to write logits size\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+    // Write [logits_data]
+    if (!node->logits.empty()) {
+        write_cnt = fwrite(node->logits.data(), sizeof(float), node->logits.size(), f);
+        if (write_cnt != node->logits.size()) {
+            LOGE("failed to write logits data\n");
+            fclose(f);
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+        }
+    }
+
+    fclose(f);
+
+    LOGI("State and ids saved successfully to %s (state size: %u bytes, ids count: %zu, ids size: %u bytes)", state_path.c_str(), state_size, ids_data.size(), ids_size);
+
+    return RWKV_SUCCESS;
+}
+
+int runtime::load_history_state_to_memory(int model_id, std::string state_path) {
+    if (_models.find(model_id) == _models.end()) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto &model = _models.at(model_id);
+    if (model->backend == nullptr || model->tokenizer == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    FILE* f = fopen(state_path.c_str(), "rb");
+    if (!f) {
+        LOGE("failed to open state_path for reading: %s\n", state_path.c_str());
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+
+    uint32_t state_size;
+    size_t read_cnt = fread(&state_size, sizeof(uint32_t), 1, f);
+    if (read_cnt != 1) {
+        LOGE("failed to read state size\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+
+    std::vector<uint8_t> state_data(state_size);
+    read_cnt = fread(state_data.data(), 1, state_size, f);
+    if (read_cnt != state_size) {
+        LOGE("failed to read state data\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+
+    uint32_t ids_size;
+    read_cnt = fread(&ids_size, sizeof(uint32_t), 1, f);
+    if (read_cnt != 1) {
+        LOGE("failed to read ids size\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+
+    std::vector<int> ids_data(ids_size / sizeof(int));
+    read_cnt = fread(ids_data.data(), sizeof(int), ids_size / sizeof(int), f);
+    if (read_cnt != ids_size / sizeof(int)) {
+        LOGE("failed to read ids data\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+
+    uint32_t logits_size;
+    read_cnt = fread(&logits_size, sizeof(uint32_t), 1, f);
+    if (read_cnt != 1) {
+        LOGE("failed to read logits size\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+    std::vector<float> logits_data(logits_size / sizeof(float));
+    read_cnt = fread(logits_data.data(), sizeof(float), logits_size / sizeof(float), f);
+    if (read_cnt != logits_size / sizeof(float)) {
+        LOGE("failed to read logits data\n");
+        fclose(f);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_IO;
+    }
+
+    fclose(f);
+    LOGI("loaded state_size: %u bytes, ids_size: %u bytes, logits_size: %u bytes", state_size, ids_size, logits_size);
+
+    std::any runtime_state;
+    model->backend->deserialize_runtime_state(state_data, runtime_state);
+
+    std::vector<int> tokens_to_prefill;
+    auto node = model->backend->match_and_load_state(ids_data, tokens_to_prefill);
+    model->backend->register_state_checkpoint_with_state(node, ids_data, logits_data.data(), runtime_state);
+    LOGI("loaded state from disk for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
+
+    return RWKV_SUCCESS;
 }
 
 int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *), bool enable_reasoning) {

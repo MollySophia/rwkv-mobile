@@ -9,6 +9,12 @@ target_link_libraries(test_generate PUBLIC rwkv_mobile_internal)
 add_executable(test_chat test_chat.cpp)
 target_link_libraries(test_chat PUBLIC rwkv_mobile_internal)
 
+add_executable(test_chat_save_state test_chat_save_state.cpp)
+target_link_libraries(test_chat_save_state PUBLIC rwkv_mobile_internal)
+
+add_executable(test_chat_load_state test_chat_load_state.cpp)
+target_link_libraries(test_chat_load_state PUBLIC rwkv_mobile_internal)
+
 add_executable(mmlu mmlu.cpp)
 target_link_libraries(mmlu PUBLIC rwkv_mobile_internal)
 
