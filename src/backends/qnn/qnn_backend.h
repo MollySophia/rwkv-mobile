@@ -123,6 +123,12 @@ private:
     uint32_t qnnBatch8DecodeGraphsCount = 0;
     GraphInfo_t **qnnBatch8DecodeGraphsInfo = nullptr;
 
+    uint32_t qnnBatch10DecodeGraphsCount = 0;
+    GraphInfo_t **qnnBatch10DecodeGraphsInfo = nullptr;
+
+    uint32_t qnnBatch12DecodeGraphsCount = 0;
+    GraphInfo_t **qnnBatch12DecodeGraphsInfo = nullptr;
+
     uint32_t graphConfigsInfoCount = 0;
     GraphConfigInfo_t **graphConfigsInfo = nullptr;
 
@@ -150,6 +156,12 @@ private:
     Qnn_Tensor_t *inputTensorsBatch8Decode[8] = {nullptr};
     Qnn_Tensor_t *outputTensorsBatch8Decode[8] = {nullptr};
 
+    Qnn_Tensor_t *inputTensorsBatch10Decode[8] = {nullptr};
+    Qnn_Tensor_t *outputTensorsBatch10Decode[8] = {nullptr};
+
+    Qnn_Tensor_t *inputTensorsBatch12Decode[8] = {nullptr};
+    Qnn_Tensor_t *outputTensorsBatch12Decode[8] = {nullptr};
+
     Qnn_Tensor_t *logitsOutputTensor = nullptr;
 
     Qnn_Tensor_t *vFirstTensor = nullptr;
@@ -171,6 +183,7 @@ private:
 
     size_t logitsOutputTensorSize = 0;
 
+    // TODO: simplify this
     std::vector<std::unordered_map<std::string, void*>> decodeGraphsTensorNameToTensorPointer;
     std::vector<std::unordered_map<std::string, size_t>> decodeGraphsTensorNameToSize;
     std::vector<std::unordered_map<std::string, void*>> prefillGraphsTensorNameToTensorPointer;
@@ -187,6 +200,10 @@ private:
     std::vector<std::unordered_map<std::string, size_t>> batch6DecodeGraphsTensorNameToSize;
     std::vector<std::unordered_map<std::string, void*>> batch8DecodeGraphsTensorNameToTensorPointer;
     std::vector<std::unordered_map<std::string, size_t>> batch8DecodeGraphsTensorNameToSize;
+    std::vector<std::unordered_map<std::string, void*>> batch10DecodeGraphsTensorNameToTensorPointer;
+    std::vector<std::unordered_map<std::string, size_t>> batch10DecodeGraphsTensorNameToSize;
+    std::vector<std::unordered_map<std::string, void*>> batch12DecodeGraphsTensorNameToTensorPointer;
+    std::vector<std::unordered_map<std::string, size_t>> batch12DecodeGraphsTensorNameToSize;
 
     std::unordered_map<std::string, void*> stateTensorsNameToTensorPointer;
 
