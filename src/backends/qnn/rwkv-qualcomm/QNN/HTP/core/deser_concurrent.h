@@ -16,6 +16,7 @@
 #include <memory>
 #include <vector>
 #include <tuple>
+#include <stdexcept>
 
 #include "deser_concurrent_defs.h"
 
@@ -206,6 +207,18 @@ class DeserSegDescs {
     InitTimeSchedule *initSchedule;
 };
 
+class dcrate_seg_overflow_error : public std::exception {
+  public:
+    dcrate_seg_overflow_error() noexcept {} //LCOV_EXCL_LINE [SAFTYSWCCB-1753]
+    ~dcrate_seg_overflow_error() {} //LCOV_EXCL_LINE [SAFTYSWCCB-1753]
+    dcrate_seg_overflow_error(dcrate_seg_overflow_error const &) = default;
+    dcrate_seg_overflow_error(dcrate_seg_overflow_error &&) = default;
+    dcrate_seg_overflow_error &operator=(dcrate_seg_overflow_error const &) = default;
+    dcrate_seg_overflow_error &operator=(dcrate_seg_overflow_error &&) = default;
+
+    char const *what() const noexcept override;
+};
+
 // A 'DCrate' is a proxy object stored within Deserz.
 // It has some of the same methods as Crate; but if nextp is not null,
 // it will allocated into the space at 'nextp', limited by 'limitp'
@@ -282,6 +295,7 @@ GraphStatus segmentjob_deserialize_ops(Deserializer &dctx, unsigned segno, unsig
 GraphStatus segmentjob_process_fixups(Deserializer &dctx, unsigned segno, unsigned threadno);
 GraphStatus segmentjob_compile_ops(Deserializer &dctx, unsigned segno, unsigned threadno);
 void resolve_chunk_preload_after_multiseg_deser(Deserializer &dctx);
+[[noreturn]] NOINLINE void throw_dcrate_seg_overflow();
 
 } // namespace hnnx
 

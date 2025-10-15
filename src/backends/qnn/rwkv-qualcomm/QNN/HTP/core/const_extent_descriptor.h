@@ -37,8 +37,52 @@ class ConstExtentDesc {
     bool scan_table(); // sanity check, and unpacks the above; returns true if OK.
 
   public:
-    static uint8_t constexpr EXTENT_FLAGS_BITFIELD_LSB = 8;
-    static uint8_t constexpr EXTENT_FLAGS_BITFIELD_WIDTH = 8;
+    ///
+    /// @brief Header
+    /// @details Composition of header of constant extent section ...
+    ///
+    ///     33222222 22221111 111111
+    ///     10987654 32109876 54321098 76543210
+    ///    +--------+--------+--------+--------+
+    ///    |              magic                | 0
+    ///    +--------+--------+--------+--------+
+    ///    |hlen/4W |      desc_len/64B        | 1
+    ///    +--------+--------+--------+--------+
+    ///    |reserved|  flags |   num_extents   | 2
+    ///    +--------+--------+--------+--------+
+    ///    |reserved|     num_mempools         | 3
+    ///    +--------+--------------------------+
+    ///
+
+    ///
+    /// @brief LSB and width of various bitfields in header
+    /// @warning It MUST MATCH the ASCII art of the header above!
+    ///
+    static size_t constexpr HEADER_DESC_LEN_BITFIELD_LSB = 0u;
+    static size_t constexpr HEADER_DESC_LEN_BITFIELD_WIDTH = 24u;
+    static size_t constexpr HEADER_LEN_BITFIELD_LSB = 24u;
+    static size_t constexpr HEADER_LEN_BITFIELD_WIDTH = 8u;
+    static size_t constexpr HEADER_NUM_EXTENTS_BITFIELD_LSB = 0u;
+    static size_t constexpr HEADER_NUM_EXTENTS_BITFIELD_WIDTH = 16u;
+    static size_t constexpr HEADER_FLAGS_BITFIELD_LSB = 16u;
+    static size_t constexpr HEADER_FLAGS_BITFIELD_WIDTH = 8u;
+    static size_t constexpr HEADER_NUM_MEMPOOLS_BITFIELD_LSB = 0u;
+    static size_t constexpr HEADER_NUM_MEMPOOLS_BITFIELD_WIDTH = 24u;
+
+    ///
+    /// @brief Values for 8b flags in constant extent header
+    ///
+    static uint8_t constexpr HEADER_FLAG_RESERVED_0 = (1 << 0);
+    static uint8_t constexpr HEADER_FLAG_RESERVED_1 = (1 << 1);
+    static uint8_t constexpr HEADER_FLAG_RESERVED_2 = (1 << 2);
+    static uint8_t constexpr HEADER_FLAG_IS_REPLACEABLE = (1 << 3); ///< Contents are replaceable weights
+    static uint8_t constexpr HEADER_FLAG_IS_FAR_HINT = (1 << 4); ///< Contents maybe far
+    static uint8_t constexpr HEADER_FLAG_RESERVED_5 = (1 << 5);
+    static uint8_t constexpr HEADER_FLAG_RESERVED_6 = (1 << 6);
+    static uint8_t constexpr HEADER_FLAG_RESERVED_7 = (1 << 7);
+
+    static uint8_t constexpr EXTENT_FLAGS_BITFIELD_LSB = 8u;
+    static uint8_t constexpr EXTENT_FLAGS_BITFIELD_WIDTH = 8u;
 
     ///
     /// @brief Values for 8b flags in extent record
@@ -71,6 +115,18 @@ class ConstExtentDesc {
     // optional name of the const_extent this descriptor corresponds to. Used for matching in weight_sharing.
     std::string name = std::string{};
 
+    ///
+    /// @brief Various options for adjusting offset in mempool_info()
+    ///
+    enum offset_adjust_t {
+        OFFSET_ADJUST_DESC_REL = 0, ///< Adjust offset relative to descriptor (default)
+        OFFSET_ADJUST_FALSE =
+                OFFSET_ADJUST_DESC_REL, ///< Alias to descriptor-relative address (default) - i.e. dont adjust
+        OFFSET_ADJUST_EXTENT_REL = 1, ///< Adjust offset relative to extent
+        OFFSET_ADJUST_TRUE = OFFSET_ADJUST_EXTENT_REL, ///< Alias to extent-relative offset - i.e. adjust
+        OFFSET_ADJUST_IF_FAR, ///< Offset relative to extent if containing extent is far
+    };
+
     ConstExtentDesc() {}
     ConstExtentDesc(table_t &&table_in);
     void serialize(Serializer &) const;
@@ -91,11 +147,15 @@ class ConstExtentDesc {
     // NOTE: extent_id is 1-based, must be 1 .. num_extents()
     extab_entry extent_info(unsigned extent_id) const;
 
-    // unpack a row of the mempool table.
-    // note: idx is not a mempool idx, it is a 1-based row in range 1...num_mempools();
-    // if adjust_offset, the offset of the containing extent is added to the offset
-    // of the mempool in the returned value.
-    mempool_entry mempool_info(unsigned idx, bool adjust_offset = false) const;
+    ///
+    /// @brief Get/unpack a mempool entry from mempool table in this constant extent
+    /// descriptor
+    /// @param [in] idx ID (1-based!) of the mempool entry to get. It is expected
+    /// to be in range [1...num_mempools()]
+    /// @param [in] adjust_offset Option to adjust offset
+    /// @return Valid mempool entry
+    ///
+    mempool_entry mempool_info(unsigned idx, offset_adjust_t adjust_offset = OFFSET_ADJUST_FALSE) const;
 
     // The ordering of the data and the descriptors is such that:
     //

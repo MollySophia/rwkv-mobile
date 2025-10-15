@@ -62,6 +62,7 @@ struct OptimFlags {
         prepare_aux_graph = flagbit<18>::val, // is this an aux graph prepare?
         autothread_flag = flagbit<19>::val, // Always set the autothread flag
         trace_rule = flagbit<20>::val, // extra diagnosic tracing on a rule.
+        enable_native_mixed_precision_ops = flagbit<21>::val, // enable native mixed precision kernels
     };
 
     /*

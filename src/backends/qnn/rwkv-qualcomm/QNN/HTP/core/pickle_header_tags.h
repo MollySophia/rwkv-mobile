@@ -16,7 +16,7 @@ enum HTP_header_const {
     HdrVersion_VERSION = 1,
     HdrVersion_GRAPH_PATCH_VERSION = 1,
     HdrVersion_VERSION_FLAG_MULTI_NSP = 0x8000, // 'or' to version in multi-pickle header.
-    MULTI_SER_ALIGN = 64, // all blobs in multi-pickle are padded out to multiple of this
+    MULTI_SER_ALIGN = 4096, // all blobs in multi-pickle are padded out to multiple of this
     HdrTag_IDENT = 'I' + 256 * 'd',
     HdrTag_SIZE = 'S' + 256 * 'z',
     HdrTag_VERSION = 'V' + 256 * 'r',

@@ -63,12 +63,12 @@ template <typename Derived, int N> [[gnu::always_inline]] constexpr op_reg_parms
 #endif
 #if DESERIALIZATION_ENABLED == 1
                 Derived::get_tensor_deserializer_register_func(),
-                test_flag_for(flags_for<Derived, N>(), Flags::IS_CONST) ? nullptr
-                                                                        : alloc_func_for_op<Derived>::alloc_func,
+                test_flag_for(flags_for<Derived, N>, Flags::IS_CONST) ? nullptr
+                                                                      : alloc_func_for_op<Derived>::alloc_func,
                 !std::is_trivially_destructible<Derived>::value ? dealloc_func_for_op<Derived>::func : nullptr,
 #endif
 #ifndef PREPARE_DISABLED
-                get_costf<Derived>(), flags_for<Derived, N>(),
+                get_costf<Derived>(), flags_for<Derived, N>,
 #endif
 #if DESERIALIZATION_ENABLED == 1
                 alloc_func_for_op<Derived>::op_size_align,
@@ -76,25 +76,5 @@ template <typename Derived, int N> [[gnu::always_inline]] constexpr op_reg_parms
     };
 }
 // LCOV_EXCL_STOP
-
-struct simop_reg_parms {
-    SimpleOpFactory sim_newop;
-    std::type_info const *tinf;
-    Op::tensor_deserializer_register_func deserializer_reg_func;
-    deserialize_op_func deserialize_func;
-    cost_function_t cost_f;
-    Flags_word flags;
-    template <typename Derived, int N> static constexpr simop_reg_parms parms_for_simple();
-};
-
-template <typename Derived, int N> [[gnu::always_inline]] constexpr simop_reg_parms simop_reg_parms::parms_for_simple()
-{
-    return simop_reg_parms{Derived::create,
-                           &typeid(Derived),
-                           Derived::get_tensor_deserializer_register_func(),
-                           alloc_func_for_op_ext<Derived>::alloc_func,
-                           get_costf<Derived>(),
-                           flags_for<Derived, N>()};
-}
 } // namespace hnnx
 #endif

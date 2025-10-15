@@ -189,6 +189,7 @@ typedef enum {
   QNN_HTP_GRAPH_CONFIG_OPTION_HMX_BOUNDING                       = 11,
   QNN_HTP_GRAPH_CONFIG_OPTION_WEIGHTS_PACKING                    = 12,
   QNN_HTP_GRAPH_CONFIG_OPTION_ASSUME_SAME_QUANT                  = 13,
+  QNN_HTP_GRAPH_CONFIG_OPTION_SHARE_IO_BUFFER                    = 14,
   QNN_HTP_GRAPH_CONFIG_OPTION_RESERVED                           = 0x7fff0000,
   QNN_HTP_GRAPH_CONFIG_OPTION_UNKNOWN                            = 0x7fffffff
 } QnnHtpGraph_ConfigOption_t;
@@ -252,6 +253,8 @@ typedef struct {
  *               +----+-------------------------------------------------------------------------------------+------------------------------------------------+
  *               | 13 | QNN_HTP_GRAPH_CONFIG_OPTION_ASSUME_SAME_QUANT | bool |
  *               +----+-------------------------------------------------------------------------------------+------------------------------------------------+
+ *               | 14 | QNN_HTP_GRAPH_CONFIG_OPTION_SHARE_IO_BUFFER | bool |
+ *               +----+-------------------------------------------------------------------------------------+------------------------------------------------+
  *               +-------------------------+----------------------------------------------------------------+------------------------------------------------+
  *               | 0x7fff0000 - 0x7ffffffe | QNN_HTP_GRAPH_CONFIG_OPTION_RESERVED | These are
  * reserved for internal purposes       |
@@ -279,6 +282,7 @@ typedef struct {
     QnnHtp_HmxBoundingInfo_t hmxBoundingInfo;
     bool weightsPacking;
     bool assumeSameQuant;
+    bool shareIOBuffer;
   };
 } QnnHtpGraph_CustomConfig_t;
 

@@ -12,8 +12,10 @@
 #include "weak_linkage.h"
 #include "macros_attribute.h"
 #include <cstdarg>
+#include <cstdint>
 #include <string>
 #include <chrono>
+//#include <fmt/format.h>
 
 #if !defined(__PRETTY_FUNCTION__) && !defined(__GNUC__)
 #define __FUNC_INFO__ __FUNCSIG__
@@ -225,6 +227,33 @@ template <class T> constexpr const char *format_type_check = "";
 // hooks for removing it.
 #define debuglog(...) _debuglog(__VA_ARGS__)
 
+//
+// BCK:  Temporarily removing fmtlib logging due to QNN build issues.
+//
+#if 0
+//
+// These are logging variants which use fmtlib.
+//
+
+// Internal formatter function which sends data to stdout, FARF, etc.
+void vlogmsg_fmt(fmt::string_view fmt, fmt::format_args args);
+
+template <typename... T> inline void logmsg_fmt(const int prio, fmt::format_string<T...> fmt, T &&...args)
+{
+    // LCOV_EXCL_START [SAFTYSWCCB-996]
+    if (log_condition(prio)) {
+        vlogmsg_fmt(fmt, fmt::make_format_args(args...));
+    }
+    // LCOV_EXCL_STOP
+}
+
+#define errlogf(...)          logmsg_fmt(NN_LOG_ERRORLVL, "", MAKE_LOG_FMT_WITH_PREFIX(":ERROR:" FMT, ##__VA_ARGS__))
+#define warnlogf(...)         logmsg_fmt(NN_LOG_WARNLVL, "", MAKE_LOG_FMT_WITH_PREFIX(":WARNING:" FMT, ##__VA_ARGS__))
+#define infologf(FMT, ...)    logmsg_fmt(NN_LOG_INFOLVL, MAKE_LOG_FMT_WITH_PREFIX(FMT, ##__VA_ARGS__))
+#define verboselogf(FMT, ...) logmsg_fmt(NN_LOG_VERBOSELVL, MAKE_LOG_FMT_WITH_PREFIX(FMT, ##__VA_ARGS__))
+#define debuglogf(FMT, ...)   logmsg_fmt(NN_LOG_DEBUGLVL, "", MAKE_LOG_FMT_WITH_PREFIX(FMT, ##__VA_ARGS__))
+#endif // 0
+
 #ifdef NN_LOG_MAXLVL
 #define LOG_STAT()    ((NN_LOG_MAXLVL) >= NN_LOG_STATLVL)
 #define LOG_INFO()    ((NN_LOG_MAXLVL) >= NN_LOG_INFOLVL)
@@ -260,7 +289,7 @@ class ExternalTimePoint {
 
     void update_progress(unsigned int new_numerator, unsigned int new_denominator);
 
-    void close();
+    std::pair<std::string, uint64_t> close();
 
     // Custom destructor
     ExternalTimePoint() = delete;

@@ -148,18 +148,20 @@
 PUSH_VISIBILITY(default)
 
 namespace tileExt {
-enum tile_flags : unsigned {
-    // lower 5 bits contain 'ht'. This must be 0 (to indicate 'default') or a number in range 1..8
-    // The default is normally 8; for 32-bit tiles it is 2.
-    tile_ht_mask = 31,
-    copy = 32,
-    unshuffled = 64,
-    broadcast = 128,
+// definitions for the 'flags' parameter of the tile methods
+// This used to be an enum, but static analysis doesn't like '&' and '|' applied to enum
 
-    write_strategy = 256, // used internally only
-    write_strategy_keep = unshuffled | tile_ht_mask
-};
+// lower 5 bits contain 'ht'. This must be 0 (to indicate 'default') or a number in range 1..8
+// The default is 8 in all currently supported cases.
+inline constexpr unsigned tile_ht_mask = 31;
+inline constexpr unsigned copy = 32; // force copy on read, even if direct access is possible
+inline constexpr unsigned unshuffled = 64; // for 16 bit, data in tile buffer is unshuffled.
+inline constexpr unsigned broadcast = 128; // only affects read - broadcast on dims with size 1
 
+// ussed internally only!
+// These determine what flags are passed to read_tile in order to implement write_tile_strategy.
+inline constexpr unsigned write_strategy = 256;
+inline constexpr unsigned write_strategy_keep = unshuffled | tile_ht_mask;
 } //namespace tileExt
 
 namespace hnnx {
@@ -335,6 +337,10 @@ template <> struct tile_methods<Ldefs::Crouton_16> : public tile_methods_r4crout
 
 // 32 bit
 template <> struct tile_methods<Ldefs::Crouton_32> : public tile_methods_r4crouton<Ldefs::Crouton_32> {
+};
+
+// 8 bit
+template <> struct tile_methods<Ldefs::Crouton4x1_8> : public tile_methods_r4crouton<Ldefs::Crouton4x1_8> {
 };
 
 } // namespace tileExt_priv

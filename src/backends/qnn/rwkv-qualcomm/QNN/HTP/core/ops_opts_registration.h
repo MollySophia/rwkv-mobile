@@ -28,14 +28,12 @@ namespace hnnx {
 /** @brief reg_op_node */
 class reg_op_node {
     /** @brief parms parameters (cost func, flags, etc) for the Op */
-    union {
-        op_reg_parms op_parms;
-        simop_reg_parms simple_op_parms;
-    };
+    op_reg_parms op_parms;
     /** @brief op_name */
     uint16_t op_name_offset;
     /** @brief type_tag */
     uint16_t type_tag_offset;
+    bool is_external;
 
     std::string_view const get_subview(std::string_view const strtab, std::string_view::size_type const start) const
     {
@@ -44,19 +42,14 @@ class reg_op_node {
 
   public:
     // LCOV_EXCL_START [SAFTYSWCCB-1736] constexprs resolved during compile time
-    /** @brief reg_op_node @param a @param n @param t */
-    constexpr reg_op_node(op_reg_parms const p, uint16_t const n, uint16_t const t) noexcept
-        : op_parms(p), op_name_offset(n), type_tag_offset(t)
-    {
-    }
-
-    constexpr reg_op_node(simop_reg_parms const p, uint16_t const n, uint16_t const t) noexcept
-        : simple_op_parms(p), op_name_offset(n), type_tag_offset(t)
+    /** @brief reg_op_node @param a @param n @param t @param s*/
+    constexpr reg_op_node(op_reg_parms const p, uint16_t const n, uint16_t const t, bool s) noexcept
+        : op_parms(p), op_name_offset(n), type_tag_offset(t), is_external(s)
     {
     }
 
     /** @brief reg_op_node */
-    constexpr reg_op_node() noexcept : reg_op_node(op_reg_parms{}, 0, 0) {}
+    constexpr reg_op_node() noexcept : reg_op_node(op_reg_parms{}, 0, 0, false) {}
 
     // LCOV_EXCL_STOP
 
@@ -74,11 +67,23 @@ class reg_op_node {
         std::string_view const op_name = get_subview(op_name_strtab, op_name_offset);
         std::string_view const type_tag = get_subview(type_tag_strtab, type_tag_offset);
         std::vector<std::unique_ptr<PackageOpStorageBase>> &ops = current_package_ops_storage_vec_func();
-        ops.push_back(std::make_unique<PackageOpStorageBase>(
-                op_name, type_tag, simple_op_parms.sim_newop, *(simple_op_parms.tinf),
-                simple_op_parms.deserializer_reg_func, simple_op_parms.deserialize_func, simple_op_parms.cost_f,
-                simple_op_parms.flags));
+        // support typical ops package
+        ops.push_back(std::make_unique<PackageOpStorageBase>(op_name, type_tag, is_external, op_parms));
     }
+#ifndef PREPARE_DISABLED
+    void core_process(std::string_view const op_name_strtab, std::string_view const type_tag_strtab,
+                      std::string_view file_name) const
+    {
+        std::string_view const op_name = get_subview(op_name_strtab, op_name_offset);
+        std::string_view const type_tag = get_subview(type_tag_strtab, type_tag_offset);
+        hnnx::make_op_custom(op_name, type_tag, op_parms, file_name);
+    }
+    void pkg_process(std::string_view const op_name_strtab, std::string_view const type_tag_strtab,
+                     std::string_view file_name) const
+    {
+        pkg_process(op_name_strtab, type_tag_strtab);
+    }
+#endif
 };
 
 #ifdef PREPARE_DISABLED
@@ -261,26 +266,42 @@ template <typename T> struct arr_container<T, true> {
     static constexpr built_array<std::string::value_type, S> chain = {};
 };
 
+constexpr std::string_view op_file_name(std::string_view path)
+{
+    size_t last_pos = path.find_last_of('/');
+    if (last_pos == std::string_view::npos) {
+        return path;
+    }
+    size_t second_last_pos = path.find_last_of('/', last_pos - 1);
+    if (second_last_pos == std::string_view::npos) {
+        return path;
+    }
+    return path.substr(second_last_pos + 1);
+}
+
 /** @brief reg_op_table */
 class reg_op_table {
     reg_op_node const *entries;
     uint32_t num_entries;
     std::string_view op_name_strtab;
     std::string_view type_tag_strtab;
+    std::string_view file_name;
 
   public:
     constexpr reg_op_node const *get_entries() const noexcept { return entries; }
     constexpr uint32_t get_num_entries() const noexcept { return num_entries; }
     constexpr std::string_view const get_op_name_strtab() const noexcept { return op_name_strtab; }
     constexpr std::string_view const get_type_tag_strtab() const noexcept { return type_tag_strtab; }
+    constexpr std::string_view const get_file_name() const noexcept { return file_name; }
     // LCOV_EXCL_START [SAFTYSWCCB-1736] constexprs resolved during compile time, consexpr constructor
     constexpr reg_op_table(reg_op_node const *const p, uint32_t const n, std::string_view::value_type const *const o,
                            std::string_view::size_type const o_size, std::string_view::value_type const *const t,
-                           std::string_view::size_type const t_size) noexcept
-        : entries(p), num_entries(n), op_name_strtab{o, o_size}, type_tag_strtab{t, t_size}
+                           std::string_view::size_type const t_size,
+                           std::string_view::value_type const *const f) noexcept
+        : entries(p), num_entries(n), op_name_strtab{o, o_size}, type_tag_strtab{t, t_size}, file_name{op_file_name(f)}
     {
     }
-    constexpr reg_op_table() noexcept : reg_op_table(nullptr, 0U, "", 0U, "", 0U) {}
+    constexpr reg_op_table() noexcept : reg_op_table(nullptr, 0U, "", 0U, "", 0U, "") {}
     // LCOV_EXCL_STOP
 };
 

@@ -29,28 +29,18 @@ class OpInfo {
     cost_function_t cost;
     Flags_word flags;
     bool is_external_flag;
-    bool is_simple_op;
-    union {
-        OpFactory op_factory;
-        SimpleOpFactory simple_op_factory;
-    };
+    OpFactory op_factory;
     const std::string_view type_tag;
 
   public:
     //LCOV_EXCL_START [SAFTYSWCCB-1542]
     OpInfo(cost_function_t cost_in, Flags_word flags_in, OpFactory op_factory_in, bool is_external_in,
            const std::string_view type_tag_in)
-        : cost(cost_in), flags(flags_in), is_external_flag(is_external_in), is_simple_op(false),
-          op_factory(op_factory_in), type_tag(type_tag_in)
+        : cost(cost_in), flags(flags_in), is_external_flag(is_external_in), op_factory(op_factory_in),
+          type_tag(type_tag_in)
     {
     }
     //LCOV_EXCL_STOP
-    OpInfo(cost_function_t cost_in, Flags_word flags_in, SimpleOpFactory simple_op_factory_in, bool is_external_in,
-           const std::string_view type_tag_in)
-        : cost(cost_in), flags(flags_in), is_external_flag(is_external_in), is_simple_op(true),
-          simple_op_factory(simple_op_factory_in), type_tag(type_tag_in)
-    {
-    }
 
     ~OpInfo() = default;
 
@@ -63,8 +53,7 @@ class OpInfo {
     //LCOV_EXCL_START [SAFTYSWCCB-1542]
     API_EXPORT const char *get_type_tag() const { return type_tag.data(); }
 
-    API_EXPORT OpFactory get_op_factory() const { return !is_simple_op ? op_factory : nullptr; }
-    API_EXPORT SimpleOpFactory get_simple_op_factory() const { return is_simple_op ? simple_op_factory : nullptr; }
+    API_EXPORT OpFactory get_op_factory() const { return op_factory; }
     //LCOV_EXCL_STOP
 };
 
@@ -96,11 +85,9 @@ API_FUNC_EXPORT inline OpInfo const *op_info_map_lookup(OP const *op)
 
 API_FUNC_EXPORT void register_op_info(const std::type_info &type, cost_function_t cost, Flags_word flags,
                                       OpFactory op_factory, bool is_external, const std::string_view type_tag);
-API_FUNC_EXPORT void register_op_info(const std::type_info &type, cost_function_t cost, Flags_word flags,
-                                      SimpleOpFactory op_factory, bool is_external, const std::string_view type_tag);
 
-template <typename T, typename OPFACTORY>
-API_FUNC_EXPORT inline void register_op_info(cost_function_t cost, Flags_word flags, OPFACTORY op_factory,
+template <typename T>
+API_FUNC_EXPORT inline void register_op_info(cost_function_t cost, Flags_word flags, OpFactory op_factory,
                                              bool is_external, const std::string_view type_tag)
 {
     register_op_info(typeid(T), cost, flags, op_factory, is_external, type_tag);

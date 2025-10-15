@@ -37,6 +37,7 @@ enum DType {
     QInt8 = 7,
     Float16 = 8,
     Int64 = 9,
+    BFloat16 = 10,
     ZZ_LAST_DTYPE,
     None = 254, //  for output of OpDef representing null output. Not for use by external API.
     Multi = 255 //  for output of OpDef representing multiple outputs. Not for use by external API.
@@ -44,7 +45,8 @@ enum DType {
 
 #define DTYPE_NAMETABLE_INIT                                                                                           \
     {                                                                                                                  \
-        "UNKNOWN", "QUInt8", "QUInt16", "QInt16", "Float32", "Int32", "QInt32", "QInt8", "Float16", "Int64"            \
+        "UNKNOWN", "QUInt8", "QUInt16", "QInt16", "Float32", "Int32", "QInt32", "QInt8", "Float16", "Int64",           \
+                "BFloat16"                                                                                             \
     }
 
 #ifdef __cplusplus
@@ -86,6 +88,8 @@ inline char const *DType_name_inline(DType d)
         return "QInt8";
     case DType::Multi:
         return "Multi";
+    case DType::BFloat16:
+        return "BFloat16";
     }
 }
 // LCOV_EXCL_STOP

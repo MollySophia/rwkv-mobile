@@ -28,6 +28,7 @@
 #include "QnnContext.h"
 #include "QnnDevice.h"
 #include "QnnError.h"
+#include "QnnGlobalConfig.h"
 #include "QnnGraph.h"
 #include "QnnLog.h"
 #include "QnnMem.h"
@@ -99,6 +100,13 @@ typedef enum {
 
 /** @brief See QnnProperty_hasCapability()*/
 typedef Qnn_ErrorHandle_t (*QnnProperty_HasCapabilityFn_t)(QnnProperty_Key_t key);
+
+//
+// From QnnGlobalConfig.h
+//
+
+/** @brief See QnnConfig_Set()*/
+typedef Qnn_ErrorHandle_t (*QnnGlobalConfig_SetFn_t)(const QnnGlobalConfig_t** config);
 
 //
 // From QnnBackend.h
@@ -210,6 +218,18 @@ typedef Qnn_ErrorHandle_t (*QnnContext_CreateFromBinaryListAsyncFn_t)(
 /** @brief See QnnContext_finalize()*/
 typedef Qnn_ErrorHandle_t (*QnnContext_FinalizeFn_t)(Qnn_ContextHandle_t context,
                                                      Qnn_ProfileHandle_t profile);
+
+/** @brief See QnnContext_createFromBinaryWithCallback()*/
+typedef Qnn_ErrorHandle_t (*QnnContext_CreateFromBinaryWithCallbackFn_t)(
+    Qnn_BackendHandle_t backend,
+    Qnn_DeviceHandle_t device,
+    const QnnContext_Config_t** config,
+    const Qnn_ContextBinaryCallback_t* callback,
+    const void* binaryBuffer,
+    Qnn_ContextBinarySize_t binaryBufferSize,
+    Qnn_ContextHandle_t* context,
+    Qnn_ProfileHandle_t profile,
+    Qnn_SignalHandle_t signal);
 
 /** @brief See QnnContext_getBinarySectionSize()*/
 typedef Qnn_ErrorHandle_t (*QnnContext_GetBinarySectionSizeFn_t)(
@@ -552,6 +572,8 @@ typedef struct {
   QnnContext_GetIncrementalBinaryFn_t       contextGetIncrementalBinary;
   QnnContext_ReleaseIncrementalBinaryFn_t   contextReleaseIncrementalBinary;
   QnnContext_FinalizeFn_t                   contextFinalize;
+  QnnGlobalConfig_SetFn_t                   globalConfigSet;
+  QnnContext_CreateFromBinaryWithCallbackFn_t contextCreateFromBinaryWithCallback;
 } QNN_INTERFACE_VER_TYPE;
 
 /// QNN_INTERFACE_VER_TYPE initializer macro
@@ -623,6 +645,8 @@ typedef struct {
   NULL, /*contextGetIncrementalProperty*/ \
   NULL, /*contextReleaseIncrementalProperty*/ \
   NULL, /*contextFinalize*/ \
+  NULL, /*globalConfigSet*/ \
+  NULL, /*contextCreateFromBinaryWithCallback*/ \
 }
 
 typedef struct {

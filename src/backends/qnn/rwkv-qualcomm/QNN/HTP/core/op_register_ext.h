@@ -29,19 +29,11 @@ class PackageOpStorageBase {
   public:
     const std::string op_name;
     const std::string_view type_tag;
-    const SimpleOpFactory simpop;
-    const std::type_info &type_info;
-    const Op::tensor_deserializer_register_func deserializer_reg_func;
-    const deserialize_op_func deserialize_func;
-    cost_function_t cost_f;
-    const Flags_word flags;
+    const bool is_external;
+    const op_reg_parms opreg_parms;
 
     API_EXPORT PackageOpStorageBase(const std::string_view op_name_in, const std::string_view type_tag_in,
-                                    const SimpleOpFactory simpop_in, const std::type_info &tinf,
-                                    const Op::tensor_deserializer_register_func deserializer_reg_func_in,
-                                    const deserialize_op_func deserialize_func_in, const cost_function_t cost_f_in,
-                                    Flags_word flags_in);
-
+                                    const bool is_external_in, const op_reg_parms opreg_params_in);
     API_EXPORT OpFactory make_op_wrapper() const;
 };
 

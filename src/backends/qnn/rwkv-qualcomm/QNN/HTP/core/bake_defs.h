@@ -178,7 +178,7 @@ constexpr std::pair<unsigned, unsigned> OpExtraInfo_size_align = {24, 8};
 // give the full size.
 constexpr std::pair<unsigned, unsigned> slice_dispatch_op_size_align(unsigned const nslices, bool const exact = false)
 {
-    return {tgt_sizet_bytes * ((op_has_graphp ? 5 : 4) + 3 * Executable::MAX_OP_SLICES), tgt_sizet_bytes};
+    return {tgt_sizet_bytes * ((op_has_graphp ? 7 : 6) + Executable::MAX_OP_SLICES), tgt_sizet_bytes};
 }
 
 // The size of a Predicated Op

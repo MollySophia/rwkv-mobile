@@ -25,9 +25,10 @@
 
 // QNN System API headers
 #include "System/QnnSystemContext.h"
-#include "System/QnnSystemTensor.h"
-#include "System/QnnSystemLog.h"
 #include "System/QnnSystemDlc.h"
+#include "System/QnnSystemLog.h"
+#include "System/QnnSystemTensor.h"
+#include "System/QnnSystemProfile.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -164,25 +165,46 @@ typedef Qnn_ErrorHandle_t (*QnnSystemDlc_getOpMappingsFn_t)(QnnSystemDlc_Handle_
 /** @brief See QnnSystemDlc_free()*/
 typedef Qnn_ErrorHandle_t (*QnnSystemDlc_freeFn_t)(QnnSystemDlc_Handle_t dlcHandle);
 
+//
+// From QnnSystemProfile.h
+//
+
+/** @brief See QnnSystemProfile_createSerializationTarget()*/
+typedef Qnn_ErrorHandle_t (*QnnSystemProfile_createSerializationTargetFn_t)(QnnSystemProfile_SerializationTarget_t serializationTargetInfo,
+                                                         QnnSystemProfile_SerializationTargetConfig_t* configs,
+                                                         uint32_t numConfigs,
+                                                         QnnSystemProfile_SerializationTargetHandle_t* serializationTarget);
+
+/** @brief See QnnSystemProfile_serializeEventData()*/
+typedef Qnn_ErrorHandle_t (*QnnSystemProfile_serializeEventDataFn_t)(QnnSystemProfile_SerializationTargetHandle_t serializationTarget,
+                                                                 const QnnSystemProfile_ProfileData_t** eventData,
+                                                                 uint32_t numEvents);
+
+/** @brief See QnnSystemProfile_freeSerializationTarget()*/
+typedef Qnn_ErrorHandle_t (*QnnSystemProfile_freeSerializationTargetFn_t)(QnnSystemProfile_SerializationTargetHandle_t serializationTarget);
+
 /**
  * @brief This struct defines Qnn system interface specific to version.
  *        Interface functions are allowed to be NULL if not supported/available.
  *
  */
 typedef struct {
-  QnnSystemContext_CreateFn_t            systemContextCreate;
-  QnnSystemContext_GetBinaryInfoFn_t     systemContextGetBinaryInfo;
-  QnnSystemContext_GetMetaDataFn_t       systemContextGetMetaData;
-  QnnSystemContext_FreeFn_t              systemContextFree;
-  QnnSystemTensor_getMemoryFootprintFn_t systemTensorGetMemoryFootprint;
-  QnnSystemLog_createFn_t                systemLogCreate;
-  QnnSystemLog_setLogLevelFn_t           systemLogSetLogLevel;
-  QnnSystemLog_freeFn_t                  systemLogFree;
-  QnnSystemDlc_createFromFileFn_t        systemDlcCreateFromFile;
-  QnnSystemDlc_createFromBinaryFn_t      systemDlcCreateFromBinary;
-  QnnSystemDlc_composeGraphsFn_t         systemDlcComposeGraphs;
-  QnnSystemDlc_getOpMappingsFn_t         systemDlcGetOpMappings;
-  QnnSystemDlc_freeFn_t                  systemDlcFree;
+  QnnSystemContext_CreateFn_t                    systemContextCreate;
+  QnnSystemContext_GetBinaryInfoFn_t             systemContextGetBinaryInfo;
+  QnnSystemContext_GetMetaDataFn_t               systemContextGetMetaData;
+  QnnSystemContext_FreeFn_t                      systemContextFree;
+  QnnSystemTensor_getMemoryFootprintFn_t         systemTensorGetMemoryFootprint;
+  QnnSystemLog_createFn_t                        systemLogCreate;
+  QnnSystemLog_setLogLevelFn_t                   systemLogSetLogLevel;
+  QnnSystemLog_freeFn_t                          systemLogFree;
+  QnnSystemDlc_createFromFileFn_t                systemDlcCreateFromFile;
+  QnnSystemDlc_createFromBinaryFn_t              systemDlcCreateFromBinary;
+  QnnSystemDlc_composeGraphsFn_t                 systemDlcComposeGraphs;
+  QnnSystemDlc_getOpMappingsFn_t                 systemDlcGetOpMappings;
+  QnnSystemDlc_freeFn_t                          systemDlcFree;
+  QnnSystemProfile_createSerializationTargetFn_t systemProfileCreateSerializationTarget;
+  QnnSystemProfile_serializeEventDataFn_t        systemProfileSerializeEventData;
+  QnnSystemProfile_freeSerializationTargetFn_t   systemProfileFreeSerializationTarget;
 } QNN_SYSTEM_INTERFACE_VER_TYPE;
 
 /// QNN_INTERFACE_VER_TYPE initializer macro
@@ -200,6 +222,9 @@ typedef struct {
   NULL, /*systemDlcComposeGraphs*/ \
   NULL, /*systemDlcGetOpMappings*/ \
   NULL, /*systemDlcFree*/ \
+  NULL, /*systemProfileCreateSerializationTarget*/ \
+  NULL, /*systemProfileSerializeEventData*/ \
+  NULL, /*systemProfileFreeSerializationTarget*/ \
 }
 
 typedef struct {

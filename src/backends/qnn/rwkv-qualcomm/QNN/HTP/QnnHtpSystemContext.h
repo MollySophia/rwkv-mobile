@@ -53,12 +53,13 @@ typedef enum {
   // Following version with GraphInfoBlobVersion as:
   //   - Major 0, Minor: 0, Patch: 1
   QNN_SYSTEM_CONTEXT_HTP_GRAPH_INFO_BLOB_VERSION_V1 = 0x01,
+  QNN_SYSTEM_CONTEXT_HTP_GRAPH_INFO_BLOB_VERSION_V2 = 0x02,
   // Unused, present to ensure 32 bits.
   QNN_SYSTEM_CONTEXT_HTP_GRAPH_INFO_BLOB_UNDEFINED = 0x7FFFFFFF
 } QnnHtpSystemContext_GraphInfoBlobVersion_t;
 
 // This struct is gets populated within a binary blob as part of GraphInfoBlob in
-// QnnSystemContext_BinaryInfoV#_t struct in QnnSystemContext.h
+// QnnSystemContext_BinaryInfoV1_t struct in QnnSystemContext.h
 typedef struct {
   // Stores the spill-fill buffer size used by each of the graphs
   uint64_t spillFillBufferSize;
@@ -71,6 +72,61 @@ typedef struct {
   // Number of HVX Threads to reserve;
   uint64_t numHvxThreads;
 } QnnHtpSystemContext_GraphBlobInfoV1_t;
+
+// This struct gets populated within a binary blob as part of GraphInfoBlob in
+// QnnSystemContext_BinaryInfoV2_t struct in QnnSystemContext.h
+/*
+Note: This chart is for illustrative purposes only.
++-----------------------------+--------------------------+
+|        256G (Far Mem)       |                          |
+|                             | Shared (name)     : 6G   |
+|                             +--------------------------+
+|                             | Non-Shared (name) : 1M   |
+|                             +--------------------------+
+|                             | I/O                      |
+|                             | K Cache (name)    : 100M |
+|                             | V Cache (name)    : 100M |
+|                             +--------------------------+
+|                             | Free Memory       : 100M |
+|                             +--------------------------+
+|                             |                          |
+|                             | (Far Memory starts at 4G)|
++-----------------------------+--------------------------+
+|         3.5G (Near Mem)     |                          |
+|                             | Shared (name)     : 1G   |
+|                             +--------------------------+
+|                             | Non-Shared (Const): 100K |
+|                             +--------------------------+
+|                             | Op Data           : 100K |
+|                             |                          |
++-----------------------------+--------------------------+
+
+                Total Memory Used: 6.701G
+*/
+typedef struct {
+  QnnHtpSystemContext_GraphInfoBlobVersion_t version;
+  // Stores the nativeK channel tile size used by each of the graphs (bytes)
+  uint64_t nativeKChannelSize;
+  // Stores the nativeV channel tile size used by each of the graphs (bytes)
+  uint64_t nativeVChannelSize;
+  // The field name IsSafeShareIO indicates if it is safe to share the
+  // buffer between inputs and outputs. 1: True, 0: False
+  // Client is responsible for ensuring no clash between input and output
+  // when flag is set.
+  uint32_t isSafeShareIO;
+  // Stores graph input/output tensors size (bytes)
+  uint64_t ioTensorSize;
+  // Stores opdata memory/meta data size associated with ops that will be executed,
+  // inlcuding op data like runlists (bytes)
+  uint64_t opDataSize;
+  // Stores size of const data in the graph (bytes)
+  uint64_t constSize;
+  // Stores size of DDR-tensor (bytes)
+  uint64_t ddrTensorSize;
+  // Stores shared weights size (bytes)
+  uint64_t sharedWeightsSize;
+
+} QnnHtpSystemContext_GraphBlobInfoV2_t;
 
 typedef struct {
   QnnHtpSystemContext_GraphInfoBlobVersion_t version;
@@ -87,17 +143,18 @@ typedef enum {
   QNN_SYSTEM_CONTEXT_HTP_CONTEXT_INFO_BLOB_UNDEFINED = 0x7FFFFFFF
 } QnnHtpSystemContext_ContextInfoBlobVersion_t;
 
-typedef struct{
-    /// An integer representation of SocUtility::DspArch
-    uint32_t dspArch;
+typedef struct {
+  /// An integer representation of SocUtility::DspArch
+  uint32_t dspArch;
 } QnnHtpSystemContext_ContextBlobInfoV1_t;
 
 typedef struct {
   QnnHtpSystemContext_ContextInfoBlobVersion_t version;
   union UNNAMED {
-    QnnHtpSystemContext_ContextBlobInfoV1_t contextBinaryContextBlobInfoV1;
+  QnnHtpSystemContext_ContextBlobInfoV1_t contextBinaryContextBlobInfoV1;
   };
 } QnnHtpSystemContext_ContextBlobInfo_t;
+
 
 //=============================================================================
 // Data Types

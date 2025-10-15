@@ -41,7 +41,8 @@ enum class Flags : unsigned {
     IS_PRELOAD, // Op is a chunk preload op
     CAN_BE_SRC_DESTRUCTIVE, // Op will work correctly if input[0] and output[0] are at the same places in TCM
     IS_WEIGHT_FOR_BIT_REARRANGE, // Indicates Weight data will be used for bit rearrangement
-    IS_PREDICATE_MARKER,
+    IS_PREDICATE_MARKER_TRUE, // Op is a marker node, all the producers of this node have a true sense for predication.
+    IS_PREDICATE_MARKER_FALSE, // Same as above but with a false sense.
     XXX_LAST_FLAG
 };
 // NOTE: if you add new background op types (FOR_HVX, RESOURCE_HVX, etc) make sure to update
@@ -87,10 +88,11 @@ constexpr Flags_word flagval_generate = ((Flags_word(1) << static_cast<unsigned>
 
 constexpr int FLAG_FOLDING_LIMIT = 20;
 
-template <typename T, int S = 1> inline constexpr Flags_word flags_for()
-{
-    return 0;
-}
+template <typename T, int S> struct flags_for_t {
+    constexpr static Flags_word value = 0;
+};
+
+template <typename T, int S = 1> constexpr Flags_word flags_for = flags_for_t<T, S>::value;
 
 inline constexpr bool test_flag_for(Flags_word w, Flags which)
 {
@@ -140,17 +142,15 @@ template <typename T> [[maybe_unused]] static constexpr const char *docs_for()
     /* LCOV_EXCL_START [SAFTYSWCCB-1736] constexprs resolved during compile time */                                                                                                                                                 \
     template <> constexpr unsigned FlagCounter<T, S>::increment() { return 1U; }                                                                                                                                                    \
     /* LCOV_EXCL_STOP */                                                                                                                                                                                                            \
-    template <> constexpr Flags_word hnnx::flags_for<T, FlagCounter<T, S>::get()>()                                                                                                                                                 \
-    {                                                                                                                                                                                                                               \
-        constexpr Flags_word flags = hnnx::flagval_generate<__VA_ARGS__>;                                                                                                                                                           \
+    template <> struct hnnx::flags_for_t<T, FlagCounter<T, S>::get()> {                                                                                                                                                             \
+        constexpr static Flags_word value = hnnx::flagval_generate<__VA_ARGS__>;                                                                                                                                                    \
         static_assert(                                                                                                                                                                                                              \
                 FlagCounter<T, S>::get() <= hnnx::FLAG_FOLDING_LIMIT,                                                                                                                                                               \
                 "Flag folding limit exceeded, this means you tried to register too many flags to the same type.");                                                                                                                  \
         static_assert(                                                                                                                                                                                                              \
-                FlagCounter<T, S>::get() == 1 || flags == flags_for<T, FlagCounter<T, S>::get() - 1>(),                                                                                                                             \
+                FlagCounter<T, S>::get() == 1 || value == hnnx::flags_for<T, FlagCounter<T, S>::get() - 1>,                                                                                                                         \
                 "Flags mismatch, this happens when different flags have been registered for the same type. Due to TCM folding, this can also happen when registering different flags for the TCM and non-TCM op implementations."); \
-        return flags;                                                                                                                                                                                                               \
-    }
+    };
 
 #define FLAGS_FOR(F, ...)                   FLAGS_FOR_IMPL(F, __COUNTER__, __VA_ARGS__)
 #define FLAGS_FOR_DT_NO_TCM_FOLDING(F, ...) FLAGS_FOR_IMPL(DerivedType<F>::type, __COUNTER__, __VA_ARGS__)

@@ -89,7 +89,7 @@ typedef volatile uint32_t *counter_nc_t;
 // (between Excecutable its subclasses) to change the pointer value.
 class API_EXPORT Executable {
   public:
-    static constexpr unsigned MAX_OP_SLICES = 4;
+    static constexpr unsigned MAX_OP_SLICES = 8;
 
     using FuncType = GraphStatus (*)(const void *, EXECUTE_METHOD_PARMS);
     using ItemType = std::pair<FuncType, const void *>;
@@ -107,6 +107,8 @@ class API_EXPORT Executable {
     };
     virtual GraphStatus execute(EXECUTE_METHOD_PARMS) const noexcept = 0; // Needs to be at vtable offset zero!!!
     virtual ItemType compile(Graph &graph_in) const; // Turn this Executable into a function pointer and data pointer.
+    virtual bool
+    check_constraint_for_recompile(Graph &graph_in) const; // allows for additional check for running during recompile
     virtual ~Executable() = default;
     static const size_t *vtable(Executable const *); // helper function: get vtable
     static size_t execute_address(Executable const *); // helper function: get address of execute() function

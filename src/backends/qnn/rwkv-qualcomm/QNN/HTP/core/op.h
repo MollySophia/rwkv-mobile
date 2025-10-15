@@ -27,7 +27,6 @@ class Graph;
 class Tensor;
 namespace hnnx {
 class OpIoPtrs;
-class SimpleOpBase;
 class CostBasedFeatureDesc;
 struct OpExtraInfo;
 } // namespace hnnx
@@ -56,9 +55,9 @@ PUSH_VISIBILITY(default)
 // Flags used to describe the class of checkpoints we have.
 enum ChkptStoreType {
     ChkptNormal = 0, // N, M
-    ChkptNone = 1, // (-1 or 0) and (-1 or 1).
+    ChkptNone = 1, // (-1 or 0), -1
     ChkptNoGate = 2, // (-1 or 0), N
-    ChkptNoDone = 3, // N, (-1 or 1)
+    ChkptNoDone = 3, // N, -1
     ChkptFlagShift = 2,
     ChkptOpFlagMask = 0x3,
     ChkptFlagMask = ((1 << ChkptFlagShift) - 1),
@@ -126,7 +125,7 @@ class Op : public hnnx::Executable {
     API_EXPORT inline size_t num_outputs() const { return num_inputs_outputs().second; }
     API_EXPORT inline size_t num_inputs() const { return num_inputs_outputs().first; }
     API_EXPORT const char *true_name() const;
-    API_EXPORT virtual Flags_word get_flag_word() const { return hnnx::flags_for<Op>(); }
+    API_EXPORT virtual Flags_word get_flag_word() const { return hnnx::flags_for<Op>; }
     virtual const char *get_docs() const { return hnnx::docs_for<Op>(); } //LCOV_EXCL_LINE [SAFTYSWCCB-1542]
 
     /// @brief
@@ -468,11 +467,6 @@ class OpHookBase {
 };
 
 // if the indicated Op is a SpawnOp, get its inner op ptr, otherwise null.
-
-using SimpleOpFactory = std::unique_ptr<SimpleOpBase> (*)(size_t n_inputs_in, size_t n_outputs_in,
-                                                          Tensor const *const *inputs_in,
-                                                          OutputDef const *const *outputs_in, Graph &graph_in);
-
 } // namespace hnnx
 
 POP_VISIBILITY()

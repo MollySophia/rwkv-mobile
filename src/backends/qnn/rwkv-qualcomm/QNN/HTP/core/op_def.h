@@ -362,6 +362,9 @@ class OpDef : public OpDefFlags {
     API_EXPORT virtual void nndebug_serialize(hnnx::Serializer &sctx) const;
     API_EXPORT void serialize(hnnx::Serializer &sctx) const;
     API_EXPORT OpDef(GraphPrepare &graph_in, hnnx::Deserializer &dctx);
+#ifndef PREPARE_DISABLED
+    void dump() const; // debugging only
+#endif
 };
 
 namespace hnnx {

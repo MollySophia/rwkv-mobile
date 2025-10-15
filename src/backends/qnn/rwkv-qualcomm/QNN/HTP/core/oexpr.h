@@ -532,6 +532,44 @@ template <typename T> struct func_roundup {
     }
 };
 
+// Formal definition of ROUNDDOWN(a,b):
+// T can be int or unsigned ('size_t')
+// UNDEFINED for b < 0 ( you will get 0, and maybe a runtime warning, some day?)
+//
+// For b == 0, round to previous smaller power of two
+// rounddown(a,1) = a
+//
+// Otherwise for b>=2: result is a rounded down (towards -inf) to a multiple of b.
+//  So, rounddown(15,10) = 10, rounddown(-15,10) = -20
+template <typename T> struct func_rounddown {
+    static_assert(std::is_integral_v<T>, "ROUNDDOWN can only apply to integer types");
+    inline T rounddown_pow2(T a) const
+    {
+        if (a == 0) return 0; // No power of two for zero
+        // bit spreading
+        a |= a >> 1;
+        a |= a >> 2;
+        a |= a >> 4;
+        a |= a >> 8;
+        a |= a >> 16;
+        return a - (a >> 1); // Clear all but the highest set bit
+    }
+    inline T operator()(T numToRound, T multiple) const
+    {
+        if (multiple < 0) return 0;
+        if (multiple == 0) return rounddown_pow2(numToRound);
+        if (multiple == 1) return numToRound;
+
+        T remainder = numToRound % multiple;
+        if (remainder == 0) return numToRound;
+
+        T ret = numToRound - remainder; // rounded towards 0;
+        if (numToRound <= 0) ret -= multiple;
+
+        return ret;
+    }
+};
+
 /// \addtogroup OptConstraint
 /// @{
 
@@ -543,6 +581,8 @@ OEXP_ARITH(MOD, true_modulus)
 // - for signed int: ROUNDUP(15,10)-> 20 but ROUNDUP(-15,10) -> -10.
 //
 OEXP_ARITH(ROUNDUP, func_roundup)
+
+OEXP_ARITH(ROUNDDOWN, func_rounddown)
 
 /// @}
 

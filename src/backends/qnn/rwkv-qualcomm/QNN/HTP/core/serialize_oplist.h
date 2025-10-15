@@ -65,7 +65,6 @@ class SerOpsInterface {
     // Common handler for op_typical, op_variadic, op_typical_with_extra.
     // mode = 0 for op_typical
     //       = 1 for op_variadic
-    //       = 3 for op_simpleop
     //   for op_typical_with_extra:
     //       lower 8 bits are log2(aligment) - must be >= 2, <= log2(max_opaquet_align)
     //       uppper 24 bits are size, multiple of alignment.
@@ -73,7 +72,6 @@ class SerOpsInterface {
     // So, codes 4..257 are available.
     static constexpr unsigned opMODE_typical = 0;
     static constexpr unsigned opMODE_variadic = 1;
-    static constexpr unsigned opMODE_simpleop = 3;
 
     virtual void op_serialize_func(Op const *op, unsigned n_in, Tensor const *const *in_tens, unsigned n_out,
                                    uptr_Tensor const *out_tens, unsigned mode) = 0;
@@ -140,14 +138,6 @@ class SerOpsInterface {
         op_serialize_func(op, inputs.size(), inputs.data(), outputs.size(), outputs.data(), opMODE_variadic);
     }
 
-    // to be used for SimpleOpWrapper::serialize; op_serialize_func will dynamic-cast to SimpleOpWrapper
-    // and then obtain the proper type.
-    template <typename V_IN, typename V_OUT>
-    inline void op_simpleop(Op const *op, V_IN const &inputs, V_OUT const &outputs)
-    {
-        op_serialize_func(op, inputs.size(), inputs.data(), outputs.size(), outputs.data(), opMODE_simpleop);
-    }
-
     // Used for ConstWrapperOp, ShapeWrapperOp, DummyN
     inline void op_for_tensor(Op const *op, unsigned n_out, uptr_Tensor const *out_tens)
     {
@@ -173,6 +163,28 @@ class SerOpsInterface {
     // It is expected that no other serialization activity occurs between the call to .op_special(),
     // and the call to spcl_done (when the handle is deleted).
     //
+    // IMPORTANT: the calls to the handle returned by op_special must be done in this
+    // sequence, so that the pickle format is correctly described by the 'op_format_code'
+    // (see section Op_Remainer_Framework in pickle_format.md)
+    //
+    //   0 to 63 'extra' words (using calls to '.data_u32(), each of which can supply more than one);
+    //   optional: 1 call to '.sized_vec' to supply a 'sized' table
+    //   0 to 15 calls to .tensor_in to supply any input tensor(s);
+    //   0 to 7 calls to .tensor_out to supply any output tensor(s)
+    //
+    // calls to .fill_nullptr() can be done at any time, they have no effect on pickle, just
+    // the crate size estimate.
+    //
+    // If this is not followed, an exception will be thrown in serialize_oplist.cc during
+    // serialization.
+    // If this is too restrictive, there are a fair number of 'reserved 0' bits
+    // in the op_format code, so you can make a backwards compatible mod, and update this comment,
+    // the doc, and the sequence checking code.
+    //
+    // A given framework op class must always make the same the sequence of calls in every instance;
+    // if there is a 'sized_vec', the size of that can change among instances.
+    //
+    //
     virtual OpSerHandle op_special(Op const *op) = 0;
 
   protected:
@@ -182,7 +194,8 @@ class SerOpsInterface {
     virtual void spcl_add_u32(OpSerHandle &, uint32_t const *p, unsigned n) = 0;
     virtual void spcl_add_sized_vec(OpSerHandle &, uint32_t const *data, bool extra) = 0;
     virtual void spcl_fill_nullptr(OpSerHandle &, unsigned n) = 0;
-
+    virtual void spcl_add_in_tensor(OpSerHandle &, Tensor const *) = 0;
+    virtual void spcl_add_out_tensor(OpSerHandle &, uptr_Tensor const &) = 0;
     OpSerHandle make_opser_handle(unsigned info);
 };
 
@@ -231,6 +244,21 @@ class OpSerHandle {
         owner.spcl_add_sized_vec(*this, arr_data, extra);
         return *this;
     }
+    // add in input tensor
+    //
+    inline OpSerHandle &tensor_in(Tensor const *tin)
+    {
+        owner.spcl_add_in_tensor(*this, tin);
+        return *this;
+    }
+    // add an output tensor
+    //
+    inline OpSerHandle &tensor_out(uptr_Tensor const &tout)
+    {
+        owner.spcl_add_out_tensor(*this, tout);
+        return *this;
+    }
+
     ///////////////////////////
     // add one or more 'null pointer fill', this has no effect on the pickle but it reserves
     // pointer slot(s) in the baked op image.

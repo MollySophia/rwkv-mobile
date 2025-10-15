@@ -13,6 +13,7 @@
 #include <type_traits>
 #include "dtype_enum.h"
 #include "float16.h"
+#include "bfloat16.h"
 #include "macros_attribute.h"
 #include "weak_linkage.h"
 
@@ -97,6 +98,14 @@ template <> struct dtype_traits<DType::Int64> {
     static const bool is_float = false;
     static const storage_type minus_inf_code = 1llu << 63;
 };
+template <> struct dtype_traits<DType::BFloat16> {
+    typedef BFloat16 element_type;
+    typedef uint16_t storage_type;
+    static const int element_size = sizeof(element_type);
+    static const bool is_quant = false;
+    static const bool is_float = true;
+    static const storage_type minus_inf_code = 0xFF80;
+};
 
 // 'runtime' attributes
 // E.g. Dtype_info(d).elbytes gives the element size.
@@ -159,6 +168,8 @@ inline constexpr dtype_info DType_info_inline(DType d)
         return dtype_info_for<DType::QInt8>();
     case DType::Int64:
         return dtype_info_for<DType::Int64>();
+    case DType::BFloat16:
+        return dtype_info_for<DType::BFloat16>();
     default:
         return dtype_info_for<DType::UNKNOWN>();
     }

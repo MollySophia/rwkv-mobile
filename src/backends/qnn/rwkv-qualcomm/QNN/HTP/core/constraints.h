@@ -38,6 +38,9 @@ namespace constraint_lib {
 //! IS_FLOAT("operand") -> bool   (alias of IS_FLOAT32)
 #define IS_FLOAT(X) IS_FLOAT32(X)
 
+//! IS_BFLOAT16("operand") -> bool (true if operand has BFloat16 output)
+#define IS_BFLOAT16(X) EQ(DTYPE_OF(X), DType::BFloat16)
+
 //! IS_QUINT8("operand") -> bool   (true if operand has 'QUInt8' output)
 #define IS_QUINT8(X) EQ(DTYPE_OF(X), DType::QUInt8)
 

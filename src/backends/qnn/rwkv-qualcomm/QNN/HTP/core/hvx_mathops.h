@@ -54,7 +54,8 @@ template <int FBITS, bool RND> inline HVX_Vector s16_from_hf_core(HVX_Vector vin
     if constexpr (RND) {
         result = Q6_Vh_vround_VwVw_sat(vsf_1, vsf_0);
     } else {
-        result = Q6_Vh_vsat_VwVw(vsf_1, vsf_0);
+        // Q6_Vh_vround_VwVw_sat has an implicit right shift by 16, so mimic that
+        result = Q6_Vh_vsat_VwVw(Q6_Vw_vasr_VwR(vsf_1, 16), Q6_Vw_vasr_VwR(vsf_0, 16));
     }
     // but we need to also take care of out-of-range inputs; any with original exponent exceeding
     // 29-FBITS. This is only possible when FBITS is -1 or more.

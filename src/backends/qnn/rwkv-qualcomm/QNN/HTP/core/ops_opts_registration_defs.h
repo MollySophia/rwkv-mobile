@@ -18,7 +18,7 @@ template <auto, int> struct ModifiedDerivedType;
 
 /** @brief IMPL_APPEND_REG_OP_ELEM_NO_TCM_FOLDING (used by REGISTER_OP, REGISTER_OP_HVX, etc.) */
 // LCOV_EXCL_START [SAFTYSWCCB-1736] constexprs resolved during compile time
-#define IMPL_APPEND_REG_OP_ELEM_NO_TCM_FOLDING(I, FP, OP, TAG, IS_SIMPLE)                                              \
+#define IMPL_APPEND_REG_OP_ELEM_NO_TCM_FOLDING(I, FP, OP, TAG, IS_EXTERNAL)                                            \
     /** @brief Increment the Op count for this file @return 1 */                                                       \
     template <> constexpr int32_t NC<(I)>::inc_op() noexcept { return 1; }                                             \
                                                                                                                        \
@@ -86,8 +86,8 @@ template <auto, int> struct ModifiedDerivedType;
     template <>                                                                                                        \
     constexpr ba_op<NC<(I)>::reg_op_count()> op_arr_container::chain<UniqTy<0>, NC<(I)>::reg_op_count()> =             \
             chain<UniqTy<0>, NC<(I - 1)>::reg_op_count()>.append(                                                      \
-                    hnnx::reg_op_node{hnnx::GetParms<IS_SIMPLE>::get<FP, I>(), StrUpd<(I)>::op_name_offset,            \
-                                      StrUpd<(I)>::type_tag_offset});
+                    hnnx::reg_op_node{hnnx::GetParms::get<FP, I>(), StrUpd<(I)>::op_name_offset,                       \
+                                      StrUpd<(I)>::type_tag_offset, IS_EXTERNAL});
 
 /** @brief IMPL_APPEND_REG_OP_ELEM (used by REGISTER_OP, REGISTER_OP_HVX, etc.) */
 #define IMPL_APPEND_REG_OP_ELEM(I, FP, OP, TAG, LINE)                                                                  \
@@ -154,19 +154,18 @@ template <auto, int> struct ModifiedDerivedType;
                                           .find(std::string_view{(TAG).data(), (TAG).size()}));                        \
                                                                                                                        \
     /** @brief Finally, append a new element to the Op registration table. */                                          \
-    /** @brief IS_SIMPLE argument to GetParms::get is always false; we only fold for internal ops, not op packages */  \
     template <>                                                                                                        \
     template <>                                                                                                        \
     constexpr ba_op<NC<(I)>::reg_op_count()> op_arr_container::chain<UniqTy<0>, NC<(I)>::reg_op_count()> =             \
             chain<UniqTy<0>, NC<(I - 1)>::reg_op_count()>.append(                                                      \
-                    hnnx::reg_op_node{hnnx::GetParms<false>::get<fold::ModifiedDerivedType<FP, LINE>::Modified, I>(),  \
-                                      StrUpd<(I)>::op_name_offset, StrUpd<(I)>::type_tag_offset});
+                    hnnx::reg_op_node{hnnx::GetParms::get<fold::ModifiedDerivedType<FP, LINE>::Modified, I>(),         \
+                                      StrUpd<(I)>::op_name_offset, StrUpd<(I)>::type_tag_offset, false});
 
 /** @brief APPEND_REG_OP_ELEM (used by REGISTER_OP, REGISTER_OP_HVX, etc.) */
 #define APPEND_REG_OP_ELEM(FP, OP, TAG, LINE) IMPL_APPEND_REG_OP_ELEM(__COUNTER__, FP, OP, TAG, LINE)
 /** @breif see register-op-tcm-folding.md **/
-#define APPEND_REG_OP_ELEM_NO_TCM_FOLDING(FP, OP, TAG, IS_SIMPLE)                                                      \
-    IMPL_APPEND_REG_OP_ELEM_NO_TCM_FOLDING(__COUNTER__, FP, OP, TAG, IS_SIMPLE)
+#define APPEND_REG_OP_ELEM_NO_TCM_FOLDING(FP, OP, TAG, IS_EXTERNAL)                                                    \
+    IMPL_APPEND_REG_OP_ELEM_NO_TCM_FOLDING(__COUNTER__, FP, OP, TAG, IS_EXTERNAL)
 
 /** @brief IMPL_APPEND_REG_OPT_ELEM (used by DEF_OPT and DEF_OPTIM) */
 #define IMPL_APPEND_REG_OPT_ELEM(I, PRIORITY, FLAGS, DEFOPTFN, LINE)                                                   \
@@ -227,7 +226,6 @@ template <auto, int> struct ModifiedDerivedType;
 
 #define OPTS_REG_TABLE(NAME)     CTRICKS_PASTER(NAME, _inner_opts_regist_table)
 #define EXT_OPTS_REG_TABLE(NAME) CTRICKS_PASTER(NAME, _opts_table)
-
 /**
  * @brief IMPL_FINALIZE_TABLES defines the registration tables for both
  * the ops and opts defined in the Op source file
@@ -254,7 +252,8 @@ template <auto, int> struct ModifiedDerivedType;
                 OP_NAME_STR_TABLE(NAME).empty() ? nullptr : &OP_NAME_STR_TABLE(NAME).front(),                                                                          \
                 OP_NAME_STR_TABLE(NAME).size(),                                                                                                                        \
                 TYPE_TAG_STR_TABLE(NAME).empty() ? nullptr : &TYPE_TAG_STR_TABLE(NAME).front(),                                                                        \
-                TYPE_TAG_STR_TABLE(NAME).size()};                                                                                                                      \
+                TYPE_TAG_STR_TABLE(NAME).size(),                                                                                                                       \
+                __FILE__};                                                                                                                                             \
         return &table;                                                                                                                                                 \
     }                                                                                                                                                                  \
     /** @brief Exported getter function for the Optimization registration table and its size */                                                                        \
@@ -318,6 +317,14 @@ template <auto, int> struct ModifiedDerivedType;
 
 #endif
 
+#ifndef PREPARE_DISABLED
+#define OP_PROCESS_IMPL(PREFIX)                                                                                        \
+    std::string_view const filename = op_tab->get_file_name();                                                         \
+    reg_op.PREFIX##_process(names, suffixes, filename);
+#else
+#define OP_PROCESS_IMPL(PREFIX) reg_op.PREFIX##_process(names, suffixes);
+#endif
+
 /**
  * @brief As part of loading the HTP core, register all of the Ops and Optimization rules.
  * This will be called at static-initialization time.
@@ -334,7 +341,7 @@ template <auto, int> struct ModifiedDerivedType;
             std::string_view const suffixes = op_tab->get_type_tag_strtab();                                           \
             for (uint32_t j = 0U; j < op_tab->get_num_entries(); j++) {                                                \
                 const reg_op_node reg_op = entries[j];                                                                 \
-                reg_op.PREFIX##_process(names, suffixes);                                                              \
+                OP_PROCESS_IMPL(PREFIX)                                                                                \
             }                                                                                                          \
         }                                                                                                              \
     }                                                                                                                  \
@@ -439,7 +446,13 @@ template <auto, int> struct ModifiedDerivedType;
             chain<UniqTy<0>, (I)-1>.append(&EXT_OPTS_REG_TABLE(NAME));                                                 \
     }
 
-#define DECLARE_OPS_OPTS_LIST(NAME)     IMPL_DECLARE_OPS_OPTS_LIST(__COUNTER__, NAME)
-#define DECLARE_PKG_OPS_OPTS_LIST(NAME) IMPL_DECLARE_OPS_OPTS_LIST(__COUNTER__, NAME)
+#ifdef OPS_DISABLED
+#define DECLARE_OPS_OPTS_LIST(NAME)
+#else
+#define DECLARE_OPS_OPTS_LIST(NAME) IMPL_DECLARE_OPS_OPTS_LIST(__COUNTER__, NAME)
+#endif
+
+#define DECLARE_PKG_OPS_OPTS_LIST(NAME)  IMPL_DECLARE_OPS_OPTS_LIST(__COUNTER__, NAME)
+#define DECLARE_PRIV_OPS_OPTS_LIST(NAME) IMPL_DECLARE_OPS_OPTS_LIST(__COUNTER__, NAME)
 
 #endif // OPS_OPTS_REGISTRATION_DEFS_H

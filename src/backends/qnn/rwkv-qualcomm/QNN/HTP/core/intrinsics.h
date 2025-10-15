@@ -305,6 +305,19 @@ inline void dcfetch(void const *addr)
     POP_WARNING()
 }
 
+inline void dcfetch_block(const void *addr, int size);
+
+inline void dcfetch_multi(void const *addr, int len)
+{
+#if (__HEXAGON_ARCH__ >= 85)
+    // LCOV_EXCL_START [SAFTYSWCCB-1735] Hawi
+    asm volatile(" dcfetch_multi(%0,%1) " : : "r"(addr), "r"(len));
+    // LCOV_EXCL_STOP
+#else
+    dcfetch_block(addr, len);
+#endif
+}
+
 inline void ALWAYSINLINE l2pref(const void *p, uint32_t height, uint32_t width, uint32_t stride)
 {
     uint64_t const control = Q6_P_combine_RR(stride, Q6_R_combine_RlRl(width, height));
@@ -371,6 +384,7 @@ inline void q6op_vstu_variable_ARVR(void *addr, int n, HVX_Vector vin, int pos0)
 }
 
 inline void dcfetch(void const volatile *addr) {}
+inline void dcfetch_multi(void const *addr, int len) {}
 inline void l2pref(const void *p, uint32_t height, uint32_t width, uint32_t stride) {}
 
 inline void pause_just_enough()
@@ -755,7 +769,7 @@ static inline HVX_Vector convert_s32_to_sf(const HVX_Vector vals)
     return Q6_Vsf_equals_Vw(vals);
 #else
     // LCOV_EXCL_START [SAFTYSWCCB-1735]
-    return int32_to_float(vals);
+    return int32_to_fp32(vals);
     // LCOV_EXCL_STOP
 #endif
 }

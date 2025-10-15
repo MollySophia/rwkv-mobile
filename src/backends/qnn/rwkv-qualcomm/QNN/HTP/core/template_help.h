@@ -16,6 +16,7 @@
 #include <type_traits>
 #include <utility>
 #include "type_name.h"
+#include "graph_handle_defs.h"
 
 class Graph;
 class Tensor;
@@ -230,11 +231,19 @@ enum class OpArgCategory { //
     tensor_in, // T const &, where T is a Tensor subclass.
     vararg_in, // Vector<T const*> const &; or Vector<T*>
     slice_spec, // op_slice_spec (passed by value)
-    graph_ref, // Graph const &
+    graph_handle, // subclass of hnnx::GraphHandleBase; previously 'Graph const &'
 };
 
+// OpArgCat<TYPE>::value is the category of a parameter type, as an 'enum OpArgCategory'
+// the 'base' definition only looks at the 'graph_handle' category; all others are
+// done by specializing this this struct.
 template <typename T> struct OpArgCat {
-    static constexpr OpArgCategory value = OpArgCategory::invalid;
+    // if it's a subclass of GraphHandleBase (without actually being GraphHandleBase) it's 'graph_handle'
+    // otherwise invalid.
+    static constexpr OpArgCategory value =
+            (std::is_base_of_v<hnnx::GraphHandleBase, T> && !std::is_same_v<const hnnx::GraphHandleBase, const T>)
+                    ? OpArgCategory::graph_handle
+                    : OpArgCategory::invalid;
 };
 
 // T& or T const &; Ok if  T subclass of Tensor;
@@ -242,10 +251,6 @@ template <typename T> struct OpArgCat<T &> {
     static constexpr OpArgCategory value = !std::is_base_of_v<Tensor, T> ? OpArgCategory::invalid
                                            : std::is_const_v<T>          ? OpArgCategory::tensor_in
                                                                          : OpArgCategory::tensor_out;
-};
-// Graph const & ok
-template <> struct OpArgCat<Graph const &> {
-    static constexpr OpArgCategory value = OpArgCategory::graph_ref;
 };
 
 // Also: Vector<T*> is ok as pass-by-value or pass-by-const-ref.
@@ -272,7 +277,7 @@ template <> struct OpArgCat<OsS> {
 // - `vararg_in` (0 or 1, only if `VariadicOp`) - parameter is `VECTOR<T const *> const &`
 // - `tensor_out` (0 or more) - parameter is `T &` (these are 'scratch outputs')
 // - `slice_spec` (0 or 1) - parameter is `op_slice_spec`
-// - `graph_ref` (0 or 1) - parameter is `Graph &`
+// - `graph_handle` (0 or 1) - parameter is a subclass of `GraphHandleBase`, passed by value.
 //
 // This is done by traversing and checking these rules:
 //  - Each one's category must be >= the previous category, and can only be equal if it's 'tensor_out' or 'tensor_in'.
@@ -310,7 +315,7 @@ template <OpArgCategory... Args> inline constexpr int CheckOpFuncArgs()
                 if (cat == OpArgCategory::tensor_out) {
                     num_scratch_out++; // count one more scratch output
                 } else if (cat < OpArgCategory::slice_spec) {
-                    return -1; // any after 'scratch out' must be slice_spec or graph_ref.
+                    return -1; // any after 'scratch out' must be slice_spec or graph_handle.
                 }
             }
             cat_previous = cat;
@@ -363,6 +368,23 @@ template <OpArgCategory CAT> struct ArgTupFilterHelper<CAT> {
 
 template <OpArgCategory CAT, typename... Types> using ArgTupFilter_t = typename ArgTupFilterHelper<CAT, Types...>::type;
 
+// This mechanism is used to control the generation of name_args_tuple (in ArgsTuples),
+// we don't want to add the 'graph handle' parameter if
+// TypeOfGraphHandleParameter::appears_in_opid_string is false.
+// so, CheckGraphHandleTuple<TupleT>::type is:
+//      tuple<> if TupleT is tuple<>
+//      tuple<H> if TupleT is tuple<H> where H::appears_in_opid_string is true
+//      tuple<> if TupleT is tuple<H> where H::appears_in_opid_string is false
+// No other cases should occur, due to how graph_handle_tup is generated (no tuple of more than one,
+// and no tuple<X> where X is some other type which is not a graph_handle eligible type).
+template <typename TUPLET> struct CheckGraphHandleTuple;
+template <> struct CheckGraphHandleTuple<std::tuple<>> {
+    using type = std::tuple<>;
+};
+template <typename GH> struct CheckGraphHandleTuple<std::tuple<GH>> {
+    using type = std::conditional_t<GH::appears_in_opid_string, std::tuple<GH>, std::tuple<>>;
+};
+
 //////////
 template <typename R> struct ArgsTuples;
 
@@ -377,8 +399,8 @@ template <typename R, typename... Args> struct ArgsTuples<R(Args...)> {
     // If not supported in VariadicOp, this must be checked there.
     static constexpr size_t n_scratch_outputs = (check_op_func_val <= 0) ? size_t(0) : size_t(check_op_func_val);
 
-    // extract 'Graph const &' and 'op_slice_spec'
-    using const_graph_tup = ArgTupFilter_t<OpArgCategory::graph_ref, Args...>; // reference to graph?
+    // extract 'GHandle' and 'op_slice_spec'
+    using graph_handle_tup = ArgTupFilter_t<OpArgCategory::graph_handle, Args...>; // a graph handle?
     using slice_spec_tup = ArgTupFilter_t<OpArgCategory::slice_spec, Args...>; // 'slice_spec'?
 
     using input_tuple = ArgTupFilter_t<OpArgCategory::tensor_in, Args...>; // the inputs as real types
@@ -391,21 +413,22 @@ template <typename R, typename... Args> struct ArgsTuples<R(Args...)> {
                                       output_tuple>; // the outputs as pointers
     using output_uniqueptrs_tuple = TupMap_t<add_uniqueptr_t,
                                              output_tuple>; // the outputs as std::unique_ptrs
-    using graph_ptr_tuple = TupMap_t<std::add_pointer_t,
-                                     const_graph_tup>; // the graph as pointer
 
     static constexpr size_t n_inputs = std::tuple_size<input_tuple>::value; // number of inputs
     static constexpr size_t n_outputs = std::tuple_size<output_tuple>::value; // number of outputs
-    static constexpr bool has_graph = (std::tuple_size<const_graph_tup>::value > 0); // does it have a graph operand?
+    static constexpr bool has_graph = (std::tuple_size<graph_handle_tup>::value > 0); // does it have a graph operand?
     static constexpr bool has_slice_spec = (std::tuple_size<slice_spec_tup>::value > 0); // has op_slice_spec?
 
     // To support 'scratch output', we want the 'nameArray' to be based on:
     //  outputs, scratchout, varout, inputs, varin, graphref
     // .. even though 'scratchout' parms appear later in the function.
     // 'output_tuple' is the regular outputs followed by the scratch outputs, so the below will work.
-    //
-    using tname_args_tuple = Concat<output_tuple, var_output_tuple, input_tuple, var_input_tuple, const_graph_tup>;
-    //a string in the form of "@t1.t2.t3"... where t1,t2,t3,etc are the typenames of the input arguments as defined by DEFINE_TYPENAME
+    // Note: may or may not add graph_handle_tup to the end, depending on what actual handle type it is
+    // (see CheckGraphHandleTuple).
+    using tname_args_tuple = Concat<output_tuple, var_output_tuple, input_tuple, var_input_tuple,
+                                    typename CheckGraphHandleTuple<graph_handle_tup>::type>;
+    //a string in the form of "@t1.t2.t3"... where t1,t2,t3,etc are the typenames of the input arguments
+    // as defined by DEFINE_TYPENAME
     static constexpr auto nameArray =
             GetTypeNames<tname_args_tuple>(std::make_index_sequence<std::tuple_size_v<tname_args_tuple>>{});
     static constexpr const char *inputTypeNames = nameArray.data();

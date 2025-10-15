@@ -55,8 +55,6 @@ using tensor_deserializer_fn = uptr_Tensor (*)(Deserz &);
 
 using deserialize_op_func = void *(*)(void *, Deserz &); // Allocation function
 using deserialize_dtor_func = void (*)(Graph *, void *); // Deallocation function
-class SimpleOpBase;
-using deserialize_make_unique = std::unique_ptr<SimpleOpBase> (*)();
 
 struct op_deserializer_fn {
     op_deserializer_fn(deserialize_op_func init_func_in, const size_align_code_t sizeal_in)
@@ -98,6 +96,7 @@ struct trick_stringview_lt {
 };
 
 using op_deserializer_map_t = std::map<std::string_view, std::pair<op_deserializer_fn, bool>, trick_stringview_lt>;
+using op_filename_map_t = std::map<std::string_view, std::string_view>;
 using tensor_deserializer_map_t = std::map<std::string_view, tensor_deserializer_fn, trick_stringview_lt>;
 using cexdesc_deserializer_map = std::map<std::string, ConstExtentDesc>;
 
@@ -451,6 +450,8 @@ class Deserializer : public Deserz {
     constexpr bool is_shared_dynamic_tensor_shape_format() const { return shared_dynamic_tensor_shape; }
     void set_shared_dynamic_tensor_shape_format(const bool v = true) { shared_dynamic_tensor_shape = v; }
 
+    void set_shared_io_buffer(const bool v = true) { shared_io_buffer = v; }
+
     PUSH_WARNING()
     DISABLE_WARNING("-Wcast-qual", MSVC_NO_EQUIV)
     // valid when the entire pickle, in const_extent format, is loaded as a single, persistent dma buffer
@@ -487,6 +488,7 @@ class Deserializer : public Deserz {
     DeserTensorConn tensorconn;
     bool aligned_const_format_flag = false;
     bool shared_dynamic_tensor_shape = false;
+    bool shared_io_buffer = false;
 
     // this is used in 'deserialize_str', so it ideally should be in Deserz; but
     // it's pretty large; so, put it here and forbid calling deserialize_str
@@ -710,7 +712,8 @@ PUSH_VISIBILITY(default)
  * @param[in] fn Deserialize function
  */
 API_EXPORT void deserialize_op_register(std::type_info const *tinf, const std::string_view type_tag,
-                                        const op_deserializer_fn &fn, bool is_external = false);
+                                        const op_deserializer_fn &fn, bool is_external = false,
+                                        std::string_view filename = "");
 /**
  * @brief register the deserialization function for each \ref Tensor
  * Since \ref Tensor derived classes are instantiated via templates, there

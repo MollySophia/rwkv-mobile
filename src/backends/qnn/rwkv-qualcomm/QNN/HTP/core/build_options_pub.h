@@ -27,6 +27,13 @@ constexpr bool DebugRegistry = true;
 #else
 constexpr bool DebugRegistry = false;
 #endif
+
+#ifdef PREPARE_DISABLED
+static constexpr bool WITH_PREPARE = false;
+#else
+static constexpr bool WITH_PREPARE = true;
+#endif
+
 } // namespace build_options_pub
 
 #endif // BUILD_OPTIONS_PUB_H

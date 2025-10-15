@@ -39,13 +39,13 @@ typedef enum {
   //////////////////////////////////////////
 
   /// Qnn System Context success
-  QNN_SYSTEM_DLC_NO_ERROR = QNN_SUCCESS,
+  QNN_SYSTEM_DLC_NO_ERROR = QNN_SYSTEM_COMMON_NO_ERROR,
   /// There is optional API component that is not supported yet.
-  QNN_SYSTEM_DLC_ERROR_UNSUPPORTED_FEATURE = QNN_COMMON_ERROR_NOT_SUPPORTED,
+  QNN_SYSTEM_DLC_ERROR_UNSUPPORTED_FEATURE = QNN_SYSTEM_COMMON_ERROR_UNSUPPORTED_FEATURE,
   /// QNN System DLC invalid handle
-  QNN_SYSTEM_DLC_ERROR_INVALID_HANDLE = QNN_SYSTEM_DLC_MINERROR + 0,
+  QNN_SYSTEM_DLC_ERROR_INVALID_HANDLE = QNN_SYSTEM_COMMON_ERROR_INVALID_HANDLE,
   /// One or more arguments to a System DLC API is/are NULL/invalid.
-  QNN_SYSTEM_DLC_ERROR_INVALID_ARGUMENT = QNN_SYSTEM_DLC_MINERROR + 1,
+  QNN_SYSTEM_DLC_ERROR_INVALID_ARGUMENT = QNN_SYSTEM_COMMON_ERROR_INVALID_ARGUMENT,
   /// Generic Failure in achieving the objective of a System DLC API
   QNN_SYSTEM_DLC_ERROR_OPERATION_FAILED = QNN_SYSTEM_DLC_MINERROR + 2,
 
@@ -105,7 +105,9 @@ typedef void* QnnSystemDlc_Handle_t;
  *         - QNN_SYSTEM_DLC_ERROR_UNSUPPORTED_FEATURE: system context features not supported
  */
 QNN_SYSTEM_API
-Qnn_ErrorHandle_t QnnSystemDlc_createFromFile(Qnn_LogHandle_t logger, const char* dlcPath, QnnSystemDlc_Handle_t* dlcHandle);
+Qnn_ErrorHandle_t QnnSystemDlc_createFromFile(Qnn_LogHandle_t logger,
+                                              const char* dlcPath,
+                                              QnnSystemDlc_Handle_t* dlcHandle);
 
 /**
  * @brief A function to create an instance of the DLC from a binary buffer
@@ -123,9 +125,10 @@ Qnn_ErrorHandle_t QnnSystemDlc_createFromFile(Qnn_LogHandle_t logger, const char
  *         - QNN_SYSTEM_DLC_ERROR_UNSUPPORTED_FEATURE: system context features not supported
  */
 QNN_SYSTEM_API
-Qnn_ErrorHandle_t QnnSystemDlc_createFromBinary(Qnn_LogHandle_t logger, const uint8_t* buffer,
-                                                const Qnn_ContextBinarySize_t bufferSize, QnnSystemDlc_Handle_t* dlcHandle);
-
+Qnn_ErrorHandle_t QnnSystemDlc_createFromBinary(Qnn_LogHandle_t logger,
+                                                const uint8_t* buffer,
+                                                const Qnn_ContextBinarySize_t bufferSize,
+                                                QnnSystemDlc_Handle_t* dlcHandle);
 
 /**
  * @brief A function to compose graphs from a DLC on a particular backend, __backend__, through

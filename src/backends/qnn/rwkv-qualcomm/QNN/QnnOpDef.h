@@ -25,7 +25,7 @@
 #define QNN_OP_PACKAGE_NAME_QTI_AISW "qti.aisw"
 
 #define QNN_OPSET_VERSION_MAJOR 2
-#define QNN_OPSET_VERSION_MINOR 3
+#define QNN_OPSET_VERSION_MINOR 7
 #define QNN_OPSET_VERSION_PATCH 0
 
 #define QNN_OP_ARGB_TO_RGB                      "ArgbToRgb"
@@ -117,11 +117,12 @@
 #define QNN_OP_CONV_1D_PARAM_GROUP      "group"
 #define QNN_OP_CONV_1D_PARAM_DILATION   "dilation"
 
-#define QNN_OP_CONV_2D                  "Conv2d"
-#define QNN_OP_CONV_2D_PARAM_STRIDE     "stride"
-#define QNN_OP_CONV_2D_PARAM_PAD_AMOUNT "pad_amount"
-#define QNN_OP_CONV_2D_PARAM_GROUP      "group"
-#define QNN_OP_CONV_2D_PARAM_DILATION   "dilation"
+#define QNN_OP_CONV_2D                            "Conv2d"
+#define QNN_OP_CONV_2D_PARAM_STRIDE               "stride"
+#define QNN_OP_CONV_2D_PARAM_PAD_AMOUNT           "pad_amount"
+#define QNN_OP_CONV_2D_PARAM_GROUP                "group"
+#define QNN_OP_CONV_2D_PARAM_DILATION             "dilation"
+#define QNN_OP_CONV_2D_PARAM_REUSE_SPARSE_INDICES "reuse_sparse_indices"
 
 #define QNN_OP_CONV_3D                             "Conv3d"
 #define QNN_OP_CONV_3D_PARAM_STRIDE                "stride"
@@ -396,6 +397,9 @@
 #define QNN_OP_GRU_PARAM_LINEAR_BEFORE_RESET "linear_before_reset"
 #define QNN_OP_GRU_PARAM_TIME_MAJOR          "time_major"
 
+#define QNN_OP_HADAMARD_TRANSFORM             "HadamardTransform"
+#define QNN_OP_HADAMARD_TRANSFORM_PARAM_SCALE "scale"
+
 #define QNN_OP_HARD_SWISH "HardSwish"
 
 #define QNN_OP_HEAT_MAP_MAX_KEY_POINT "HeatMapMaxKeyPoint"
@@ -430,6 +434,8 @@
 #define QNN_OP_IS_INF_PARAM_DETECT_NEGATIVE "detect_negative"
 #define QNN_OP_IS_INF_PARAM_DETECT_POSITIVE "detect_positive"
 
+#define QNN_OP_IS_NAN "IsNan"
+
 #define QNN_OP_L2_NORM               "L2Norm"
 #define QNN_OP_L2_NORM_PARAM_AXIS    "axis"
 #define QNN_OP_L2_NORM_PARAM_AXES    "axes"
@@ -443,6 +449,8 @@
 #define QNN_OP_LAYER_NORM               "LayerNorm"
 #define QNN_OP_LAYER_NORM_PARAM_EPSILON "epsilon"
 #define QNN_OP_LAYER_NORM_PARAM_AXES    "axes"
+
+#define QNN_OP_LOGIT "Logit"
 
 #define QNN_OP_LOG_SOFTMAX            "LogSoftmax"
 #define QNN_OP_LOG_SOFTMAX_PARAM_AXIS "axis"
@@ -561,6 +569,10 @@
 #define QNN_OP_PRELU "Prelu"
 
 #define QNN_OP_QUANTIZE "Quantize"
+
+#define QNN_OP_RANDOM_UNIFORM_LIKE            "RandomUniformLike"
+#define QNN_OP_RANDOM_UNIFORM_LIKE_PARAM_LOW  "low"
+#define QNN_OP_RANDOM_UNIFORM_LIKE_PARAM_HIGH "high"
 
 #define QNN_OP_REDUCE_MAX                 "ReduceMax"
 #define QNN_OP_REDUCE_MAX_PARAM_AXES      "axes"
@@ -681,6 +693,11 @@
 
 #define QNN_OP_SQUEEZE            "Squeeze"
 #define QNN_OP_SQUEEZE_PARAM_AXES "axes"
+
+#define QNN_OP_STFT                    "Stft"
+#define QNN_OP_STFT_PARAM_FRAME_STEP   "frame_step"
+#define QNN_OP_STFT_PARAM_FRAME_LENGTH "frame_length"
+#define QNN_OP_STFT_PARAM_ONESIDED     "onesided"
 
 #define QNN_OP_STRIDED_SLICE                     "StridedSlice"
 #define QNN_OP_STRIDED_SLICE_PARAM_RANGES        "ranges"

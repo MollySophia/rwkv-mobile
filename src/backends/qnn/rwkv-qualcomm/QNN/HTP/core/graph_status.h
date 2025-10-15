@@ -48,6 +48,8 @@ struct GraphStatus {
         ErrorHMXRelease = 32,
         ErrorTCMRelease = 33,
         ErrorWeightsCompressedBadFormat = 34, // Weights are DLBC compressed, but compression format is not supported
+        ErrorTCMReleaseReacquire = 35,
+        ErrorFatalCheckpoint = 36,
 
         ErrorFatalMcMetaData = 93,
         ErrorFatalApiRecVersion = 94,
@@ -61,6 +63,9 @@ struct GraphStatus {
         AbortSuccess = 102,
         ErrorBadDynamicOp = 103,
         ErrorNot2kAlignedVTCMReq = 104,
+        ErrorBadCDPatchContent = 105,
+        ErrorSegmentMemoryOverflow = 106,
+        ErrorBadAlloc = 107,
         ErrorFatal = -1,
     };
 #ifdef __cplusplus
