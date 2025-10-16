@@ -96,6 +96,81 @@ static size_t getQnnDatatypeSize(Qnn_DataType_t dataType) {
     }
 }
 
+int qnn_backend::parse_bsz_from_graph_name(const std::string &graphName) {
+    auto pos = graphName.find("bsz");
+    if (pos == std::string::npos) return 0;
+    pos += 3;
+    int val = 0;
+    while (pos < graphName.size() && isdigit(graphName[pos])) {
+        val = val * 10 + (graphName[pos] - '0');
+        pos++;
+    }
+    return val;
+}
+
+int qnn_backend::initialize_batch_decode_graphs(
+        uint32_t graphsCount,
+        GraphInfo_t **graphsInfo,
+        std::vector<std::unordered_map<std::string, void*>> &tensorNameToTensorPointer,
+        std::vector<std::unordered_map<std::string, size_t>> &tensorNameToSize,
+        Qnn_Tensor_t **inputTensorsArr,
+        Qnn_Tensor_t **outputTensorsArr,
+        const char *inTensorName,
+        int batchSize) {
+    for (int graph_id = 0; graph_id < (int)graphsCount; graph_id++) {
+        std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
+        auto graphInfo = (*graphsInfo)[graph_id];
+        LOGI("Batch%d Decode Graph %d : %s", batchSize, graph_id, graphInfo.graphName);
+
+        // output sizes
+        auto result = populate_tensor_name_to_size_map(graphInfo, tensorNameToSize[graph_id], false);
+        if (result != RWKV_SUCCESS) {
+            return result;
+        }
+
+        // output tensors
+        result = setup_output_tensors_for_graph(graph_id, graphsCount, graphInfo,
+                                               outputTensorsArr, tensorNameToTensorPointer[graph_id],
+                                               tensorNameToSize[graph_id], qnnContextHandles[graph_id],
+                                               vFirstTensor, hiddenStateTensor, false);
+        if (result != RWKV_SUCCESS) {
+            return result;
+        }
+
+        // input sizes
+        result = populate_tensor_name_to_size_map(graphInfo, tensorNameToSize[graph_id], true);
+        if (result != RWKV_SUCCESS) {
+            return result;
+        }
+
+        // shared inputs
+        populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
+
+        if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsArr[graph_id], tensorNameToTensorPointer[graph_id], graphInfo,
+                                        tensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
+            LOGE("Error in setting up Input Tensors for Batch%d Decode", batchSize);
+            return RWKV_ERROR_IO;
+        }
+
+        // deep embedding mapping
+        map_deep_embedding_tensors(graphInfo, graph_id, tensorNameToTensorPointer[graph_id], 
+                                   deepEmbeddingTensors, false);
+    }
+
+    // find input tensor name
+    if (tensorNameToTensorPointer.size() > 0) {
+        if (tensorNameToTensorPointer[0].find(inTensorName) != tensorNameToTensorPointer[0].end()) {
+            tokenInputTensorBatchDecode[batchSize] = (Qnn_Tensor_t*)tensorNameToTensorPointer[0][inTensorName];
+        } else {
+            std::string chunk1Name = std::string(inTensorName) + "_chunk1";
+            if (tensorNameToTensorPointer[0].find(chunk1Name) != tensorNameToTensorPointer[0].end()) {
+                tokenInputTensorBatchDecode[batchSize] = (Qnn_Tensor_t*)tensorNameToTensorPointer[0][chunk1Name];
+            }
+        }
+    }
+
+    return RWKV_SUCCESS;
+}
 qnn_backend_context::qnn_backend_context(std::string qnnBackendPath) : qnnBackendPath(qnnBackendPath) {
     if (qnnBackendPath.empty()) {
         throw std::invalid_argument("QNN backend path is empty");
@@ -689,12 +764,8 @@ int qnn_backend::load_model(std::string model_path) {
         qnnPrefillGraphsCount = 0;
         qnnEmbdGraphsCount = 0;
         qnnEmbdPrefillGraphsCount = 0;
-        qnnBatch2DecodeGraphsCount = 0;
-        qnnBatch4DecodeGraphsCount = 0;
-        qnnBatch6DecodeGraphsCount = 0;
-        qnnBatch8DecodeGraphsCount = 0;
-        qnnBatch10DecodeGraphsCount = 0;
-        qnnBatch12DecodeGraphsCount = 0;
+        qnnBatchDecodeGraphsCount.clear();
+        qnnBatchDecodeGraphsInfo.clear();
         for (int i = 0; i < n_chunks; i++) {
             for (int j = 0; j < graphCounts[i]; j++) {
                 auto graphName = std::string((*graphInfos[i])[j].graphName);
@@ -704,43 +775,25 @@ int qnn_backend::load_model(std::string model_path) {
                     qnnEmbdGraphsCount++;
                 } else if (graphName.find("prefill") != std::string::npos) {
                     qnnPrefillGraphsCount++;
-                } else if (graphName.find("bsz2") != std::string::npos) {
-                    if (i == 0) {
-                        supported_batch_sizes.push_back(2);
-                    }
-                    qnnBatch2DecodeGraphsCount++;
-                } else if (graphName.find("bsz4") != std::string::npos) {
-                    if (i == 0) {
-                        supported_batch_sizes.push_back(3);
-                        supported_batch_sizes.push_back(4);
-                    }
-                    qnnBatch4DecodeGraphsCount++;
-                } else if (graphName.find("bsz6") != std::string::npos) {
-                    if (i == 0) {
-                        supported_batch_sizes.push_back(5);
-                        supported_batch_sizes.push_back(6);
-                    }
-                    qnnBatch6DecodeGraphsCount++;
-                } else if (graphName.find("bsz8") != std::string::npos) {
-                    if (i == 0) {
-                        supported_batch_sizes.push_back(7);
-                        supported_batch_sizes.push_back(8);
-                    }
-                    qnnBatch8DecodeGraphsCount++;
-                } else if (graphName.find("bsz10") != std::string::npos) {
-                    if (i == 0) {
-                        supported_batch_sizes.push_back(9);
-                        supported_batch_sizes.push_back(10);
-                    }
-                    qnnBatch10DecodeGraphsCount++;
-                } else if (graphName.find("bsz12") != std::string::npos) {
-                    if (i == 0) {
-                        supported_batch_sizes.push_back(11);
-                        supported_batch_sizes.push_back(12);
-                    }
-                    qnnBatch12DecodeGraphsCount++;
                 } else {
-                    qnnDecodeGraphsCount++;
+                    int parsedBsz = parse_bsz_from_graph_name(graphName);
+                    if (parsedBsz > 0) {
+                        if (i == 0) {
+                            if (parsedBsz == 2) {
+                                supported_batch_sizes.push_back(2);
+                            } else {
+                                supported_batch_sizes.push_back(parsedBsz - 1);
+                                supported_batch_sizes.push_back(parsedBsz);
+                            }
+                        }
+                        if (parsedBsz >= 2) {
+                            qnnBatchDecodeGraphsCount[parsedBsz]++;
+                        } else {
+                            qnnDecodeGraphsCount++;
+                        }
+                    } else {
+                        qnnDecodeGraphsCount++;
+                    }
                 }
             }
         }
@@ -752,12 +805,7 @@ int qnn_backend::load_model(std::string model_path) {
         GraphInfo_t *graphInfoArrPrefill = nullptr;
         GraphInfo_t *graphInfoArrEmbd = nullptr;
         GraphInfo_t *graphInfoArrEmbdPrefill = nullptr;
-        GraphInfo_t *graphInfoArrBatch2Decode = nullptr;
-        GraphInfo_t *graphInfoArrBatch4Decode = nullptr;
-        GraphInfo_t *graphInfoArrBatch6Decode = nullptr;
-        GraphInfo_t *graphInfoArrBatch8Decode = nullptr;
-        GraphInfo_t *graphInfoArrBatch10Decode = nullptr;
-        GraphInfo_t *graphInfoArrBatch12Decode = nullptr;
+        std::unordered_map<int, GraphInfo_t*> graphInfoArrBatchDecode;
 
         if (qnnPrefillGraphsCount > 0) {
             qnnPrefillGraphsInfo = (GraphInfo_t **)calloc(qnnPrefillGraphsCount, sizeof(GraphInfo_t *));
@@ -774,47 +822,26 @@ int qnn_backend::load_model(std::string model_path) {
             graphInfoArrEmbdPrefill =
                 (GraphInfo_t *)calloc(qnnEmbdPrefillGraphsCount, sizeof(GraphInfo_t));
         }
-        if (qnnBatch2DecodeGraphsCount > 0) {
-            qnnBatch2DecodeGraphsInfo = (GraphInfo_t **)calloc(qnnBatch2DecodeGraphsCount, sizeof(GraphInfo_t *));
-            graphInfoArrBatch2Decode =
-                (GraphInfo_t *)calloc(qnnBatch2DecodeGraphsCount, sizeof(GraphInfo_t));
-        }
-        if (qnnBatch4DecodeGraphsCount > 0) {
-            qnnBatch4DecodeGraphsInfo = (GraphInfo_t **)calloc(qnnBatch4DecodeGraphsCount, sizeof(GraphInfo_t *));
-            graphInfoArrBatch4Decode =
-                (GraphInfo_t *)calloc(qnnBatch4DecodeGraphsCount, sizeof(GraphInfo_t));
-        }
-        if (qnnBatch6DecodeGraphsCount > 0) {
-            qnnBatch6DecodeGraphsInfo = (GraphInfo_t **)calloc(qnnBatch6DecodeGraphsCount, sizeof(GraphInfo_t *));
-            graphInfoArrBatch6Decode =
-                (GraphInfo_t *)calloc(qnnBatch6DecodeGraphsCount, sizeof(GraphInfo_t));
-        }
-        if (qnnBatch8DecodeGraphsCount > 0) {
-            qnnBatch8DecodeGraphsInfo = (GraphInfo_t **)calloc(qnnBatch8DecodeGraphsCount, sizeof(GraphInfo_t *));
-            graphInfoArrBatch8Decode =
-                (GraphInfo_t *)calloc(qnnBatch8DecodeGraphsCount, sizeof(GraphInfo_t));
-        }
-        if (qnnBatch10DecodeGraphsCount > 0) {
-            qnnBatch10DecodeGraphsInfo = (GraphInfo_t **)calloc(qnnBatch10DecodeGraphsCount, sizeof(GraphInfo_t *));
-            graphInfoArrBatch10Decode =
-                (GraphInfo_t *)calloc(qnnBatch10DecodeGraphsCount, sizeof(GraphInfo_t));
-        }
-        if (qnnBatch12DecodeGraphsCount > 0) {
-            qnnBatch12DecodeGraphsInfo = (GraphInfo_t **)calloc(qnnBatch12DecodeGraphsCount, sizeof(GraphInfo_t *));
-            graphInfoArrBatch12Decode =
-                (GraphInfo_t *)calloc(qnnBatch12DecodeGraphsCount, sizeof(GraphInfo_t));
+        for (auto& [batchSize, count] : qnnBatchDecodeGraphsCount) {
+            if (count > 0) {
+                qnnBatchDecodeGraphsInfo[batchSize] = (GraphInfo_t **)calloc(count, sizeof(GraphInfo_t *));
+                graphInfoArrBatchDecode[batchSize] = (GraphInfo_t *)calloc(count, sizeof(GraphInfo_t));
+            }
         }
 
-        if (nullptr == qnnDecodeGraphsInfo || nullptr == graphInfoArrDecode ||
+        bool allocationError = (nullptr == qnnDecodeGraphsInfo || nullptr == graphInfoArrDecode ||
             (qnnPrefillGraphsCount > 0 && (nullptr == qnnPrefillGraphsInfo || nullptr == graphInfoArrPrefill)) ||
             (qnnEmbdGraphsCount > 0 && (nullptr == qnnEmbdGraphsInfo || nullptr == graphInfoArrEmbd)) ||
-            (qnnEmbdPrefillGraphsCount > 0 && (nullptr == qnnEmbdPrefillGraphsInfo || nullptr == graphInfoArrEmbdPrefill)) ||
-            (qnnBatch2DecodeGraphsCount > 0 && (nullptr == qnnBatch2DecodeGraphsInfo || nullptr == graphInfoArrBatch2Decode)) ||
-            (qnnBatch4DecodeGraphsCount > 0 && (nullptr == qnnBatch4DecodeGraphsInfo || nullptr == graphInfoArrBatch4Decode)) ||
-            (qnnBatch6DecodeGraphsCount > 0 && (nullptr == qnnBatch6DecodeGraphsInfo || nullptr == graphInfoArrBatch6Decode)) ||
-            (qnnBatch8DecodeGraphsCount > 0 && (nullptr == qnnBatch8DecodeGraphsInfo || nullptr == graphInfoArrBatch8Decode)) ||
-            (qnnBatch10DecodeGraphsCount > 0 && (nullptr == qnnBatch10DecodeGraphsInfo || nullptr == graphInfoArrBatch10Decode)) ||
-            (qnnBatch12DecodeGraphsCount > 0 && (nullptr == qnnBatch12DecodeGraphsInfo || nullptr == graphInfoArrBatch12Decode))) {
+            (qnnEmbdPrefillGraphsCount > 0 && (nullptr == qnnEmbdPrefillGraphsInfo || nullptr == graphInfoArrEmbdPrefill)));
+
+        for (auto& [batchSize, count] : qnnBatchDecodeGraphsCount) {
+            if (count > 0 && (qnnBatchDecodeGraphsInfo[batchSize] == nullptr || graphInfoArrBatchDecode[batchSize] == nullptr)) {
+                allocationError = true;
+                break;
+            }
+        }
+
+        if (allocationError) {
             LOGE("Failed to allocate memory for *graphInfo");
             if (nullptr != qnnDecodeGraphsInfo) {
                 free(qnnDecodeGraphsInfo);
@@ -840,41 +867,14 @@ int qnn_backend::load_model(std::string model_path) {
             if (nullptr != graphInfoArrEmbdPrefill) {
                 free(graphInfoArrEmbdPrefill);
             }
-            if (nullptr != qnnBatch2DecodeGraphsInfo) {
-                free(qnnBatch2DecodeGraphsInfo);
-            }
-            if (nullptr != qnnBatch4DecodeGraphsInfo) {
-                free(qnnBatch4DecodeGraphsInfo);
-            }
-            if (nullptr != qnnBatch6DecodeGraphsInfo) {
-                free(qnnBatch6DecodeGraphsInfo);
-            }
-            if (nullptr != qnnBatch8DecodeGraphsInfo) {
-                free(qnnBatch8DecodeGraphsInfo);
-            }
-            if (nullptr != qnnBatch10DecodeGraphsInfo) {
-                free(qnnBatch10DecodeGraphsInfo);
-            }
-            if (nullptr != qnnBatch12DecodeGraphsInfo) {
-                free(qnnBatch12DecodeGraphsInfo);
-            }
-            if (nullptr != graphInfoArrBatch2Decode) {
-                free(graphInfoArrBatch2Decode);
-            }
-            if (nullptr != graphInfoArrBatch4Decode) {
-                free(graphInfoArrBatch4Decode);
-            }
-            if (nullptr != graphInfoArrBatch6Decode) {
-                free(graphInfoArrBatch6Decode);
-            }
-            if (nullptr != graphInfoArrBatch8Decode) {
-                free(graphInfoArrBatch8Decode);
-            }
-            if (nullptr != graphInfoArrBatch10Decode) {
-                free(graphInfoArrBatch10Decode);
-            }
-            if (nullptr != graphInfoArrBatch12Decode) {
-                free(graphInfoArrBatch12Decode);
+
+            for (auto& [batchSize, count] : qnnBatchDecodeGraphsCount) {
+                if (qnnBatchDecodeGraphsInfo[batchSize] != nullptr) {
+                    free(qnnBatchDecodeGraphsInfo[batchSize]);
+                }
+                if (graphInfoArrBatchDecode[batchSize] != nullptr) {
+                    free(graphInfoArrBatchDecode[batchSize]);
+                }
             }
             returnStatus = RWKV_ERROR_MODEL;
         }
@@ -887,9 +887,8 @@ int qnn_backend::load_model(std::string model_path) {
         LOGI("%s", debug_message.c_str());
 
         if (RWKV_SUCCESS == returnStatus) {
-            // TODO: better way to do this
             int prefill_gidx = 0, decode_gidx = 0, embd_gidx = 0, embd_prefill_gidx = 0;
-            int batch2_decode_gidx = 0, batch4_decode_gidx = 0, batch6_decode_gidx = 0, batch8_decode_gidx = 0, batch10_decode_gidx = 0, batch12_decode_gidx = 0;
+            std::unordered_map<int, int> batch_decode_gidx;
             for (int i = 0; i < n_chunks; i++) {
                 for (int j = 0; j < graphCounts[i]; j++) {
                     auto graphName = std::string((*graphInfos[i])[j].graphName);
@@ -921,69 +920,32 @@ int qnn_backend::load_model(std::string model_path) {
                         qnnPrefillGraphsInfo[prefill_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
                         qnnPrefillGraphsInfo[prefill_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
                         prefill_gidx++;
-                    } else if (graphName.find("bsz2") != std::string::npos) {
-                        qnnBatch2DecodeGraphsInfo[batch2_decode_gidx] = graphInfoArrBatch2Decode + batch2_decode_gidx;
-                        qnnBatch2DecodeGraphsInfo[batch2_decode_gidx]->graph = (*graphInfos[i])[j].graph;
-                        qnnBatch2DecodeGraphsInfo[batch2_decode_gidx]->graphName = strdup((*graphInfos[i])[j].graphName);
-                        qnnBatch2DecodeGraphsInfo[batch2_decode_gidx]->inputTensors = (*graphInfos[i])[j].inputTensors;
-                        qnnBatch2DecodeGraphsInfo[batch2_decode_gidx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
-                        qnnBatch2DecodeGraphsInfo[batch2_decode_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
-                        qnnBatch2DecodeGraphsInfo[batch2_decode_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
-                        batch2_decode_gidx++;
-                    } else if (graphName.find("bsz4") != std::string::npos) {
-                        qnnBatch4DecodeGraphsInfo[batch4_decode_gidx] = graphInfoArrBatch4Decode + batch4_decode_gidx;
-                        qnnBatch4DecodeGraphsInfo[batch4_decode_gidx]->graph = (*graphInfos[i])[j].graph;
-                        qnnBatch4DecodeGraphsInfo[batch4_decode_gidx]->graphName = strdup((*graphInfos[i])[j].graphName);
-                        qnnBatch4DecodeGraphsInfo[batch4_decode_gidx]->inputTensors = (*graphInfos[i])[j].inputTensors;
-                        qnnBatch4DecodeGraphsInfo[batch4_decode_gidx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
-                        qnnBatch4DecodeGraphsInfo[batch4_decode_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
-                        qnnBatch4DecodeGraphsInfo[batch4_decode_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
-                        batch4_decode_gidx++;
-                    } else if (graphName.find("bsz6") != std::string::npos) {
-                        qnnBatch6DecodeGraphsInfo[batch6_decode_gidx] = graphInfoArrBatch6Decode + batch6_decode_gidx;
-                        qnnBatch6DecodeGraphsInfo[batch6_decode_gidx]->graph = (*graphInfos[i])[j].graph;
-                        qnnBatch6DecodeGraphsInfo[batch6_decode_gidx]->graphName = strdup((*graphInfos[i])[j].graphName);
-                        qnnBatch6DecodeGraphsInfo[batch6_decode_gidx]->inputTensors = (*graphInfos[i])[j].inputTensors;
-                        qnnBatch6DecodeGraphsInfo[batch6_decode_gidx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
-                        qnnBatch6DecodeGraphsInfo[batch6_decode_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
-                        qnnBatch6DecodeGraphsInfo[batch6_decode_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
-                        batch6_decode_gidx++;
-                    } else if (graphName.find("bsz8") != std::string::npos) {
-                        qnnBatch8DecodeGraphsInfo[batch8_decode_gidx] = graphInfoArrBatch8Decode + batch8_decode_gidx;
-                        qnnBatch8DecodeGraphsInfo[batch8_decode_gidx]->graph = (*graphInfos[i])[j].graph;
-                        qnnBatch8DecodeGraphsInfo[batch8_decode_gidx]->graphName = strdup((*graphInfos[i])[j].graphName);
-                        qnnBatch8DecodeGraphsInfo[batch8_decode_gidx]->inputTensors = (*graphInfos[i])[j].inputTensors;
-                        qnnBatch8DecodeGraphsInfo[batch8_decode_gidx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
-                        qnnBatch8DecodeGraphsInfo[batch8_decode_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
-                        qnnBatch8DecodeGraphsInfo[batch8_decode_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
-                        batch8_decode_gidx++;
-                    } else if (graphName.find("bsz10") != std::string::npos) {
-                        qnnBatch10DecodeGraphsInfo[batch10_decode_gidx] = graphInfoArrBatch10Decode + batch10_decode_gidx;
-                        qnnBatch10DecodeGraphsInfo[batch10_decode_gidx]->graph = (*graphInfos[i])[j].graph;
-                        qnnBatch10DecodeGraphsInfo[batch10_decode_gidx]->graphName = strdup((*graphInfos[i])[j].graphName);
-                        qnnBatch10DecodeGraphsInfo[batch10_decode_gidx]->inputTensors = (*graphInfos[i])[j].inputTensors;
-                        qnnBatch10DecodeGraphsInfo[batch10_decode_gidx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
-                        qnnBatch10DecodeGraphsInfo[batch10_decode_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
-                        qnnBatch10DecodeGraphsInfo[batch10_decode_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
-                        batch10_decode_gidx++;
-                    } else if (graphName.find("bsz12") != std::string::npos) {
-                        qnnBatch12DecodeGraphsInfo[batch12_decode_gidx] = graphInfoArrBatch12Decode + batch12_decode_gidx;
-                        qnnBatch12DecodeGraphsInfo[batch12_decode_gidx]->graph = (*graphInfos[i])[j].graph;
-                        qnnBatch12DecodeGraphsInfo[batch12_decode_gidx]->graphName = strdup((*graphInfos[i])[j].graphName);
-                        qnnBatch12DecodeGraphsInfo[batch12_decode_gidx]->inputTensors = (*graphInfos[i])[j].inputTensors;
-                        qnnBatch12DecodeGraphsInfo[batch12_decode_gidx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
-                        qnnBatch12DecodeGraphsInfo[batch12_decode_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
-                        qnnBatch12DecodeGraphsInfo[batch12_decode_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
-                        batch12_decode_gidx++;
                     } else {
-                        qnnDecodeGraphsInfo[decode_gidx] = graphInfoArrDecode + decode_gidx;
-                        qnnDecodeGraphsInfo[decode_gidx]->graph = (*graphInfos[i])[j].graph;
-                        qnnDecodeGraphsInfo[decode_gidx]->graphName = strdup((*graphInfos[i])[j].graphName);
-                        qnnDecodeGraphsInfo[decode_gidx]->inputTensors = (*graphInfos[i])[j].inputTensors;
-                        qnnDecodeGraphsInfo[decode_gidx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
-                        qnnDecodeGraphsInfo[decode_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
-                        qnnDecodeGraphsInfo[decode_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
-                        decode_gidx++;
+                        int parsedBsz = parse_bsz_from_graph_name(graphName);
+                        if (parsedBsz >= 2) {
+                            if (batch_decode_gidx.find(parsedBsz) == batch_decode_gidx.end()) {
+                                batch_decode_gidx[parsedBsz] = 0;
+                            }
+                            
+                            int current_idx = batch_decode_gidx[parsedBsz];
+                            qnnBatchDecodeGraphsInfo[parsedBsz][current_idx] = graphInfoArrBatchDecode[parsedBsz] + current_idx;
+                            qnnBatchDecodeGraphsInfo[parsedBsz][current_idx]->graph = (*graphInfos[i])[j].graph;
+                            qnnBatchDecodeGraphsInfo[parsedBsz][current_idx]->graphName = strdup((*graphInfos[i])[j].graphName);
+                            qnnBatchDecodeGraphsInfo[parsedBsz][current_idx]->inputTensors = (*graphInfos[i])[j].inputTensors;
+                            qnnBatchDecodeGraphsInfo[parsedBsz][current_idx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
+                            qnnBatchDecodeGraphsInfo[parsedBsz][current_idx]->outputTensors = (*graphInfos[i])[j].outputTensors;
+                            qnnBatchDecodeGraphsInfo[parsedBsz][current_idx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
+                            batch_decode_gidx[parsedBsz]++;
+                        } else {
+                            qnnDecodeGraphsInfo[decode_gidx] = graphInfoArrDecode + decode_gidx;
+                            qnnDecodeGraphsInfo[decode_gidx]->graph = (*graphInfos[i])[j].graph;
+                            qnnDecodeGraphsInfo[decode_gidx]->graphName = strdup((*graphInfos[i])[j].graphName);
+                            qnnDecodeGraphsInfo[decode_gidx]->inputTensors = (*graphInfos[i])[j].inputTensors;
+                            qnnDecodeGraphsInfo[decode_gidx]->numInputTensors = (*graphInfos[i])[j].numInputTensors;
+                            qnnDecodeGraphsInfo[decode_gidx]->outputTensors = (*graphInfos[i])[j].outputTensors;
+                            qnnDecodeGraphsInfo[decode_gidx]->numOutputTensors = (*graphInfos[i])[j].numOutputTensors;
+                            decode_gidx++;
+                        }
                     }
                 }
             }
@@ -1428,322 +1390,29 @@ int qnn_backend::qnn_initialize_tensors() {
             embdPrefillGraphsTensorNameToTensorPointer.resize(qnnEmbdPrefillGraphsCount);
             embdPrefillGraphsTensorNameToSize.resize(qnnEmbdPrefillGraphsCount);
         }
-        if (qnnBatch2DecodeGraphsCount > 0) {
-            batch2DecodeGraphsTensorNameToTensorPointer.resize(qnnBatch2DecodeGraphsCount);
-            batch2DecodeGraphsTensorNameToSize.resize(qnnBatch2DecodeGraphsCount);
-        }
-        if (qnnBatch4DecodeGraphsCount > 0) {
-            batch4DecodeGraphsTensorNameToTensorPointer.resize(qnnBatch4DecodeGraphsCount);
-            batch4DecodeGraphsTensorNameToSize.resize(qnnBatch4DecodeGraphsCount);
-        }
-        if (qnnBatch6DecodeGraphsCount > 0) {
-            batch6DecodeGraphsTensorNameToTensorPointer.resize(qnnBatch6DecodeGraphsCount);
-            batch6DecodeGraphsTensorNameToSize.resize(qnnBatch6DecodeGraphsCount);
-        }
-        if (qnnBatch8DecodeGraphsCount > 0) {
-            batch8DecodeGraphsTensorNameToTensorPointer.resize(qnnBatch8DecodeGraphsCount);
-            batch8DecodeGraphsTensorNameToSize.resize(qnnBatch8DecodeGraphsCount);
-        }
-        if (qnnBatch10DecodeGraphsCount > 0) {
-            batch10DecodeGraphsTensorNameToTensorPointer.resize(qnnBatch10DecodeGraphsCount);
-            batch10DecodeGraphsTensorNameToSize.resize(qnnBatch10DecodeGraphsCount);
-        }
-        if (qnnBatch12DecodeGraphsCount > 0) {
-            batch12DecodeGraphsTensorNameToTensorPointer.resize(qnnBatch12DecodeGraphsCount);
-            batch12DecodeGraphsTensorNameToSize.resize(qnnBatch12DecodeGraphsCount);
-        }
-
-        // Initialize Batch12 Decode Graphs
-        if (qnnBatch12DecodeGraphsCount > 0) {
-            for (int graph_id = 0; graph_id < qnnBatch12DecodeGraphsCount; graph_id++) {
-                std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
-                auto graphInfo = (*qnnBatch12DecodeGraphsInfo)[graph_id];
-                LOGI("Batch12 Decode Graph %d : %s", graph_id, graphInfo.graphName);
-
-                // Populate output tensor name to size map
-                auto result = populate_tensor_name_to_size_map(graphInfo, batch12DecodeGraphsTensorNameToSize[graph_id], false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Setup output tensors using helper function
-                result = setup_output_tensors_for_graph(graph_id, qnnBatch12DecodeGraphsCount, graphInfo,
-                                                       outputTensorsBatch12Decode, batch12DecodeGraphsTensorNameToTensorPointer[graph_id],
-                                                       batch12DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id],
-                                                       vFirstTensor, hiddenStateTensor, false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input tensor name to size map
-                result = populate_tensor_name_to_size_map(graphInfo, batch12DecodeGraphsTensorNameToSize[graph_id], true);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input shared tensor map using helper function
-                populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
-
-                if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsBatch12Decode[graph_id], batch12DecodeGraphsTensorNameToTensorPointer[graph_id], graphInfo,
-                                            batch12DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
-                    LOGE("Error in setting up Input Tensors for Batch12 Decode");
-                    return RWKV_ERROR_IO;
-                }
-
-                // Map deep embedding tensors using helper function
-                map_deep_embedding_tensors(graphInfo, graph_id, batch12DecodeGraphsTensorNameToTensorPointer[graph_id], 
-                                         deepEmbeddingTensors, false);
-            }
-            // Find input tensor for batch8 decode
-            if (batch12DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz12") != batch12DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[12] = (Qnn_Tensor_t*)batch12DecodeGraphsTensorNameToTensorPointer[0]["in_bsz12"];
-            } else if (batch12DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz12_chunk1") != batch12DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[12] = (Qnn_Tensor_t*)batch12DecodeGraphsTensorNameToTensorPointer[0]["in_bsz12_chunk1"];
+        for (auto& [batchSize, count] : qnnBatchDecodeGraphsCount) {
+            if (count > 0) {
+                batchDecodeGraphsTensorNameToTensorPointer[batchSize].resize(count);
+                batchDecodeGraphsTensorNameToSize[batchSize].resize(count);
+                // Allocate tensor arrays
+                inputTensorsBatchDecode[batchSize] = new Qnn_Tensor_t*[count];
+                outputTensorsBatchDecode[batchSize] = new Qnn_Tensor_t*[count];
             }
         }
 
-        // Initialize Batch10 Decode Graphs
-        if (qnnBatch10DecodeGraphsCount > 0) {
-            for (int graph_id = 0; graph_id < qnnBatch10DecodeGraphsCount; graph_id++) {
-                std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
-                auto graphInfo = (*qnnBatch10DecodeGraphsInfo)[graph_id];
-                LOGI("Batch10 Decode Graph %d : %s", graph_id, graphInfo.graphName);
-
-                // Populate output tensor name to size map
-                auto result = populate_tensor_name_to_size_map(graphInfo, batch10DecodeGraphsTensorNameToSize[graph_id], false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Setup output tensors using helper function
-                result = setup_output_tensors_for_graph(graph_id, qnnBatch10DecodeGraphsCount, graphInfo,
-                                                       outputTensorsBatch10Decode, batch10DecodeGraphsTensorNameToTensorPointer[graph_id],
-                                                       batch10DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id],
-                                                       vFirstTensor, hiddenStateTensor, false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input tensor name to size map
-                result = populate_tensor_name_to_size_map(graphInfo, batch10DecodeGraphsTensorNameToSize[graph_id], true);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input shared tensor map using helper function
-                populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
-
-                if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsBatch10Decode[graph_id], batch10DecodeGraphsTensorNameToTensorPointer[graph_id], graphInfo,
-                                            batch10DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
-                    LOGE("Error in setting up Input Tensors for Batch10 Decode");
-                    return RWKV_ERROR_IO;
-                }
-
-                // Map deep embedding tensors using helper function
-                map_deep_embedding_tensors(graphInfo, graph_id, batch10DecodeGraphsTensorNameToTensorPointer[graph_id], 
-                                         deepEmbeddingTensors, false);
-            }
-            // Find input tensor for batch10 decode
-            if (batch10DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz10") != batch10DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[10] = (Qnn_Tensor_t*)batch10DecodeGraphsTensorNameToTensorPointer[0]["in_bsz10"];
-            } else if (batch10DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz10_chunk1") != batch10DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[10] = (Qnn_Tensor_t*)batch10DecodeGraphsTensorNameToTensorPointer[0]["in_bsz10_chunk1"];
-            }
-        }
-
-        // Initialize Batch8 Decode Graphs
-        if (qnnBatch8DecodeGraphsCount > 0) {
-            for (int graph_id = 0; graph_id < qnnBatch8DecodeGraphsCount; graph_id++) {
-                std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
-                auto graphInfo = (*qnnBatch8DecodeGraphsInfo)[graph_id];
-                LOGI("Batch8 Decode Graph %d : %s", graph_id, graphInfo.graphName);
-
-                // Populate output tensor name to size map
-                auto result = populate_tensor_name_to_size_map(graphInfo, batch8DecodeGraphsTensorNameToSize[graph_id], false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Setup output tensors using helper function
-                result = setup_output_tensors_for_graph(graph_id, qnnBatch8DecodeGraphsCount, graphInfo,
-                                                       outputTensorsBatch8Decode, batch8DecodeGraphsTensorNameToTensorPointer[graph_id],
-                                                       batch8DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id],
-                                                       vFirstTensor, hiddenStateTensor, false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input tensor name to size map
-                result = populate_tensor_name_to_size_map(graphInfo, batch8DecodeGraphsTensorNameToSize[graph_id], true);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input shared tensor map using helper function
-                populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
-
-                if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsBatch8Decode[graph_id], batch8DecodeGraphsTensorNameToTensorPointer[graph_id], graphInfo,
-                                            batch8DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
-                    LOGE("Error in setting up Input Tensors for Batch8 Decode");
-                    return RWKV_ERROR_IO;
-                }
-
-                // Map deep embedding tensors using helper function
-                map_deep_embedding_tensors(graphInfo, graph_id, batch8DecodeGraphsTensorNameToTensorPointer[graph_id], 
-                                         deepEmbeddingTensors, false);
-            }
-            // Find input tensor for batch8 decode
-            if (batch8DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz8") != batch8DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[8] = (Qnn_Tensor_t*)batch8DecodeGraphsTensorNameToTensorPointer[0]["in_bsz8"];
-            } else if (batch8DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz8_chunk1") != batch8DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[8] = (Qnn_Tensor_t*)batch8DecodeGraphsTensorNameToTensorPointer[0]["in_bsz8_chunk1"];
-            }
-        }
-
-        // Initialize Batch6 Decode Graphs
-        if (qnnBatch6DecodeGraphsCount > 0) {
-            for (int graph_id = 0; graph_id < qnnBatch6DecodeGraphsCount; graph_id++) {
-                std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
-                auto graphInfo = (*qnnBatch6DecodeGraphsInfo)[graph_id];
-                LOGI("Batch6 Decode Graph %d : %s", graph_id, graphInfo.graphName);
-
-                // Populate output tensor name to size map
-                auto result = populate_tensor_name_to_size_map(graphInfo, batch6DecodeGraphsTensorNameToSize[graph_id], false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Setup output tensors using helper function
-                result = setup_output_tensors_for_graph(graph_id, qnnBatch6DecodeGraphsCount, graphInfo,
-                                                       outputTensorsBatch6Decode, batch6DecodeGraphsTensorNameToTensorPointer[graph_id],
-                                                       batch6DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id],
-                                                       vFirstTensor, hiddenStateTensor, false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input tensor name to size map
-                result = populate_tensor_name_to_size_map(graphInfo, batch6DecodeGraphsTensorNameToSize[graph_id], true);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input shared tensor map using helper function
-                populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
-
-                if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsBatch6Decode[graph_id], batch6DecodeGraphsTensorNameToTensorPointer[graph_id], graphInfo,
-                                            batch6DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
-                    LOGE("Error in setting up Input Tensors for Batch6 Decode");
-                        return RWKV_ERROR_IO;
-                    }
-
-                // Map deep embedding tensors using helper function
-                map_deep_embedding_tensors(graphInfo, graph_id, batch6DecodeGraphsTensorNameToTensorPointer[graph_id], 
-                                         deepEmbeddingTensors, false);
-            }
-            // Find input tensor for batch6 decode
-            if (batch6DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz6") != batch6DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[6] = (Qnn_Tensor_t*)batch6DecodeGraphsTensorNameToTensorPointer[0]["in_bsz6"];
-            } else if (batch6DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz6_chunk1") != batch6DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[6] = (Qnn_Tensor_t*)batch6DecodeGraphsTensorNameToTensorPointer[0]["in_bsz6_chunk1"];
-            }
-        }
-
-        // Initialize Batch4 Decode Graphs
-        if (qnnBatch4DecodeGraphsCount > 0) {
-            for (int graph_id = 0; graph_id < qnnBatch4DecodeGraphsCount; graph_id++) {
-                std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
-                auto graphInfo = (*qnnBatch4DecodeGraphsInfo)[graph_id];
-                LOGI("Batch4 Decode Graph %d : %s", graph_id, graphInfo.graphName);
-
-                // Populate output tensor name to size map
-                auto result = populate_tensor_name_to_size_map(graphInfo, batch4DecodeGraphsTensorNameToSize[graph_id], false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Setup output tensors using helper function
-                result = setup_output_tensors_for_graph(graph_id, qnnBatch4DecodeGraphsCount, graphInfo,
-                                                       outputTensorsBatch4Decode, batch4DecodeGraphsTensorNameToTensorPointer[graph_id],
-                                                       batch4DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id],
-                                                       vFirstTensor, hiddenStateTensor, false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input tensor name to size map
-                result = populate_tensor_name_to_size_map(graphInfo, batch4DecodeGraphsTensorNameToSize[graph_id], true);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input shared tensor map using helper function
-                populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
-
-                if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsBatch4Decode[graph_id], batch4DecodeGraphsTensorNameToTensorPointer[graph_id], graphInfo,
-                                            batch4DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
-                    LOGE("Error in setting up Input Tensors for Batch4 Decode");
-                        return RWKV_ERROR_IO;
-                    }
-
-                // Map deep embedding tensors using helper function
-                map_deep_embedding_tensors(graphInfo, graph_id, batch4DecodeGraphsTensorNameToTensorPointer[graph_id], 
-                                         deepEmbeddingTensors, false);
-            }
-            // Find input tensor for batch4 decode
-            if (batch4DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz4") != batch4DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[4] = (Qnn_Tensor_t*)batch4DecodeGraphsTensorNameToTensorPointer[0]["in_bsz4"];
-            } else if (batch4DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz4_chunk1") != batch4DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[4] = (Qnn_Tensor_t*)batch4DecodeGraphsTensorNameToTensorPointer[0]["in_bsz4_chunk1"];
-            }
-        }
-
-        // Initialize Batch2 Decode Graphs
-        if (qnnBatch2DecodeGraphsCount > 0) {
-            for (int graph_id = 0; graph_id < qnnBatch2DecodeGraphsCount; graph_id++) {
-                std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
-                auto graphInfo = (*qnnBatch2DecodeGraphsInfo)[graph_id];
-                LOGI("Batch2 Decode Graph %d : %s", graph_id, graphInfo.graphName);
-
-                // Populate output tensor name to size map
-                auto result = populate_tensor_name_to_size_map(graphInfo, batch2DecodeGraphsTensorNameToSize[graph_id], false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Setup output tensors using helper function
-                result = setup_output_tensors_for_graph(graph_id, qnnBatch2DecodeGraphsCount, graphInfo,
-                                                       outputTensorsBatch2Decode, batch2DecodeGraphsTensorNameToTensorPointer[graph_id],
-                                                       batch2DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id],
-                                                       vFirstTensor, hiddenStateTensor, false);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input tensor name to size map
-                result = populate_tensor_name_to_size_map(graphInfo, batch2DecodeGraphsTensorNameToSize[graph_id], true);
-                if (result != RWKV_SUCCESS) {
-                    return result;
-                }
-
-                // Populate input shared tensor map using helper function
-                populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
-
-                if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsBatch2Decode[graph_id], batch2DecodeGraphsTensorNameToTensorPointer[graph_id], graphInfo,
-                                            batch2DecodeGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
-                    LOGE("Error in setting up Input Tensors for Batch2 Decode");
-                    return RWKV_ERROR_IO;
-                }
-
-                // Map deep embedding tensors using helper function
-                map_deep_embedding_tensors(graphInfo, graph_id, batch2DecodeGraphsTensorNameToTensorPointer[graph_id], 
-                                         deepEmbeddingTensors, false);
-            }
-            // Find input tensor for batch2 decode
-            if (batch2DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz2") != batch2DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[2] = (Qnn_Tensor_t*)batch2DecodeGraphsTensorNameToTensorPointer[0]["in_bsz2"];
-            } else if (batch2DecodeGraphsTensorNameToTensorPointer[0].find("in_bsz2_chunk1") != batch2DecodeGraphsTensorNameToTensorPointer[0].end()) {
-                tokenInputTensorBatchDecode[2] = (Qnn_Tensor_t*)batch2DecodeGraphsTensorNameToTensorPointer[0]["in_bsz2_chunk1"];
+        for (auto& [batchSize, count] : qnnBatchDecodeGraphsCount) {
+            if (count > 0) {
+                std::string inTensorName = "in_bsz" + std::to_string(batchSize);
+                int initStatus = initialize_batch_decode_graphs(
+                    count,
+                    qnnBatchDecodeGraphsInfo[batchSize],
+                    batchDecodeGraphsTensorNameToTensorPointer[batchSize],
+                    batchDecodeGraphsTensorNameToSize[batchSize],
+                    inputTensorsBatchDecode[batchSize],
+                    outputTensorsBatchDecode[batchSize],
+                    inTensorName.c_str(),
+                    batchSize);
+                if (initStatus != RWKV_SUCCESS) return initStatus;
             }
         }
 
@@ -2125,22 +1794,17 @@ int qnn_backend::execute_emb_prefill_graph() {
 }
 
 int qnn_backend::execute_batch_decode_graph(int bsz) {
-    if (bsz <= 2) {
-        return execute_graph(qnnBatch2DecodeGraphsInfo, qnnBatch2DecodeGraphsCount, inputTensorsBatch2Decode, outputTensorsBatch2Decode);
-    } else if (bsz <= 4) {
-        return execute_graph(qnnBatch4DecodeGraphsInfo, qnnBatch4DecodeGraphsCount, inputTensorsBatch4Decode, outputTensorsBatch4Decode);
-    } else if (bsz <= 6) {
-        return execute_graph(qnnBatch6DecodeGraphsInfo, qnnBatch6DecodeGraphsCount, inputTensorsBatch6Decode, outputTensorsBatch6Decode);
-    } else if (bsz <= 8) {
-        return execute_graph(qnnBatch8DecodeGraphsInfo, qnnBatch8DecodeGraphsCount, inputTensorsBatch8Decode, outputTensorsBatch8Decode);
-    } else if (bsz <= 10) {
-        return execute_graph(qnnBatch10DecodeGraphsInfo, qnnBatch10DecodeGraphsCount, inputTensorsBatch10Decode, outputTensorsBatch10Decode);
-    } else if (bsz <= 12) {
-        return execute_graph(qnnBatch12DecodeGraphsInfo, qnnBatch12DecodeGraphsCount, inputTensorsBatch12Decode, outputTensorsBatch12Decode);
-    } else {
-        LOGE("QNN: unsupported batch size: %d", bsz);
+    int needed_bsz = (bsz + 1) & ~1;
+    if (qnnBatchDecodeGraphsCount.find(needed_bsz) == qnnBatchDecodeGraphsCount.end() ||
+        qnnBatchDecodeGraphsCount[needed_bsz] == 0) {
+        LOGE("QNN: no graphs available for batch size: %d", needed_bsz);
         return RWKV_ERROR_EVAL;
     }
+
+    return execute_graph(qnnBatchDecodeGraphsInfo[needed_bsz], 
+                        qnnBatchDecodeGraphsCount[needed_bsz], 
+                        inputTensorsBatchDecode[needed_bsz], 
+                        outputTensorsBatchDecode[needed_bsz]);
 }
 
 int qnn_backend::post_graph_execute(float *& logits) {
@@ -2783,79 +2447,7 @@ int qnn_backend::release_model() {
         qnnEmbdGraphsInfo = nullptr;
     }
 
-    if (qnnBatch2DecodeGraphsCount > 0) {
-        for (int i = 0; i < qnnBatch2DecodeGraphsCount; i++) {
-            auto graphInfo     = (*qnnBatch2DecodeGraphsInfo)[i];
-            qnnIOTensorUtils->tearDownTensors(inputTensorsBatch2Decode[i], graphInfo.numInputTensors);
-            qnnIOTensorUtils->tearDownTensors(outputTensorsBatch2Decode[i], graphInfo.numOutputTensors);
-            inputTensorsBatch2Decode[i]  = nullptr;
-            outputTensorsBatch2Decode[i] = nullptr;
-        }
-
-        freeGraphsInfo(&qnnBatch2DecodeGraphsInfo, qnnBatch2DecodeGraphsCount);
-        qnnBatch2DecodeGraphsInfo = nullptr;
-    }
-
-    if (qnnBatch4DecodeGraphsCount > 0) {
-        for (int i = 0; i < qnnBatch4DecodeGraphsCount; i++) {
-            auto graphInfo     = (*qnnBatch4DecodeGraphsInfo)[i];
-            qnnIOTensorUtils->tearDownTensors(inputTensorsBatch4Decode[i], graphInfo.numInputTensors);
-            qnnIOTensorUtils->tearDownTensors(outputTensorsBatch4Decode[i], graphInfo.numOutputTensors);
-            inputTensorsBatch4Decode[i]  = nullptr;
-            outputTensorsBatch4Decode[i] = nullptr;
-        }
-
-        freeGraphsInfo(&qnnBatch4DecodeGraphsInfo, qnnBatch4DecodeGraphsCount);
-        qnnBatch4DecodeGraphsInfo = nullptr;
-    }
-    if (qnnBatch6DecodeGraphsCount > 0) {
-        for (int i = 0; i < qnnBatch6DecodeGraphsCount; i++) {
-            auto graphInfo     = (*qnnBatch6DecodeGraphsInfo)[i];
-            qnnIOTensorUtils->tearDownTensors(inputTensorsBatch6Decode[i], graphInfo.numInputTensors);
-            qnnIOTensorUtils->tearDownTensors(outputTensorsBatch6Decode[i], graphInfo.numOutputTensors);
-            inputTensorsBatch6Decode[i]  = nullptr;
-            outputTensorsBatch6Decode[i] = nullptr;
-        }
-
-        freeGraphsInfo(&qnnBatch6DecodeGraphsInfo, qnnBatch6DecodeGraphsCount);
-        qnnBatch6DecodeGraphsInfo = nullptr;
-    }
-    if (qnnBatch8DecodeGraphsCount > 0) {
-        for (int i = 0; i < qnnBatch8DecodeGraphsCount; i++) {
-            auto graphInfo     = (*qnnBatch8DecodeGraphsInfo)[i];
-            qnnIOTensorUtils->tearDownTensors(inputTensorsBatch8Decode[i], graphInfo.numInputTensors);
-            qnnIOTensorUtils->tearDownTensors(outputTensorsBatch8Decode[i], graphInfo.numOutputTensors);
-            inputTensorsBatch8Decode[i]  = nullptr;
-            outputTensorsBatch8Decode[i] = nullptr;
-        }
-
-        freeGraphsInfo(&qnnBatch8DecodeGraphsInfo, qnnBatch8DecodeGraphsCount);
-        qnnBatch8DecodeGraphsInfo = nullptr;
-    }
-    if (qnnBatch10DecodeGraphsCount > 0) {
-        for (int i = 0; i < qnnBatch10DecodeGraphsCount; i++) {
-            auto graphInfo     = (*qnnBatch10DecodeGraphsInfo)[i];
-            qnnIOTensorUtils->tearDownTensors(inputTensorsBatch10Decode[i], graphInfo.numInputTensors);
-            qnnIOTensorUtils->tearDownTensors(outputTensorsBatch10Decode[i], graphInfo.numOutputTensors);
-            inputTensorsBatch10Decode[i]  = nullptr;
-            outputTensorsBatch10Decode[i] = nullptr;
-        }
-
-        freeGraphsInfo(&qnnBatch10DecodeGraphsInfo, qnnBatch10DecodeGraphsCount);
-        qnnBatch10DecodeGraphsInfo = nullptr;
-    }
-    if (qnnBatch12DecodeGraphsCount > 0) {
-        for (int i = 0; i < qnnBatch12DecodeGraphsCount; i++) {
-            auto graphInfo     = (*qnnBatch12DecodeGraphsInfo)[i];
-            qnnIOTensorUtils->tearDownTensors(inputTensorsBatch12Decode[i], graphInfo.numInputTensors);
-            qnnIOTensorUtils->tearDownTensors(outputTensorsBatch12Decode[i], graphInfo.numOutputTensors);
-            inputTensorsBatch12Decode[i]  = nullptr;
-            outputTensorsBatch12Decode[i] = nullptr;
-        }
-
-        freeGraphsInfo(&qnnBatch12DecodeGraphsInfo, qnnBatch12DecodeGraphsCount);
-        qnnBatch12DecodeGraphsInfo = nullptr;
-    }
+    cleanup_batch_graphs();
 
     for (int i = 0; i < qnnContextHandles.size(); i++) {
         if (QNN_CONTEXT_NO_ERROR !=
@@ -2880,6 +2472,29 @@ int qnn_backend::release_model() {
     deepEmbeddingPrefillTensors.clear();
     stateTensorsNameToTensorPointer.clear();
     return RWKV_SUCCESS;
+}
+
+void qnn_backend::cleanup_batch_graphs() {
+    for (auto& [batchSize, count] : qnnBatchDecodeGraphsCount) {
+        if (qnnBatchDecodeGraphsInfo[batchSize] != nullptr) {
+            free(qnnBatchDecodeGraphsInfo[batchSize]);
+            qnnBatchDecodeGraphsInfo[batchSize] = nullptr;
+        }
+        if (inputTensorsBatchDecode[batchSize] != nullptr) {
+            delete[] inputTensorsBatchDecode[batchSize];
+            inputTensorsBatchDecode[batchSize] = nullptr;
+        }
+        if (outputTensorsBatchDecode[batchSize] != nullptr) {
+            delete[] outputTensorsBatchDecode[batchSize];
+            outputTensorsBatchDecode[batchSize] = nullptr;
+        }
+    }
+    qnnBatchDecodeGraphsCount.clear();
+    qnnBatchDecodeGraphsInfo.clear();
+    inputTensorsBatchDecode.clear();
+    outputTensorsBatchDecode.clear();
+    batchDecodeGraphsTensorNameToTensorPointer.clear();
+    batchDecodeGraphsTensorNameToSize.clear();
 }
 
 int qnn_backend::release() {

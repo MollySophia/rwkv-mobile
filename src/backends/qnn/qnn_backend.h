@@ -111,23 +111,9 @@ private:
     uint32_t qnnEmbdPrefillGraphsCount = 0;
     GraphInfo_t **qnnEmbdPrefillGraphsInfo = nullptr;
 
-    uint32_t qnnBatch2DecodeGraphsCount = 0;
-    GraphInfo_t **qnnBatch2DecodeGraphsInfo = nullptr;
-
-    uint32_t qnnBatch4DecodeGraphsCount = 0;
-    GraphInfo_t **qnnBatch4DecodeGraphsInfo = nullptr;
-
-    uint32_t qnnBatch6DecodeGraphsCount = 0;
-    GraphInfo_t **qnnBatch6DecodeGraphsInfo = nullptr;
-
-    uint32_t qnnBatch8DecodeGraphsCount = 0;
-    GraphInfo_t **qnnBatch8DecodeGraphsInfo = nullptr;
-
-    uint32_t qnnBatch10DecodeGraphsCount = 0;
-    GraphInfo_t **qnnBatch10DecodeGraphsInfo = nullptr;
-
-    uint32_t qnnBatch12DecodeGraphsCount = 0;
-    GraphInfo_t **qnnBatch12DecodeGraphsInfo = nullptr;
+    // Dynamic batch decode graphs - maps batch size to graph info
+    std::unordered_map<int, uint32_t> qnnBatchDecodeGraphsCount;
+    std::unordered_map<int, GraphInfo_t**> qnnBatchDecodeGraphsInfo;
 
     uint32_t graphConfigsInfoCount = 0;
     GraphConfigInfo_t **graphConfigsInfo = nullptr;
@@ -144,23 +130,9 @@ private:
     Qnn_Tensor_t *inputTensorsEmbdPrefill[8] = {nullptr};
     Qnn_Tensor_t *outputTensorsEmbdPrefill[8] = {nullptr};
 
-    Qnn_Tensor_t *inputTensorsBatch2Decode[8] = {nullptr};
-    Qnn_Tensor_t *outputTensorsBatch2Decode[8] = {nullptr};
-
-    Qnn_Tensor_t *inputTensorsBatch4Decode[8] = {nullptr};
-    Qnn_Tensor_t *outputTensorsBatch4Decode[8] = {nullptr};
-
-    Qnn_Tensor_t *inputTensorsBatch6Decode[8] = {nullptr};
-    Qnn_Tensor_t *outputTensorsBatch6Decode[8] = {nullptr};
-
-    Qnn_Tensor_t *inputTensorsBatch8Decode[8] = {nullptr};
-    Qnn_Tensor_t *outputTensorsBatch8Decode[8] = {nullptr};
-
-    Qnn_Tensor_t *inputTensorsBatch10Decode[8] = {nullptr};
-    Qnn_Tensor_t *outputTensorsBatch10Decode[8] = {nullptr};
-
-    Qnn_Tensor_t *inputTensorsBatch12Decode[8] = {nullptr};
-    Qnn_Tensor_t *outputTensorsBatch12Decode[8] = {nullptr};
+    // Dynamic batch decode tensors - maps batch size to tensor arrays
+    std::unordered_map<int, Qnn_Tensor_t**> inputTensorsBatchDecode;
+    std::unordered_map<int, Qnn_Tensor_t**> outputTensorsBatchDecode;
 
     Qnn_Tensor_t *logitsOutputTensor = nullptr;
 
@@ -192,18 +164,9 @@ private:
     std::vector<std::unordered_map<std::string, size_t>> embdGraphsTensorNameToSize;
     std::vector<std::unordered_map<std::string, void*>> embdPrefillGraphsTensorNameToTensorPointer;
     std::vector<std::unordered_map<std::string, size_t>> embdPrefillGraphsTensorNameToSize;
-    std::vector<std::unordered_map<std::string, void*>> batch2DecodeGraphsTensorNameToTensorPointer;
-    std::vector<std::unordered_map<std::string, size_t>> batch2DecodeGraphsTensorNameToSize;
-    std::vector<std::unordered_map<std::string, void*>> batch4DecodeGraphsTensorNameToTensorPointer;
-    std::vector<std::unordered_map<std::string, size_t>> batch4DecodeGraphsTensorNameToSize;
-    std::vector<std::unordered_map<std::string, void*>> batch6DecodeGraphsTensorNameToTensorPointer;
-    std::vector<std::unordered_map<std::string, size_t>> batch6DecodeGraphsTensorNameToSize;
-    std::vector<std::unordered_map<std::string, void*>> batch8DecodeGraphsTensorNameToTensorPointer;
-    std::vector<std::unordered_map<std::string, size_t>> batch8DecodeGraphsTensorNameToSize;
-    std::vector<std::unordered_map<std::string, void*>> batch10DecodeGraphsTensorNameToTensorPointer;
-    std::vector<std::unordered_map<std::string, size_t>> batch10DecodeGraphsTensorNameToSize;
-    std::vector<std::unordered_map<std::string, void*>> batch12DecodeGraphsTensorNameToTensorPointer;
-    std::vector<std::unordered_map<std::string, size_t>> batch12DecodeGraphsTensorNameToSize;
+    // Dynamic batch decode tensor maps - maps batch size to tensor name maps
+    std::unordered_map<int, std::vector<std::unordered_map<std::string, void*>>> batchDecodeGraphsTensorNameToTensorPointer;
+    std::unordered_map<int, std::vector<std::unordered_map<std::string, size_t>>> batchDecodeGraphsTensorNameToSize;
 
     std::unordered_map<std::string, void*> stateTensorsNameToTensorPointer;
 
@@ -259,6 +222,20 @@ private:
 #ifndef _WIN32
     RMPackReader *rmpack = nullptr;
 #endif
+
+    // Helpers for dynamic batch decode processing
+    static int parse_bsz_from_graph_name(const std::string &graphName);
+    int initialize_batch_decode_graphs(
+        uint32_t graphsCount,
+        GraphInfo_t **graphsInfo,
+        std::vector<std::unordered_map<std::string, void*>> &tensorNameToTensorPointer,
+        std::vector<std::unordered_map<std::string, size_t>> &tensorNameToSize,
+        Qnn_Tensor_t **inputTensorsArr,
+        Qnn_Tensor_t **outputTensorsArr,
+        const char *inTensorName,
+        int batchSize);
+
+    void cleanup_batch_graphs();
 };
 
 }
