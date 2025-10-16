@@ -563,54 +563,82 @@ std::vector<runtime::TokenChunk> runtime::split_text_by_image_and_token_num(cons
         }
     }
 
-    // Now split regular token chunks by max_tokens_per_chunk, also split at "Assistant"
+    // Now split regular token chunks by max_tokens_per_chunk, also split at "Assistant" and " think"
     std::vector<TokenChunk> final_chunks;
     const std::string assistant_str = "Assistant";
+    const std::string thinking_str = " think";
     for (const auto& chunk : chunks) {
         if (chunk.is_image) {
             final_chunks.push_back(chunk);
         } else {
-            // Decode tokens to string for splitting at "Assistant"
+            // Decode tokens to string for splitting
             const std::vector<int>& tokens_to_split = chunk.tokens;
             if (tokens_to_split.empty()) continue;
-
-            // Decode to text
             std::string chunk_text = _models.at(model_id)->tokenizer->decode(tokens_to_split);
 
+            // First split by "Assistant"
             size_t pos = 0;
             size_t last_pos = 0;
             std::vector<std::string> split_texts;
             std::vector<bool> assistant_belongs;
             while ((pos = chunk_text.find(assistant_str, last_pos)) != std::string::npos) {
-                // If "Assistant" is at the start, skip empty chunk
+                // non-empty part before "Assistant"
                 if (pos > last_pos) {
                     split_texts.push_back(chunk_text.substr(last_pos, pos - last_pos));
                     assistant_belongs.push_back(false);
                 }
-                // "Assistant" itself as a chunk (belongs to next chunk)
+                // "Assistant" chunk, mark as belonging
                 split_texts.push_back(assistant_str);
                 assistant_belongs.push_back(true);
                 last_pos = pos + assistant_str.length();
             }
-            // Add the remaining part
             if (last_pos < chunk_text.size()) {
                 split_texts.push_back(chunk_text.substr(last_pos));
                 assistant_belongs.push_back(false);
             }
 
-            // Now, for each split_text, encode and split by max_tokens_per_chunk
-            std::vector<int> carry_tokens;
+            // For each split chunk, further split by " think"
+            std::vector<std::string> further_split_texts;
+            std::vector<bool> trigger_belongs; // true: "Assistant" or " think", to be carried; false: normal text
             for (size_t i = 0; i < split_texts.size(); ++i) {
-                std::string part = split_texts[i];
                 if (assistant_belongs[i]) {
-                    // This is "Assistant", append to carry_tokens for next chunk
-                    auto assistant_tokens = _models.at(model_id)->tokenizer->encode(part);
-                    carry_tokens.insert(carry_tokens.end(), assistant_tokens.begin(), assistant_tokens.end());
+                    further_split_texts.push_back(split_texts[i]);
+                    trigger_belongs.push_back(true);
+                    continue;
+                }
+                // Split current string at every " think"
+                size_t tpos = 0, tlast_pos = 0;
+                while ((tpos = split_texts[i].find(thinking_str, tlast_pos)) != std::string::npos) {
+                    // Before " think"
+                    if (tpos > tlast_pos) {
+                        further_split_texts.push_back(split_texts[i].substr(tlast_pos, tpos - tlast_pos));
+                        trigger_belongs.push_back(false);
+                    }
+                    // " think" itself
+                    further_split_texts.push_back(thinking_str);
+                    trigger_belongs.push_back(true);
+                    tlast_pos = tpos + thinking_str.length();
+                }
+                // Remaining part
+                if (tlast_pos < split_texts[i].size()) {
+                    further_split_texts.push_back(split_texts[i].substr(tlast_pos));
+                    trigger_belongs.push_back(false);
+                }
+            }
+
+            // Now, for each part, encode and split by max_tokens_per_chunk
+            std::vector<int> carry_tokens;
+            for (size_t i = 0; i < further_split_texts.size(); ++i) {
+                std::string part = further_split_texts[i];
+                if (trigger_belongs[i]) {
+                    // "Assistant" or " think", carry forward
+                    auto tokens = _models.at(model_id)->tokenizer->encode(part);
+                    carry_tokens.insert(carry_tokens.end(), tokens.begin(), tokens.end());
                     continue;
                 }
                 // Normal part
                 auto part_tokens = _models.at(model_id)->tokenizer->encode(part);
-                // Prepend any carried "Assistant" tokens
+                // Prepend any carried tokens
                 if (!carry_tokens.empty()) {
                     part_tokens.insert(part_tokens.begin(), carry_tokens.begin(), carry_tokens.end());
                     carry_tokens.clear();
@@ -624,7 +652,7 @@ std::vector<runtime::TokenChunk> runtime::split_text_by_image_and_token_num(cons
                     }
                 }
             }
-            // If any "Assistant" tokens left, put them as a chunk
+            // If any "Assistant" or " think" tokens left, put them as a chunk
             if (!carry_tokens.empty()) {
                 final_chunks.push_back({carry_tokens, false, ""});
             }
@@ -977,18 +1005,28 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     bool is_pseudo_thinking = enable_reasoning && model->response_buffer.find("</think>") != std::string::npos;
     const int rewind_token_list[] = {28324, 28329, 10080, 9830}; // "…\n" "。\n" "…" "。"
     std::any state_for_rewinding;
+    bool first_token_ban_thinking_tag = is_pseudo_thinking;
+    if (inputs.size() % 2 == 1) {
+        auto last_input = inputs.back();
+        // check if it ends with " think" or " think a bit" or " think a lot"
+        if ((last_input.size() >= 6 && last_input.substr(last_input.size() - 6) != " think") &&
+            (last_input.size() >= 12 && last_input.substr(last_input.size() - 12) != " think a bit") &&
+            (last_input.size() >= 12 && last_input.substr(last_input.size() - 12) != " think a lot")) {
+            first_token_ban_thinking_tag = true;
+        }
+    }
 
     for (int i = 0; i < max_length; i++) {
         model->sampler->apply_penalties(logits, model->backend->get_num_vocab());
 
         if (i == 0) {
-            if (is_pseudo_thinking) {
+            if (first_token_ban_thinking_tag) {
                 // token 61 is '<', 261 is '\n\n'
                 logits[61] = -1e9f;
                 logits[261] = -1e9f;
             }
             logits[0] = -1e9f;
-        } else if (is_pseudo_thinking && i == 1 && decoded_idx == 11) {
+        } else if (first_token_ban_thinking_tag && i == 1 && decoded_idx == 11) {
             logits[61] = -1e9f;
         }
 
