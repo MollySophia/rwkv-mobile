@@ -4,6 +4,9 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 namespace rwkvmobile {
 

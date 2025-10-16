@@ -1,6 +1,9 @@
 #include "logger.h"
 #include <string>
 #include <cstdarg>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 namespace rwkvmobile {
 
@@ -11,11 +14,24 @@ const char *level_str[] = {
     "[ERROR]",
 };
 
+std::string get_timestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+    
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S");
+    ss << "." << std::setfill('0') << std::setw(3) << ms.count();
+    return ss.str();
+}
+
 #if defined(__ANDROID__)
 #include <android/log.h>
 #define LOG_TAG "RWKV-MOBILE"
 void Logger::log(const std::string &msg, const int level) {
-    auto log_msg = std::string(level_str[level]) + " " + msg;
+    auto timestamp = get_timestamp();
+    auto log_msg = "[" + timestamp + "] " + std::string(level_str[level]) + " " + msg;
 
     auto split_log_msg = [](const std::string &msg, const int max_length) {
         std::vector<std::string> splits;
@@ -72,9 +88,11 @@ void Logger::log(const std::string &msg, const int level) {
 #else
 #include <cstdio>
 void Logger::log(const std::string &msg, const int level) {
-    _log(std::string(level_str[level]) + " " + msg);
+    auto timestamp = get_timestamp();
+    auto log_msg = "[" + timestamp + "] " + std::string(level_str[level]) + " " + msg;
+    _log(log_msg);
     if (level >= _level) {
-        printf("%s %s\n", level_str[level], msg.c_str());
+        printf("[%s] %s %s\n", timestamp.c_str(), level_str[level], msg.c_str());
     }
 }
 #endif
