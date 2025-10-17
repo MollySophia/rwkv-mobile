@@ -831,7 +831,7 @@ int runtime::load_history_state_to_memory(int model_id, std::string state_path) 
 
     std::vector<int> tokens_to_prefill;
     auto node = model->backend->match_and_load_state(ids_data, tokens_to_prefill);
-    model->backend->register_state_checkpoint_with_state(node, ids_data, logits_data.data(), runtime_state);
+    model->backend->register_state_checkpoint_with_state(node, tokens_to_prefill, logits_data.data(), runtime_state);
     LOGI("loaded state from disk for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
 
     return RWKV_SUCCESS;
