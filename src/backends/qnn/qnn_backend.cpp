@@ -19,6 +19,7 @@
 #include <HTP/QnnHtpGraph.h>
 #include <HTP/QnnHtpContext.h>
 #include <QnnContext.h>
+#include <QnnSdkBuildId.h>
 
 #include "logger.h"
 #include "half.hpp"
@@ -482,6 +483,7 @@ int qnn_backend_context::qnn_set_rpc_latency_and_polling() {
 }
 
 int qnn_backend::init(void * extra) {
+    LOGI("QNN_SDK_BUILD_ID: %s", QNN_SDK_BUILD_ID);
     std::string path;
     if (extra != nullptr) {
         path = std::string((char *)extra);
