@@ -1005,16 +1005,7 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     bool is_pseudo_thinking = enable_reasoning && model->response_buffer.find("</think>") != std::string::npos;
     const int rewind_token_list[] = {28324, 28329, 10080, 9830}; // "…\n" "。\n" "…" "。"
     std::any state_for_rewinding;
-    bool first_token_ban_thinking_tag = is_pseudo_thinking;
-    if (inputs.size() % 2 == 1) {
-        auto last_input = inputs.back();
-        // check if it ends with " think" or " think a bit" or " think a lot"
-        if ((last_input.size() >= 6 && last_input.substr(last_input.size() - 6) != " think") &&
-            (last_input.size() >= 12 && last_input.substr(last_input.size() - 12) != " think a bit") &&
-            (last_input.size() >= 12 && last_input.substr(last_input.size() - 12) != " think a lot")) {
-            first_token_ban_thinking_tag = true;
-        }
-    }
+    bool first_token_ban_thinking_tag = !enable_reasoning || is_pseudo_thinking;
 
     for (int i = 0; i < max_length; i++) {
         model->sampler->apply_penalties(logits, model->backend->get_num_vocab());
