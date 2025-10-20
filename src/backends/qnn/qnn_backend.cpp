@@ -489,9 +489,23 @@ int qnn_backend::init(void * extra) {
         path = std::string((char *)extra);
         LOGI("Using QNN Backend Path: %s\n", path.c_str());
     } else {
+#ifdef _WIN32
+        path = "QnnHtp.dll";
+#else
         path = "libQnnHtp.so";
+#endif
         LOGI("Using default QNN Backend Path: %s\n", path.c_str());
     }
+
+#ifndef _WIN32
+    std::string path_to_set;
+    if (path != "libQnnHtp.so") {
+        path_to_set = path.substr(0, path.find_last_of('/'));
+        LOGI("Setting LD_LIBRARY_PATH and ADSP_LIBRARY_PATH to %s\n", path_to_set.c_str());
+        setenv("LD_LIBRARY_PATH", path_to_set.c_str(), 1);
+        setenv("ADSP_LIBRARY_PATH", path_to_set.c_str(), 1);
+    }
+#endif
 
     if (g_qnn_backend_context_ptr == nullptr) {
         try {
