@@ -62,6 +62,12 @@ struct loaded_models_list {
     int count;
 };
 
+struct evaluation_results {
+    int * corrects;
+    float * logits_vals;
+    int count;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -127,6 +133,10 @@ void rwkvmobile_runtime_set_qnn_library_path(rwkvmobile_runtime_t runtime, const
 double rwkvmobile_runtime_get_avg_decode_speed(rwkvmobile_runtime_t runtime, int model_id);
 
 double rwkvmobile_runtime_get_avg_prefill_speed(rwkvmobile_runtime_t runtime, int model_id);
+
+struct evaluation_results rwkvmobile_runtime_run_evaluation(rwkvmobile_runtime_t runtime, int model_id, const char * source_text, const char * target_text);
+
+void rwkvmobile_runtime_free_evaluation_results(struct evaluation_results results);
 
 // Vision
 int rwkvmobile_runtime_load_vision_encoder(rwkvmobile_runtime_t runtime, int model_id, const char * encoder_path);

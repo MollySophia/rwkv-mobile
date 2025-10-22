@@ -112,6 +112,8 @@ public:
     int save_state_by_history(int model_id, std::vector<std::string> history, std::string state_path);
     int load_history_state_to_memory(int model_id, std::string state_path);
 
+    int run_evaluation(int model_id, std::string source_text, std::string target_text, bool &correct, float &logits_val, bool insert_bos_token = true);
+
     std::vector<int> get_supported_batch_sizes(int model_id);
 
     int set_prompt(int model_id, std::string prompt);

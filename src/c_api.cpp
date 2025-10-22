@@ -1040,5 +1040,36 @@ const char * rwkvmobile_runtime_get_model_path_by_id(rwkvmobile_runtime_t runtim
     return rt->get_model_path_by_id(model_id).c_str();
 }
 
+
+struct evaluation_results rwkvmobile_runtime_run_evaluation(rwkvmobile_runtime_t runtime, int model_id, const char * source_text, const char * target_text) {
+    struct evaluation_results result;
+    if (runtime == nullptr || source_text == nullptr || target_text == nullptr) {
+        return result;
+    }
+    auto rt = static_cast<class runtime *>(runtime);
+    bool correct = false;
+    float logits_val = 0;
+    int ret = rt->run_evaluation(model_id, source_text, target_text, correct, logits_val, true);
+    if (ret != RWKV_SUCCESS) {
+        return result;
+    }
+
+    result.count = 1;
+    result.corrects = new int[1];
+    result.corrects[0] = correct;
+    result.logits_vals = new float[1];
+    result.logits_vals[0] = logits_val;
+    return result;
+}
+
+void rwkvmobile_runtime_free_evaluation_results(struct evaluation_results results) {
+    if (results.corrects != nullptr) {
+        delete[] results.corrects;
+    }
+    if (results.logits_vals != nullptr) {
+        delete[] results.logits_vals;
+    }
+}
+
 } // extern "C"
 } // namespace rwkvmobile

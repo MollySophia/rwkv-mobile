@@ -27,10 +27,6 @@ int main(int argc, char **argv) {
     int model_id = runtime.load_model(model_path, backend, tokenizer_path, nullptr); 
     ENSURE_SUCCESS_OR_LOG_EXIT(model_id < 0 ? model_id : rwkvmobile::RWKV_SUCCESS, "Failed to load model");
     if (model_id < 0) return 1;
-    runtime.set_sampler_params(model_id, 1.0, 1, 1.0);
-    runtime.set_penalty_params(model_id, 0.0, 0.0, 0.0);
-
-    float *output = nullptr;
 
     char *eval_text_buf;
     std::ifstream eval_text_file(text_path, std::ios::binary | std::ios::ate);
@@ -61,45 +57,17 @@ int main(int argc, char **argv) {
     int xcnt = 0;
     int xacc = 0;
 
-    auto softmax = [](float *logits, size_t size) {
-        std::vector<float> probs(size);
-        float max_val = *std::max_element(logits, logits + size);
-        float sum = 0;
-        for (size_t i = 0; i < size; i++) {
-            probs[i] = std::exp((logits[i] - max_val));
-            sum += probs[i];
-        }
-        for (size_t i = 0; i < size; i++) {
-            probs[i] /= sum;
-        }
-        return probs;
-    };
-
     for (const auto &text : eval_text) {
         std::cout << "Sample num: " << xcnt << std::endl;
-        auto prompt_ids = runtime.tokenizer_encode(model_id, text.substr(0, text.find_last_of(' ')));
-        prompt_ids.insert(prompt_ids.begin(), 0);
-        auto target_ids = runtime.tokenizer_encode(model_id, text.substr(text.find_last_of(' ')));
-        std::cout << "Prompt: " << text.substr(0, text.find_last_of(' ')) << std::endl;
-        std::cout << "Target: " << text.substr(text.find_last_of(' ')) << std::endl;
-        runtime.clear_state(model_id);
+        auto prompt = text.substr(0, text.find_last_of(' '));
+        auto target = text.substr(text.find_last_of(' '));
+        std::cout << "Prompt: " << prompt << std::endl;
+        std::cout << "Target: " << target << std::endl;
         std::cout << "Response: ";
 
-        bool correct = true;
-        float logits_val = 0;
-        runtime.eval_logits(model_id, prompt_ids, output);
-        auto probs = softmax(output, runtime.get_vocab_size(model_id));
-        for (int i = 0; i < target_ids.size(); i++) {
-          auto output_id = std::max_element(probs.begin(), probs.end()) - probs.begin();
-          logits_val += std::log(probs[target_ids[i]]);
-          if (output_id != target_ids[i]) {
-              correct = false;
-          }
-          std::cout << runtime.tokenizer_decode(model_id, output_id);
-
-          runtime.eval_logits(model_id, target_ids[i], output);
-          probs = softmax(output, runtime.get_vocab_size(model_id));
-        }
+        bool correct = false;
+        float logits_val = -1e9f;
+        runtime.run_evaluation(model_id, prompt, target, correct, logits_val, true);
 
         xcnt++;
         if (correct) {

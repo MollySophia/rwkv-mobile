@@ -2430,6 +2430,66 @@ int runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     return RWKV_SUCCESS;
 }
 
+int runtime::run_evaluation(int model_id, std::string source_text, std::string target_text, bool &correct, float &logits_val, bool insert_bos_token) {
+    if (_models.find(model_id) == _models.end()) {
+        LOGE("run_evaluation: Model ID %d not found", model_id);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto &model = _models.at(model_id);
+    if (model->backend == nullptr || model->tokenizer == nullptr) {
+        LOGE("run_evaluation: Backend or tokenizer for model ID %d not found", model_id);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    static auto softmax_and_argmax = [](float *logits, size_t size) -> int {
+        int max_idx = std::max_element(logits, logits + size) - logits;
+        float max_val = logits[max_idx];
+        float sum = 0;
+        for (size_t i = 0; i < size; i++) {
+            logits[i] = std::exp((logits[i] - max_val));
+            sum += logits[i];
+        }
+        for (size_t i = 0; i < size; i++) {
+            logits[i] /= sum;
+        }
+        return max_idx;
+    };
+
+    auto source_ids = model->tokenizer->encode(source_text);
+    auto target_ids = model->tokenizer->encode(target_text);
+
+    if (insert_bos_token) {
+        source_ids.insert(source_ids.begin(), 0);
+    }
+
+    float *logits = nullptr;
+    clear_state(model_id);
+    int ret = eval_logits(model_id, source_ids, logits);
+    if (ret || !logits) {
+        LOGE("run_evaluation: Error evaluating logits");
+        return ret;
+    }
+
+    correct = true;
+    logits_val = 0;
+    for (int i = 0; i < target_ids.size(); i++) {
+        auto output_id = softmax_and_argmax(logits, model->backend->get_num_vocab());
+        logits_val += std::log(logits[target_ids[i]]);
+        if (output_id != target_ids[i]) {
+            correct = false;
+        }
+        if (i != target_ids.size() - 1) {
+            ret = eval_logits(model_id, target_ids[i], logits);
+            if (ret || !logits) {
+                LOGE("run_evaluation: Error evaluating logits");
+                return ret;
+            }
+        }
+    }
+
+    return RWKV_SUCCESS;
+}
+
 double runtime::get_avg_decode_speed(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0;
