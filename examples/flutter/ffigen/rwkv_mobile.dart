@@ -464,6 +464,32 @@ late final _rwkvmobile_runtime_get_avg_prefill_speedPtr = _lookup<
     ffi.NativeFunction<ffi.Double Function(rwkvmobile_runtime_t , ffi.Int )>>('rwkvmobile_runtime_get_avg_prefill_speed');
 late final _rwkvmobile_runtime_get_avg_prefill_speed = _rwkvmobile_runtime_get_avg_prefill_speedPtr.asFunction<double Function(rwkvmobile_runtime_t , int )>();
 
+evaluation_results rwkvmobile_runtime_run_evaluation(rwkvmobile_runtime_t runtime,
+int model_id,
+ffi.Pointer<ffi.Char> source_text,
+ffi.Pointer<ffi.Char> target_text,
+) {
+  return _rwkvmobile_runtime_run_evaluation(runtime,
+model_id,
+source_text,
+target_text,
+);
+}
+
+late final _rwkvmobile_runtime_run_evaluationPtr = _lookup<
+    ffi.NativeFunction<evaluation_results Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Char> , ffi.Pointer<ffi.Char> )>>('rwkvmobile_runtime_run_evaluation');
+late final _rwkvmobile_runtime_run_evaluation = _rwkvmobile_runtime_run_evaluationPtr.asFunction<evaluation_results Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Char> , ffi.Pointer<ffi.Char> )>();
+
+void rwkvmobile_runtime_free_evaluation_results(evaluation_results results,
+) {
+  return _rwkvmobile_runtime_free_evaluation_results(results,
+);
+}
+
+late final _rwkvmobile_runtime_free_evaluation_resultsPtr = _lookup<
+    ffi.NativeFunction<ffi.Void Function(evaluation_results )>>('rwkvmobile_runtime_free_evaluation_results');
+late final _rwkvmobile_runtime_free_evaluation_results = _rwkvmobile_runtime_free_evaluation_resultsPtr.asFunction<void Function(evaluation_results )>();
+
 int rwkvmobile_runtime_load_vision_encoder(rwkvmobile_runtime_t runtime,
 int model_id,
 ffi.Pointer<ffi.Char> encoder_path,
@@ -1137,6 +1163,16 @@ final class model_info extends ffi.Struct{
 
 final class loaded_models_list extends ffi.Struct{
   external ffi.Pointer<model_info> models;
+
+  @ffi.Int()
+  external int count;
+
+}
+
+final class evaluation_results extends ffi.Struct{
+  external ffi.Pointer<ffi.Int> corrects;
+
+  external ffi.Pointer<ffi.Float> logits_vals;
 
   @ffi.Int()
   external int count;
