@@ -99,9 +99,6 @@ private:
 
     std::vector<Qnn_ContextHandle_t> qnnContextHandles;
 
-    uint32_t qnnDecodeGraphsCount = 0;
-    GraphInfo_t **qnnDecodeGraphsInfo = nullptr;
-
     uint32_t qnnPrefillGraphsCount = 0;
     GraphInfo_t **qnnPrefillGraphsInfo = nullptr;
 
@@ -117,9 +114,6 @@ private:
 
     uint32_t graphConfigsInfoCount = 0;
     GraphConfigInfo_t **graphConfigsInfo = nullptr;
-
-    Qnn_Tensor_t *inputTensors[8] = {nullptr};
-    Qnn_Tensor_t *outputTensors[8] = {nullptr};
 
     Qnn_Tensor_t *inputTensorsPrefill[8] = {nullptr};
     Qnn_Tensor_t *outputTensorsPrefill[8] = {nullptr};
@@ -142,7 +136,6 @@ private:
     Qnn_Tensor_t *hiddenStateTensorPrefill = nullptr;
 
     // input tensors
-    Qnn_Tensor_t *tokenInputTensor = nullptr;
     Qnn_Tensor_t *tokenInputTensorPrefill = nullptr;
     Qnn_Tensor_t *tokenInputTensorEmbd = nullptr;
     Qnn_Tensor_t *tokenInputTensorEmbdPrefill = nullptr;
@@ -198,7 +191,6 @@ private:
                                     bool isPrefill);
 
     int execute_graph(GraphInfo_t** graphInfo, int graphsCount, Qnn_Tensor_t** inputTensors, Qnn_Tensor_t** outputTensors);
-    int execute_decode_graph();
     int execute_prefill_graph();
     int execute_emb_decode_graph();
     int execute_emb_prefill_graph();
