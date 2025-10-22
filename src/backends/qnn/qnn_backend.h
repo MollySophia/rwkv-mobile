@@ -139,8 +139,8 @@ private:
     Qnn_Tensor_t *tokenInputTensorPrefill = nullptr;
     Qnn_Tensor_t *tokenInputTensorEmbd = nullptr;
     Qnn_Tensor_t *tokenInputTensorEmbdPrefill = nullptr;
-    std::unordered_map<int, Qnn_Tensor_t*> tokenInputTensorBatchDecode;
 
+    std::unordered_map<int, Qnn_Tensor_t*> tokenInputTensorBatchDecode;
     std::unordered_map<int, Qnn_Tensor_t*> deepEmbeddingTensors;
     std::unordered_map<int, Qnn_Tensor_t*> deepEmbeddingPrefillTensors;
 
@@ -149,8 +149,6 @@ private:
     size_t logitsOutputTensorSize = 0;
 
     // TODO: simplify this
-    std::vector<std::unordered_map<std::string, void*>> decodeGraphsTensorNameToTensorPointer;
-    std::vector<std::unordered_map<std::string, size_t>> decodeGraphsTensorNameToSize;
     std::vector<std::unordered_map<std::string, void*>> prefillGraphsTensorNameToTensorPointer;
     std::vector<std::unordered_map<std::string, size_t>> prefillGraphsTensorNameToSize;
     std::vector<std::unordered_map<std::string, void*>> embdGraphsTensorNameToTensorPointer;
