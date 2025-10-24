@@ -1010,15 +1010,12 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     for (int i = 0; i < max_length; i++) {
         model->sampler->apply_penalties(logits, model->backend->get_num_vocab());
 
-        if (i == 0) {
-            if (first_token_ban_thinking_tag) {
-                // token 61 is '<', 261 is '\n\n'
-                logits[61] = -1e9f;
-                logits[261] = -1e9f;
-            }
-            logits[0] = -1e9f;
-        } else if (first_token_ban_thinking_tag && i == 1 && decoded_idx == 11) {
+        if ((i == 0 || i == 1) && first_token_ban_thinking_tag) {
+            // token 61 is '<', 261 is '\n\n'
+            logits[11] = -1e9f;
             logits[61] = -1e9f;
+            logits[261] = -1e9f;
+            logits[0] = -1e9f;
         }
 
         decoded_idx = model->sampler->sample(logits, model->backend->get_num_vocab());
@@ -1134,6 +1131,11 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     model->response_buffer_batch.resize(batch_size);
     model->response_buffer_ids_batch.resize(batch_size);
     model->response_buffer_eos_found_batch.resize(batch_size);
+    for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
+        model->response_buffer_batch[batch_idx] = "";
+        model->response_buffer_ids_batch[batch_idx].clear();
+        model->response_buffer_eos_found_batch[batch_idx] = false;
+    }
 
     std::vector<std::vector<int>> response_ids_raw_batch(batch_size);
 
@@ -1208,7 +1210,7 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
             }
         }
 
-        is_pseudo_thinking_batch[batch_idx] = enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos;
+        is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
         model->sampler->apply_penalties(logits, num_vocab);
 
         logits[61] = -1e9f;
@@ -1241,7 +1243,7 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
                     model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
 
-                if (is_pseudo_thinking_batch[original_j] && i == 1 && decoded_idx[j] == 11) {
+                if (is_pseudo_thinking_batch[original_j] && i == 1) {
                     logits[j * num_vocab + 61] = -1e9f;
                 }
             }
@@ -2298,6 +2300,9 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     std::vector<std::map<int, float>> occurences_batch(batch_size);
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
         model->backend->get_state_on_batch_slot(batch_idx, state_batch[batch_idx]);
+        model->response_buffer_batch[batch_idx] = "";
+        model->response_buffer_ids_batch[batch_idx].clear();
+        model->response_buffer_eos_found_batch[batch_idx] = false;
     }
 
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
@@ -2339,9 +2344,12 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         }
 
         for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
-            model->response_buffer_eos_found_batch[batch_idx] = (decoded_idx_batch[batch_idx] == stop_code);
-            decoded_text_batch[batch_idx] = model->tokenizer->decode(decoded_idx_batch[batch_idx]);
             if (!model->response_buffer_eos_found_batch[batch_idx]) {
+                model->response_buffer_eos_found_batch[batch_idx] = (decoded_idx_batch[batch_idx] == stop_code);
+                decoded_text_batch[batch_idx] = model->tokenizer->decode(decoded_idx_batch[batch_idx]);
+                if (model->response_buffer_eos_found_batch[batch_idx]) {
+                    continue;
+                }
                 model->response_buffer_batch[batch_idx] += decoded_text_batch[batch_idx];
                 model->response_buffer_ids_batch[batch_idx].push_back(decoded_idx_batch[batch_idx]);
             }
