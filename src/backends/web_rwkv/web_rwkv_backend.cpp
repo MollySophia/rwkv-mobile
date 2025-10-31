@@ -15,7 +15,7 @@ int web_rwkv_backend::init(void * extra) {
 }
 
 int web_rwkv_backend::load_model(std::string model_path) {
-    const int batch_size = 8;
+    const int batch_size = 12;
 
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
