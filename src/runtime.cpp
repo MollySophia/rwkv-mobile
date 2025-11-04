@@ -2391,6 +2391,7 @@ int runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     model->response_buffer_eos_found = false;
     model->is_generating = true;
     model->stop_signal = false;
+    model->sampler->clear_occurences();
 
     std::vector<int> ids = model->tokenizer->encode(prompt);
     _prefill_progress_start(ids.size());
