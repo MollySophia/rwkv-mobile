@@ -122,6 +122,10 @@ struct sampler_params rwkvmobile_runtime_get_sampler_params(rwkvmobile_runtime_t
 
 void rwkvmobile_runtime_set_sampler_params(rwkvmobile_runtime_t runtime, int model_id, struct sampler_params params);
 
+int rwkvmobile_runtime_set_seed(rwkvmobile_runtime_t runtime, int model_id, int seed);
+
+int rwkvmobile_runtime_get_seed(rwkvmobile_runtime_t runtime, int model_id);
+
 struct penalty_params rwkvmobile_runtime_get_penalty_params(rwkvmobile_runtime_t runtime, int model_id);
 
 void rwkvmobile_runtime_set_penalty_params(rwkvmobile_runtime_t runtime, int model_id, struct penalty_params params);

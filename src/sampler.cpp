@@ -4,7 +4,8 @@
 namespace rwkvmobile {
 
 NucleusSampler::NucleusSampler() {
-    _generator.seed(std::random_device()());
+    _seed = std::random_device()();
+    _generator.seed(_seed);
 }
 
 int NucleusSampler::sample(const float* logits, const size_t size) {
@@ -115,8 +116,13 @@ std::vector<int> NucleusSampler::sample_batch(const float* logits, const size_t 
     return ret;
 }
 
-void NucleusSampler::set_seed(int seed) {
-    _generator.seed(seed);
+void NucleusSampler::set_seed(int32_t seed) {
+    _seed = seed;
+    _generator.seed(_seed);
+}
+
+int NucleusSampler::get_seed() {
+    return _seed;
 }
 
 void NucleusSampler::update_occurences(int token) {

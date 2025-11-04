@@ -61,7 +61,6 @@ struct ModelInstance {
     std::string eos_token = "\n\n";
     std::vector<std::string> stop_codes = {"\n\n", "\nUser", "User"};
     std::string thinking_token = "<think";
-    int64_t seed = 42;
 
     // Response buffer
     std::string response_buffer;
@@ -210,8 +209,8 @@ public:
     int clear_state(int model_id);
 
     // sampler and seed
-    int set_seed(int model_id, int64_t seed);
-    int64_t get_seed(int model_id);
+    int set_seed(int model_id, int32_t seed);
+    int get_seed(int model_id);
 
     void set_user_role(int model_id, std::string role);
     void set_response_role(int model_id, std::string role);

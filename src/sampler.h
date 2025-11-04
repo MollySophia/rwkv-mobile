@@ -31,7 +31,8 @@ public:
 
     std::vector<int> sample_batch(const float* logits, const size_t sampling_size, const size_t hstep, int batch_size, std::vector<float> temperature, std::vector<int> top_k, std::vector<float> top_p);
 
-    void set_seed(int seed);
+    void set_seed(int32_t seed);
+    int get_seed();
 
     void set_temperature(float temperature) { _temperature = temperature; }
     void set_top_k(int top_k) { _top_k = top_k; }
@@ -67,6 +68,8 @@ private:
     float _presence_penalty = 0.5;
     float _frequency_penalty = 0.5;
     float _penalty_decay = 0.996;
+
+    int32_t _seed = 42;
 
     std::map<int, float> _occurences;
 };

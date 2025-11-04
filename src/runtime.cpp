@@ -2873,4 +2873,26 @@ std::string& runtime::get_model_path_by_id(int model_id) {
     return model->model_path;
 }
 
+int runtime::set_seed(int model_id, int32_t seed) {
+    if (_models.find(model_id) == _models.end()) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto &model = _models.at(model_id);
+    if (model->sampler == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    model->sampler->set_seed(seed);
+    return RWKV_SUCCESS;
+}
+
+int runtime::get_seed(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return 0;
+    }
+    auto &model = _models.at(model_id);
+    if (model->sampler == nullptr) {
+        return 0;
+    }
+    return model->sampler->get_seed();
+}
 } // namespace rwkvmobile

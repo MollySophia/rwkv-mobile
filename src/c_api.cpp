@@ -1071,5 +1071,21 @@ void rwkvmobile_runtime_free_evaluation_results(struct evaluation_results result
     }
 }
 
+int rwkvmobile_runtime_set_seed(rwkvmobile_runtime_t runtime, int model_id, int seed) {
+    if (runtime == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto rt = static_cast<class runtime *>(runtime);
+    return rt->set_seed(model_id, seed);
+}
+
+int rwkvmobile_runtime_get_seed(rwkvmobile_runtime_t runtime, int model_id) {
+    if (runtime == nullptr) {
+        return 0;
+    }
+    auto rt = static_cast<class runtime *>(runtime);
+    return rt->get_seed(model_id);
+}
+
 } // extern "C"
 } // namespace rwkvmobile

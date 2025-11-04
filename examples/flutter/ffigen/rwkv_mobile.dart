@@ -392,6 +392,32 @@ late final _rwkvmobile_runtime_set_sampler_paramsPtr = _lookup<
     ffi.NativeFunction<ffi.Void Function(rwkvmobile_runtime_t , ffi.Int , sampler_params )>>('rwkvmobile_runtime_set_sampler_params');
 late final _rwkvmobile_runtime_set_sampler_params = _rwkvmobile_runtime_set_sampler_paramsPtr.asFunction<void Function(rwkvmobile_runtime_t , int , sampler_params )>();
 
+int rwkvmobile_runtime_set_seed(rwkvmobile_runtime_t runtime,
+int model_id,
+int seed,
+) {
+  return _rwkvmobile_runtime_set_seed(runtime,
+model_id,
+seed,
+);
+}
+
+late final _rwkvmobile_runtime_set_seedPtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Int )>>('rwkvmobile_runtime_set_seed');
+late final _rwkvmobile_runtime_set_seed = _rwkvmobile_runtime_set_seedPtr.asFunction<int Function(rwkvmobile_runtime_t , int , int )>();
+
+int rwkvmobile_runtime_get_seed(rwkvmobile_runtime_t runtime,
+int model_id,
+) {
+  return _rwkvmobile_runtime_get_seed(runtime,
+model_id,
+);
+}
+
+late final _rwkvmobile_runtime_get_seedPtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int )>>('rwkvmobile_runtime_get_seed');
+late final _rwkvmobile_runtime_get_seed = _rwkvmobile_runtime_get_seedPtr.asFunction<int Function(rwkvmobile_runtime_t , int )>();
+
 penalty_params rwkvmobile_runtime_get_penalty_params(rwkvmobile_runtime_t runtime,
 int model_id,
 ) {
