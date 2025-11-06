@@ -397,9 +397,72 @@ if (ENABLE_COREML_BACKEND)
 endif()
 
 if (ENABLE_MLX_BACKEND)
-    find_library(METAL_FRAMEWORK Metal)
+    find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
+    find_library(METAL_FRAMEWORK    Metal      REQUIRED)
+    find_library(Accelerate_LIBRARY Accelerate REQUIRED)
     target_compile_definitions(rwkv_mobile_internal PUBLIC ENABLE_MLX)
     target_include_directories(rwkv_mobile_internal PUBLIC src/backends/mlx src/backends/mlx/include)
+    # Set MLX library path based on platform
+    if (IOS)
+        set(MLX_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/mlx/prebuilt/ios-arm64/libMLXModelFFI.a)
+        target_link_directories(rwkv_mobile_internal PUBLIC src/backends/mlx/prebuilt/ios-arm64)
+    else()
+        set(MLX_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/mlx/prebuilt/macos-arm64/libMLXModelFFI.a)
+        target_link_directories(rwkv_mobile_internal PUBLIC src/backends/mlx/prebuilt/macos-arm64)
+    endif()
+    
+    # Link Swift runtime libraries for static library containing Swift code
+    if (APPLE)
+        # Find Swift toolchain path
+        execute_process(
+            COMMAND xcrun --find swift
+            OUTPUT_VARIABLE SWIFT_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        
+        if (SWIFT_PATH)
+            # Extract toolchain usr directory
+            # SWIFT_PATH = /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift
+            # -> /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+            get_filename_component(SWIFT_BIN_DIR "${SWIFT_PATH}" DIRECTORY)
+            # -> /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr
+            get_filename_component(SWIFT_USR_DIR "${SWIFT_BIN_DIR}" DIRECTORY)
+            
+            # Determine platform-specific Swift runtime path
+            if (IOS)
+                set(SWIFT_RUNTIME_SUBDIR "iphoneos")
+            else()
+                set(SWIFT_RUNTIME_SUBDIR "macosx")
+            endif()
+            
+            # Swift runtime libraries are in toolchain/usr/lib/swift/{platform}
+            # e.g., /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx
+            set(SWIFT_RUNTIME_PATH "${SWIFT_USR_DIR}/lib/swift/${SWIFT_RUNTIME_SUBDIR}")
+            
+            # Check if Swift runtime path exists
+            if (EXISTS "${SWIFT_RUNTIME_PATH}/libswiftCompatibility56.a")
+                # Add Swift runtime path to linker
+                target_link_directories(rwkv_mobile_internal PUBLIC ${SWIFT_RUNTIME_PATH})
+                
+                # Link Swift compatibility libraries (required for static Swift libraries)
+                target_link_libraries(rwkv_mobile_internal PUBLIC
+                    "${SWIFT_RUNTIME_PATH}/libswiftCompatibility56.a"
+                    "${SWIFT_RUNTIME_PATH}/libswiftCompatibilityConcurrency.a"
+                    "${SWIFT_RUNTIME_PATH}/libswiftCompatibilityPacks.a"
+                )
+                
+                message(STATUS "Swift runtime libraries found at ${SWIFT_RUNTIME_PATH}")
+            else()
+                message(WARNING "Swift runtime libraries not found at ${SWIFT_RUNTIME_PATH}")
+            endif()
+        else()
+            message(WARNING "Swift toolchain not found. MLX backend may not link correctly.")
+        endif()
+    endif()
+    
+    # Link MLX static library with full path to ensure it's found
+    target_link_libraries(rwkv_mobile_internal PUBLIC ${MLX_LIB_PATH} ${FOUNDATION_LIBRARY} ${METAL_FRAMEWORK} ${Accelerate_LIBRARY})
 endif()
 
 if (ENABLE_LLAMACPP_BACKEND)
