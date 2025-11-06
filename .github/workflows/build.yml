@@ -128,9 +128,7 @@ jobs:
       run: |
         git clone --single-branch --branch rwkv-mobile https://github.com/mollysophia/mlx-swift-examples.git --depth 1
         cd mlx-swift-examples
-        xcodebuild -project mlx-swift-examples.xcodeproj -scheme MLXModelFFI -configuration Release -derivedDataPath build -destination 'platform=iOS'
         xcodebuild -project mlx-swift-examples.xcodeproj -scheme MLXModelFFI -configuration Release -derivedDataPath build -destination 'platform=OS X'
-        cp build/Build/Products/Release-iphoneos/libMLXModelFFI.a ../src/backends/mlx/prebuilt/ios-arm64/libMLXModelFFI.a
         cp build/Build/Products/Release/libMLXModelFFI.a ../src/backends/mlx/prebuilt/macos-arm64/libMLXModelFFI.a
         cd ..
         rm -rf build-arm64 build-arm64-debug
