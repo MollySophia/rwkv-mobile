@@ -119,7 +119,7 @@ jobs:
 
   build-macos-library-aarch64:
     needs: [setup]
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-macos-aarch64
     steps:
