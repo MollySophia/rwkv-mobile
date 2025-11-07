@@ -515,6 +515,7 @@ std::string runtime::apply_chat_template(int model_id, std::vector<std::string> 
         return result;
     };
 
+    auto space_after_roles = get_space_after_roles(model_id);
     std::string text = model->prompt;
     for (int i = 0; i < inputs.size(); i++) {
         if (i % 2 == 0) {
@@ -522,12 +523,12 @@ std::string runtime::apply_chat_template(int model_id, std::vector<std::string> 
             user_text = replace_text(user_text, "\r\n", "\n");
             user_text = replace_text(user_text, "\n\n", "\n");
 
-            text += model->bos_token + model->user_role + ": " + inputs[i] + model->eos_token;
+            text += model->bos_token + model->user_role + ":" + (space_after_roles ? " " : "") + inputs[i] + model->eos_token;
         } else {
             if (i == inputs.size() - 1) {
-                text += model->bos_token + model->response_role + ": " + inputs[i];
+                text += model->bos_token + model->response_role + ":" + (space_after_roles ? " " : "") + inputs[i];
             } else {
-                text += model->bos_token + model->response_role + ": " + inputs[i] + model->eos_token;
+                text += model->bos_token + model->response_role + ":" + (space_after_roles ? " " : "") + inputs[i] + model->eos_token;
             }
         }
     }
@@ -535,7 +536,7 @@ std::string runtime::apply_chat_template(int model_id, std::vector<std::string> 
     if (inputs.size() % 2 != 0) {
         text +=  model->response_role + ":";
         if (enable_reasoning) {
-            text += " " + model->thinking_token;
+            text += (space_after_roles ? " " : "") + model->thinking_token;
         }
     }
     return text;
@@ -2661,6 +2662,14 @@ void runtime::set_user_role(int model_id, std::string role) {
     model->user_role = role;
 }
 
+bool runtime::get_space_after_roles(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return true;
+    }
+    auto &model = _models.at(model_id);
+    return model->space_after_roles;
+}
+
 void runtime::set_response_role(int model_id, std::string role) {
     if (_models.find(model_id) == _models.end()) {
         return;
@@ -2701,6 +2710,14 @@ void runtime::set_thinking_token(int model_id, std::string thinking_token) {
     }
     auto &model = _models.at(model_id);
     model->thinking_token = thinking_token;
+}
+
+void runtime::set_space_after_roles(int model_id, bool space_after_roles) {
+    if (_models.find(model_id) == _models.end()) {
+        return;
+    }
+    auto &model = _models.at(model_id);
+    model->space_after_roles = space_after_roles;
 }
 
 std::vector<int> runtime::tokenizer_encode(int model_id, std::string text) {

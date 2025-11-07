@@ -61,6 +61,7 @@ struct ModelInstance {
     std::string eos_token = "\n\n";
     std::vector<std::string> stop_codes = {"\n\n", "\nUser", "User"};
     std::string thinking_token = "<think";
+    bool space_after_roles = true;
 
     // Response buffer
     std::string response_buffer;
@@ -216,10 +217,12 @@ public:
     void set_response_role(int model_id, std::string role);
     void set_bos_token(int model_id, std::string token);
     void set_eos_token(int model_id, std::string token);
+    void set_space_after_roles(int model_id, bool space_after_roles);
     std::string get_user_role(int model_id);
     std::string get_response_role(int model_id);
     std::string get_bos_token(int model_id);
     std::string get_eos_token(int model_id);
+    bool get_space_after_roles(int model_id);
 
     std::string apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning = false);
 

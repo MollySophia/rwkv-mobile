@@ -166,6 +166,8 @@ int rwkvmobile_runtime_set_bos_token(rwkvmobile_runtime_t runtime, int model_id,
 
 int rwkvmobile_runtime_set_user_role(rwkvmobile_runtime_t runtime, int model_id, const char * user_role);
 
+int rwkvmobile_runtime_set_space_after_roles(rwkvmobile_runtime_t runtime, int model_id, int space_after_roles);
+
 int rwkvmobile_runtime_set_response_role(rwkvmobile_runtime_t runtime, int model_id, const char * response_role);
 
 int rwkvmobile_runtime_set_thinking_token(rwkvmobile_runtime_t runtime, int model_id, const char * thinking_token);

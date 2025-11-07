@@ -668,6 +668,20 @@ late final _rwkvmobile_runtime_set_user_rolePtr = _lookup<
     ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Char> )>>('rwkvmobile_runtime_set_user_role');
 late final _rwkvmobile_runtime_set_user_role = _rwkvmobile_runtime_set_user_rolePtr.asFunction<int Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Char> )>();
 
+int rwkvmobile_runtime_set_space_after_roles(rwkvmobile_runtime_t runtime,
+int model_id,
+int space_after_roles,
+) {
+  return _rwkvmobile_runtime_set_space_after_roles(runtime,
+model_id,
+space_after_roles,
+);
+}
+
+late final _rwkvmobile_runtime_set_space_after_rolesPtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Int )>>('rwkvmobile_runtime_set_space_after_roles');
+late final _rwkvmobile_runtime_set_space_after_roles = _rwkvmobile_runtime_set_space_after_rolesPtr.asFunction<int Function(rwkvmobile_runtime_t , int , int )>();
+
 int rwkvmobile_runtime_set_response_role(rwkvmobile_runtime_t runtime,
 int model_id,
 ffi.Pointer<ffi.Char> response_role,

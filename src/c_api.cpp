@@ -581,6 +581,15 @@ int rwkvmobile_runtime_set_thinking_token(rwkvmobile_runtime_t runtime, int mode
     return RWKV_SUCCESS;
 }
 
+int rwkvmobile_runtime_set_space_after_roles(rwkvmobile_runtime_t runtime, int model_id, int space_after_roles) {
+    if (runtime == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto rt = static_cast<class runtime *>(runtime);
+    rt->set_space_after_roles(model_id, (bool)space_after_roles);
+    return RWKV_SUCCESS;
+}
+
 struct response_buffer rwkvmobile_runtime_get_response_buffer_content(rwkvmobile_runtime_t runtime, int model_id) {
     struct response_buffer buffer;
     buffer.content = nullptr;
