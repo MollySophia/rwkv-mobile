@@ -38,11 +38,12 @@ int main(int argc, char **argv) {
     rwkvmobile_runtime_set_eos_token(runtime, model_id, "\x17");
     rwkvmobile_runtime_set_bos_token(runtime, model_id, "\x16");
     rwkvmobile_runtime_set_token_banned(runtime, model_id, {0}, 1);
+    rwkvmobile_runtime_set_space_after_roles(runtime, model_id, 0);
 
     const char *unique_identifier = "abababababa";
     rwkvmobile_runtime_set_image_unique_identifier(runtime, unique_identifier);
 
-    snprintf(msg0, sizeof(msg0), "<%s>%s</%s>please recognize the table in this picture", unique_identifier, argv[5], unique_identifier);
+    snprintf(msg0, sizeof(msg0), "<%s>%s</%s>please recognize the text in this picture", unique_identifier, argv[5], unique_identifier);
     const char *input_list[] = {msg0};
 
     rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, input_list, 1, 500, nullptr, 0);
@@ -52,7 +53,7 @@ int main(int argc, char **argv) {
     }
 
     struct response_buffer buffer = rwkvmobile_runtime_get_response_buffer_content(runtime, model_id);
-    std::cout << buffer.content << std::endl;
+    std::cout << "\nResponse:\n" << buffer.content << std::endl;
     rwkvmobile_runtime_free_response_buffer(buffer);
 
     rwkvmobile_runtime_release_vision_encoder(runtime, model_id);
