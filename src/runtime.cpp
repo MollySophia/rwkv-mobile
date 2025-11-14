@@ -534,7 +534,7 @@ std::string runtime::apply_chat_template(int model_id, std::vector<std::string> 
     }
 
     if (inputs.size() % 2 != 0) {
-        text +=  model->response_role + ":";
+        text += model->bos_token + model->response_role + ":";
         if (enable_reasoning) {
             text += (space_after_roles ? " " : "") + model->thinking_token;
         }
