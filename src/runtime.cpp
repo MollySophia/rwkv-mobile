@@ -2624,6 +2624,14 @@ float runtime::get_temperature(int model_id) {
     return model->sampler->get_temperature();
 }
 
+float runtime::get_temperature_on_batch_slot(int model_id, int slot) {
+    if (_models.find(model_id) == _models.end()) {
+        return 1.0f;
+    }
+    auto &model = _models.at(model_id);
+    return model->sampler->get_temperature_on_batch_slot(slot);
+}
+
 int runtime::get_top_k(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 1;
@@ -2632,12 +2640,28 @@ int runtime::get_top_k(int model_id) {
     return model->sampler->get_top_k();
 }
 
+int runtime::get_top_k_on_batch_slot(int model_id, int slot) {
+    if (_models.find(model_id) == _models.end()) {
+        return 1;
+    }
+    auto &model = _models.at(model_id);
+    return model->sampler->get_top_k_on_batch_slot(slot);
+}
+
 float runtime::get_top_p(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 1.0f;
     }
     auto &model = _models.at(model_id);
     return model->sampler->get_top_p();
+}
+
+float runtime::get_top_p_on_batch_slot(int model_id, int slot) {
+    if (_models.find(model_id) == _models.end()) {
+        return 1.0f;
+    }
+    auto &model = _models.at(model_id);
+    return model->sampler->get_top_p_on_batch_slot(slot);
 }
 
 void runtime::set_penalty_params(int model_id, float presence_penalty, float frequency_penalty, float penalty_decay) {
@@ -2656,6 +2680,30 @@ float runtime::get_presence_penalty(int model_id) {
     }
     auto &model = _models.at(model_id);
     return model->sampler->get_presence_penalty();
+}
+
+float runtime::get_presence_penalty_on_batch_slot(int model_id, int slot) {
+    if (_models.find(model_id) == _models.end()) {
+        return 0.0f;
+    }
+    auto &model = _models.at(model_id);
+    return model->sampler->get_presence_penalty_on_batch_slot(slot);
+}
+
+float runtime::get_frequency_penalty_on_batch_slot(int model_id, int slot) {
+    if (_models.find(model_id) == _models.end()) {
+        return 0.0f;
+    }
+    auto &model = _models.at(model_id);
+    return model->sampler->get_frequency_penalty_on_batch_slot(slot);
+}
+
+float runtime::get_penalty_decay_on_batch_slot(int model_id, int slot) {
+    if (_models.find(model_id) == _models.end()) {
+        return 0.0f;
+    }
+    auto &model = _models.at(model_id);
+    return model->sampler->get_penalty_decay_on_batch_slot(slot);
 }
 
 float runtime::get_frequency_penalty(int model_id) {

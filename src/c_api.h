@@ -120,6 +120,8 @@ int rwkvmobile_runtime_load_history_state_to_memory(rwkvmobile_runtime_t runtime
 
 struct sampler_params rwkvmobile_runtime_get_sampler_params(rwkvmobile_runtime_t runtime, int model_id);
 
+struct sampler_params rwkvmobile_runtime_get_sampler_params_on_batch_slot(rwkvmobile_runtime_t runtime, int model_id, int slot);
+
 void rwkvmobile_runtime_set_sampler_params(rwkvmobile_runtime_t runtime, int model_id, struct sampler_params params);
 
 void rwkvmobile_runtime_set_sampler_params_on_batch_slot(rwkvmobile_runtime_t runtime, int model_id, int slot, struct sampler_params params);
@@ -129,6 +131,8 @@ int rwkvmobile_runtime_set_seed(rwkvmobile_runtime_t runtime, int model_id, int 
 int rwkvmobile_runtime_get_seed(rwkvmobile_runtime_t runtime, int model_id);
 
 struct penalty_params rwkvmobile_runtime_get_penalty_params(rwkvmobile_runtime_t runtime, int model_id);
+
+struct penalty_params rwkvmobile_runtime_get_penalty_params_on_batch_slot(rwkvmobile_runtime_t runtime, int model_id, int slot);
 
 void rwkvmobile_runtime_set_penalty_params(rwkvmobile_runtime_t runtime, int model_id, struct penalty_params params);
 

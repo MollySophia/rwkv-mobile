@@ -348,6 +348,21 @@ struct sampler_params rwkvmobile_runtime_get_sampler_params(rwkvmobile_runtime_t
     return params;
 }
 
+struct sampler_params rwkvmobile_runtime_get_sampler_params_on_batch_slot(rwkvmobile_runtime_t runtime, int model_id, int slot) {
+    struct sampler_params params;
+    params.temperature = 0;
+    params.top_k = 0;
+    params.top_p = 0;
+    if (runtime == nullptr) {
+        return params;
+    }
+    auto rt = static_cast<class runtime *>(runtime);
+    params.temperature = rt->get_temperature_on_batch_slot(model_id, slot);
+    params.top_k = rt->get_top_k_on_batch_slot(model_id, slot);
+    params.top_p = rt->get_top_p_on_batch_slot(model_id, slot);
+    return params;
+}
+
 void rwkvmobile_runtime_set_sampler_params(rwkvmobile_runtime_t runtime, int model_id, struct sampler_params params) {
     if (runtime == nullptr) {
         return;
@@ -376,6 +391,21 @@ struct penalty_params rwkvmobile_runtime_get_penalty_params(rwkvmobile_runtime_t
     params.presence_penalty = rt->get_presence_penalty(model_id);
     params.frequency_penalty = rt->get_frequency_penalty(model_id);
     params.penalty_decay = rt->get_penalty_decay(model_id);
+    return params;
+}
+
+struct penalty_params rwkvmobile_runtime_get_penalty_params_on_batch_slot(rwkvmobile_runtime_t runtime, int model_id, int slot) {
+    struct penalty_params params;
+    params.presence_penalty = 0;
+    params.frequency_penalty = 0;
+    params.penalty_decay = 0;
+    if (runtime == nullptr) {
+        return params;
+    }
+    auto rt = static_cast<class runtime *>(runtime);
+    params.presence_penalty = rt->get_presence_penalty_on_batch_slot(model_id, slot);
+    params.frequency_penalty = rt->get_frequency_penalty_on_batch_slot(model_id, slot);
+    params.penalty_decay = rt->get_penalty_decay_on_batch_slot(model_id, slot);
     return params;
 }
 

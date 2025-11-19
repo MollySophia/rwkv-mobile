@@ -252,6 +252,13 @@ public:
     float get_frequency_penalty(int model_id);
     float get_penalty_decay(int model_id);
 
+    float get_temperature_on_batch_slot(int model_id, int slot);
+    int get_top_k_on_batch_slot(int model_id, int slot);
+    float get_top_p_on_batch_slot(int model_id, int slot);
+    float get_presence_penalty_on_batch_slot(int model_id, int slot);
+    float get_frequency_penalty_on_batch_slot(int model_id, int slot);
+    float get_penalty_decay_on_batch_slot(int model_id, int slot);
+
     void set_token_banned(int model_id, std::vector<int> token_banned);
 
     bool is_generating(int model_id);
