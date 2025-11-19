@@ -6,10 +6,17 @@ namespace rwkvmobile {
 NucleusSampler::NucleusSampler() {
     _seed = std::random_device()();
     _generator.seed(_seed);
+
+    _temperature = std::vector<float>(_max_batch_size, 1.0f);
+    _top_k = std::vector<int>(_max_batch_size, 128);
+    _top_p = std::vector<float>(_max_batch_size, 0.5f);
+    _presence_penalty = std::vector<float>(_max_batch_size, 0.5f);
+    _frequency_penalty = std::vector<float>(_max_batch_size, 0.5f);
+    _penalty_decay = std::vector<float>(_max_batch_size, 0.996f);
 }
 
 int NucleusSampler::sample(const float* logits, const size_t size) {
-    return sample(logits, size, _temperature, _top_k, _top_p, _index_buffer, _probs_buffer);
+    return sample(logits, size, _temperature[0], _top_k[0], _top_p[0], _index_buffer, _probs_buffer);
 }
 
 int NucleusSampler::sample(const float* logits, const size_t size, float temperature, int top_k, float top_p) {
@@ -84,7 +91,7 @@ int NucleusSampler::sample(const float* logits, const size_t size, float tempera
 }
 
 std::vector<int> NucleusSampler::sample_batch(const float* logits, const size_t sampling_size, const size_t hstep, int batch_size) {
-    return sample_batch(logits, sampling_size, hstep, batch_size, std::vector<float>(batch_size, _temperature), std::vector<int>(batch_size, _top_k), std::vector<float>(batch_size, _top_p));
+    return sample_batch(logits, sampling_size, hstep, batch_size, _temperature, _top_k, _top_p);
 }
 
 std::vector<int> NucleusSampler::sample_batch(const float* logits, const size_t sampling_size, const size_t hstep, int batch_size, std::vector<float> temperature, std::vector<int> top_k, std::vector<float> top_p) {
@@ -154,8 +161,8 @@ void NucleusSampler::apply_penalties(float * logits, const size_t size, std::map
 }
 
 void NucleusSampler::apply_penalties(float * logits, const size_t size) {
-    if (_presence_penalty > 0.0f && _frequency_penalty > 0.0f && _penalty_decay > 0.0f) {
-        apply_penalties(logits, size, _occurences, _token_banned, _presence_penalty, _frequency_penalty, _penalty_decay);
+    if (_presence_penalty[0] > 0.0f && _frequency_penalty[0] > 0.0f && _penalty_decay[0] > 0.0f) {
+        apply_penalties(logits, size, _occurences, _token_banned, _presence_penalty[0], _frequency_penalty[0], _penalty_decay[0]);
     }
 }
 

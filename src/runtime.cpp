@@ -2564,6 +2564,26 @@ void runtime::set_sampler_params(int model_id, float temperature, int top_k, flo
     model->sampler->set_top_p(top_p);
 }
 
+void runtime::set_sampler_params_on_batch_slot(int model_id, int slot, float temperature, int top_k, float top_p) {
+    if (_models.find(model_id) == _models.end()) {
+        return;
+    }
+    auto &model = _models.at(model_id);
+    model->sampler->set_temperature_on_batch_slot(slot, temperature);
+    model->sampler->set_top_k_on_batch_slot(slot, top_k);
+    model->sampler->set_top_p_on_batch_slot(slot, top_p);
+}
+
+void runtime::set_penalty_params_on_batch_slot(int model_id, int slot, float presence_penalty, float frequency_penalty, float penalty_decay) {
+    if (_models.find(model_id) == _models.end()) {
+        return;
+    }
+    auto &model = _models.at(model_id);
+    model->sampler->set_presence_penalty_on_batch_slot(slot, presence_penalty);
+    model->sampler->set_frequency_penalty_on_batch_slot(slot, frequency_penalty);
+    model->sampler->set_penalty_decay_on_batch_slot(slot, penalty_decay);
+}
+
 void runtime::set_is_generating(int model_id, bool is_generating) {
     if (_models.find(model_id) == _models.end()) {
         return;

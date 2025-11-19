@@ -392,6 +392,22 @@ late final _rwkvmobile_runtime_set_sampler_paramsPtr = _lookup<
     ffi.NativeFunction<ffi.Void Function(rwkvmobile_runtime_t , ffi.Int , sampler_params )>>('rwkvmobile_runtime_set_sampler_params');
 late final _rwkvmobile_runtime_set_sampler_params = _rwkvmobile_runtime_set_sampler_paramsPtr.asFunction<void Function(rwkvmobile_runtime_t , int , sampler_params )>();
 
+void rwkvmobile_runtime_set_sampler_params_on_batch_slot(rwkvmobile_runtime_t runtime,
+int model_id,
+int slot,
+sampler_params params,
+) {
+  return _rwkvmobile_runtime_set_sampler_params_on_batch_slot(runtime,
+model_id,
+slot,
+params,
+);
+}
+
+late final _rwkvmobile_runtime_set_sampler_params_on_batch_slotPtr = _lookup<
+    ffi.NativeFunction<ffi.Void Function(rwkvmobile_runtime_t , ffi.Int , ffi.Int , sampler_params )>>('rwkvmobile_runtime_set_sampler_params_on_batch_slot');
+late final _rwkvmobile_runtime_set_sampler_params_on_batch_slot = _rwkvmobile_runtime_set_sampler_params_on_batch_slotPtr.asFunction<void Function(rwkvmobile_runtime_t , int , int , sampler_params )>();
+
 int rwkvmobile_runtime_set_seed(rwkvmobile_runtime_t runtime,
 int model_id,
 int seed,
@@ -443,6 +459,22 @@ params,
 late final _rwkvmobile_runtime_set_penalty_paramsPtr = _lookup<
     ffi.NativeFunction<ffi.Void Function(rwkvmobile_runtime_t , ffi.Int , penalty_params )>>('rwkvmobile_runtime_set_penalty_params');
 late final _rwkvmobile_runtime_set_penalty_params = _rwkvmobile_runtime_set_penalty_paramsPtr.asFunction<void Function(rwkvmobile_runtime_t , int , penalty_params )>();
+
+void rwkvmobile_runtime_set_penalty_params_on_batch_slot(rwkvmobile_runtime_t runtime,
+int model_id,
+int slot,
+penalty_params params,
+) {
+  return _rwkvmobile_runtime_set_penalty_params_on_batch_slot(runtime,
+model_id,
+slot,
+params,
+);
+}
+
+late final _rwkvmobile_runtime_set_penalty_params_on_batch_slotPtr = _lookup<
+    ffi.NativeFunction<ffi.Void Function(rwkvmobile_runtime_t , ffi.Int , ffi.Int , penalty_params )>>('rwkvmobile_runtime_set_penalty_params_on_batch_slot');
+late final _rwkvmobile_runtime_set_penalty_params_on_batch_slot = _rwkvmobile_runtime_set_penalty_params_on_batch_slotPtr.asFunction<void Function(rwkvmobile_runtime_t , int , int , penalty_params )>();
 
 void rwkvmobile_runtime_add_adsp_library_path(ffi.Pointer<ffi.Char> path,
 ) {

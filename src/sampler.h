@@ -34,21 +34,35 @@ public:
     void set_seed(int32_t seed);
     int get_seed();
 
-    void set_temperature(float temperature) { _temperature = temperature; }
-    void set_top_k(int top_k) { _top_k = top_k; }
-    void set_top_p(float top_p) { _top_p = top_p; }
-    void set_presence_penalty(float presence_penalty) { _presence_penalty = presence_penalty; }
-    void set_frequency_penalty(float frequency_penalty) { _frequency_penalty = frequency_penalty; }
-    void set_penalty_decay(float penalty_decay) { _penalty_decay = penalty_decay; }
+    void set_temperature(float temperature) { _temperature = std::vector<float>(_max_batch_size, temperature)   ; }
+    void set_top_k(int top_k) { _top_k = std::vector<int>(_max_batch_size, top_k); }
+    void set_top_p(float top_p) { _top_p = std::vector<float>(_max_batch_size, top_p); }
+    void set_presence_penalty(float presence_penalty) { _presence_penalty = std::vector<float>(_max_batch_size, presence_penalty); }
+    void set_frequency_penalty(float frequency_penalty) { _frequency_penalty = std::vector<float>(_max_batch_size, frequency_penalty); }
+    void set_penalty_decay(float penalty_decay) { _penalty_decay = std::vector<float>(_max_batch_size, penalty_decay); }
     void set_token_banned(std::vector<int> token_banned) { _token_banned = token_banned; }
 
-    float get_temperature() { return _temperature; }
-    int get_top_k() { return _top_k; }
-    float get_top_p() { return _top_p; }
-    float get_presence_penalty() { return _presence_penalty; }
-    float get_frequency_penalty() { return _frequency_penalty; }
-    float get_penalty_decay() { return _penalty_decay; }
+    void set_temperature_on_batch_slot(int slot, float temperature) { if (slot >= 0 && slot < _max_batch_size) _temperature[slot] = temperature; }
+    void set_top_k_on_batch_slot(int slot, int top_k) { if (slot >= 0 && slot < _max_batch_size) _top_k[slot] = top_k; }
+    void set_top_p_on_batch_slot(int slot, float top_p) { if (slot >= 0 && slot < _max_batch_size) _top_p[slot] = top_p; }
+    void set_presence_penalty_on_batch_slot(int slot, float presence_penalty) { if (slot >= 0 && slot < _max_batch_size) _presence_penalty[slot] = presence_penalty; }
+    void set_frequency_penalty_on_batch_slot(int slot, float frequency_penalty) { if (slot >= 0 && slot < _max_batch_size) _frequency_penalty[slot] = frequency_penalty; }
+    void set_penalty_decay_on_batch_slot(int slot, float penalty_decay) { if (slot >= 0 && slot < _max_batch_size) _penalty_decay[slot] = penalty_decay; }
+
+    float get_temperature() { return _temperature[0]; }
+    int get_top_k() { return _top_k[0]; }
+    float get_top_p() { return _top_p[0]; }
+    float get_presence_penalty() { return _presence_penalty[0]; }
+    float get_frequency_penalty() { return _frequency_penalty[0]; }
+    float get_penalty_decay() { return _penalty_decay[0]; }
     std::vector<int> get_token_banned() { return _token_banned; }
+
+    float get_temperature_on_batch_slot(int slot) { return _temperature[std::max(0, std::min(slot, _max_batch_size - 1))]; }
+    int get_top_k_on_batch_slot(int slot) { return _top_k[std::max(0, std::min(slot, _max_batch_size - 1))]; }
+    float get_top_p_on_batch_slot(int slot) { return _top_p[std::max(0, std::min(slot, _max_batch_size - 1))]; }
+    float get_presence_penalty_on_batch_slot(int slot) { return _presence_penalty[std::max(0, std::min(slot, _max_batch_size - 1))]; }
+    float get_frequency_penalty_on_batch_slot(int slot) { return _frequency_penalty[std::max(0, std::min(slot, _max_batch_size - 1))]; }
+    float get_penalty_decay_on_batch_slot(int slot) { return _penalty_decay[std::max(0, std::min(slot, _max_batch_size - 1))]; }
 
 private:
     std::mutex _mutex;
@@ -62,12 +76,14 @@ private:
 
     std::vector<int> _token_banned;
 
-    float _temperature = 1.0f;
-    int _top_k = 128;
-    float _top_p = 0.5f;
-    float _presence_penalty = 0.5;
-    float _frequency_penalty = 0.5;
-    float _penalty_decay = 0.996;
+    int _max_batch_size = 32;
+
+    std::vector<float> _temperature;
+    std::vector<int> _top_k;
+    std::vector<float> _top_p;
+    std::vector<float> _presence_penalty;
+    std::vector<float> _frequency_penalty;
+    std::vector<float> _penalty_decay;
 
     int32_t _seed = 42;
 

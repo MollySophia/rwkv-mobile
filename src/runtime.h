@@ -241,8 +241,10 @@ public:
     void set_thinking_token(int model_id, std::string thinking_token);
 
     void set_sampler_params(int model_id, float temperature, int top_k, float top_p);
-
     void set_penalty_params(int model_id, float presence_penalty, float frequency_penalty, float penalty_decay);
+    void set_sampler_params_on_batch_slot(int model_id, int slot, float temperature, int top_k, float top_p);
+    void set_penalty_params_on_batch_slot(int model_id, int slot, float presence_penalty, float frequency_penalty, float penalty_decay);
+
     float get_temperature(int model_id);
     int get_top_k(int model_id);
     float get_top_p(int model_id);
