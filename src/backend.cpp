@@ -6,7 +6,7 @@
 
 namespace rwkvmobile {
 
-state_node* execution_provider::find_deepest_matching_node(const std::vector<int> &ids) {
+state_node* execution_provider::find_deepest_matching_node(const std::vector<int> &ids, bool increment_activation_count) {
     auto node = state_root.get();
     // find the deepest node that matches the input text
     while (node->children.size() > 0) {
@@ -14,7 +14,9 @@ state_node* execution_provider::find_deepest_matching_node(const std::vector<int
         for (auto &child : node->children) {
             if (child->ids.size() <= ids.size() && std::equal(ids.begin(), ids.begin() + child->ids.size(), child->ids.begin())) {
                 node = child.get();
-                node->activation_count++; // Increment matched child count
+                if (increment_activation_count) {
+                    node->activation_count++; // Increment matched child count
+                }
                 matched = true;
                 break;
             }
@@ -27,7 +29,7 @@ state_node* execution_provider::find_deepest_matching_node(const std::vector<int
 }
 
 state_node* execution_provider::match_and_load_state(const std::vector<int> &ids, std::vector<int> &new_ids_to_prefill) {
-    auto node = find_deepest_matching_node(ids);
+    auto node = find_deepest_matching_node(ids, true);
 
     set_state(node->state);
 
@@ -44,10 +46,11 @@ int execution_provider::register_state_checkpoint(state_node* &node, const std::
 int execution_provider::register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const float *logits, std::any &state) {
     auto new_ids = node->ids;
     new_ids.insert(new_ids.end(), ids.begin(), ids.end());
-    auto tmp_node = find_deepest_matching_node(new_ids);
+    auto tmp_node = find_deepest_matching_node(new_ids, false);
     if (tmp_node->ids.size() == new_ids.size() && std::equal(tmp_node->ids.begin(), tmp_node->ids.end(), new_ids.begin())) {
         // avoid duplicate node
         node = tmp_node;
+        node->activation_count++;
         return RWKV_SUCCESS;
     }
 

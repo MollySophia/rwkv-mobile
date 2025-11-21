@@ -194,7 +194,7 @@ int runtime::load_model(std::string model_path, std::string backend_name, std::s
         return ret_model_id;
     }
 
-    model_instance->backend->state_root->activation_count = 20;
+    model_instance->backend->state_root->activation_count = 10;
     model_instance->backend->get_state(model_instance->backend->state_root->state);
     model_instance->backend->state_root->ids = std::vector<int>();
     model_instance->backend->state_root->logits = std::vector<float>(model_instance->backend->vocab_size, 0);

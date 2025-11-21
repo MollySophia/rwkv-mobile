@@ -21,7 +21,7 @@ public:
     int activation_count;
 
     state_node() {
-        this->activation_count = 20;
+        this->activation_count = 10;
     };
 
     state_node(const std::any state, const std::vector<int> ids, const std::vector<float> logits, bool is_constant = false) {
@@ -29,7 +29,7 @@ public:
         this->ids = ids;
         this->logits = logits;
         this->is_constant = is_constant;
-        this->activation_count = 20;
+        this->activation_count = 10;
     }
 
     ~state_node() {
@@ -87,7 +87,7 @@ public:
 
     std::unique_ptr<state_node> state_root;
 
-    state_node* find_deepest_matching_node(const std::vector<int> &ids);
+    state_node* find_deepest_matching_node(const std::vector<int> &ids, bool increment_activation_count = true);
     state_node* match_and_load_state(const std::vector<int> &ids, std::vector<int> &new_ids_to_prefill);
     int register_state_checkpoint(state_node* &node, const std::vector<int> &ids, const float *logits);
     int register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const float *logits, std::any &state);
