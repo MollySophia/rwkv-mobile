@@ -6,7 +6,7 @@
 
 namespace rwkvmobile {
 
-state_node* execution_provider::match_and_load_state(const std::vector<int> &ids, std::vector<int> &new_ids_to_prefill) {
+state_node* execution_provider::find_deepest_matching_node(const std::vector<int> &ids) {
     auto node = state_root.get();
     // find the deepest node that matches the input text
     while (node->children.size() > 0) {
@@ -23,6 +23,11 @@ state_node* execution_provider::match_and_load_state(const std::vector<int> &ids
             break;
         }
     }
+    return node;
+}
+
+state_node* execution_provider::match_and_load_state(const std::vector<int> &ids, std::vector<int> &new_ids_to_prefill) {
+    auto node = find_deepest_matching_node(ids);
 
     set_state(node->state);
 
@@ -37,12 +42,13 @@ int execution_provider::register_state_checkpoint(state_node* &node, const std::
 }
 
 int execution_provider::register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const float *logits, std::any &state) {
-    for (auto &child : node->children) {
-        if (child->ids.size() == ids.size() && std::equal(child->ids.begin(), child->ids.end(), ids.begin())) {
-            child->activation_count++;
-            node = child.get();
-            return RWKV_SUCCESS;
-        }
+    auto new_ids = node->ids;
+    new_ids.insert(new_ids.end(), ids.begin(), ids.end());
+    auto tmp_node = find_deepest_matching_node(new_ids);
+    if (tmp_node->ids.size() == new_ids.size() && std::equal(tmp_node->ids.begin(), tmp_node->ids.end(), new_ids.begin())) {
+        // avoid duplicate node
+        node = tmp_node;
+        return RWKV_SUCCESS;
     }
 
     auto new_node = std::make_unique<state_node>();
