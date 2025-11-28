@@ -36,6 +36,7 @@ option(ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 
 if (ANDROID)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g0")
+    set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
 endif()
 
 if (ADDRESS_SANITIZER)
