@@ -36,7 +36,6 @@ option(ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 
 if (ANDROID)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g0")
-    set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
 endif()
 
 if (ADDRESS_SANITIZER)
@@ -290,6 +289,12 @@ endif()
 
 add_library(rwkv_mobile_internal STATIC ${RWKV_MOBILE_SRCS})
 target_include_directories(rwkv_mobile_internal PUBLIC src)
+if (CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+    target_link_options(rwkv_mobile_internal PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384"
+    )
+endif()
 
 if (WIN32)
     target_compile_definitions(rwkv_mobile_internal PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
@@ -594,6 +599,12 @@ if (BUILD_STATIC_LIB)
     add_custom_target(rwkv_mobile ALL DEPENDS ${CMAKE_BINARY_DIR}/librwkv_mobile.a)
 else()
     add_library(rwkv_mobile SHARED src/c_api.cpp)
+    if (CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+        target_link_options(rwkv_mobile PRIVATE
+            "-Wl,-z,max-page-size=16384"
+            "-Wl,-z,common-page-size=16384"
+        )
+    endif()
     target_link_libraries(rwkv_mobile PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,rwkv_mobile_internal>")
     if (WIN32)
         target_compile_definitions(rwkv_mobile PRIVATE _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
