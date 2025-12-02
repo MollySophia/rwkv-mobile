@@ -185,7 +185,13 @@ int runtime::load_model(std::string model_path, std::string backend_name, std::s
         LOGE("Failed to load model from: %s, errno = %d\n", model_path.c_str(), ret);
         return ret_model_id;
     }
-    LOGI("Loaded model from: %s as model_id = %d\n", model_path.c_str(), _next_model_id);
+
+    int next_model_id = 0;
+    while (_models.find(next_model_id) != _models.end()) {
+        next_model_id++;
+    }
+
+    LOGI("Loaded model from: %s as model_id = %d\n", model_path.c_str(), next_model_id);
     LOGI("Model num_layers: %d, num_heads: %d, hidden_size: %d, vocab_size: %d\n",
          model_instance->backend->n_layers, model_instance->backend->num_heads, model_instance->backend->hidden_size, model_instance->backend->vocab_size);
     model_instance->backend->zero_state();
@@ -208,7 +214,7 @@ int runtime::load_model(std::string model_path, std::string backend_name, std::s
         }
         ret = model_instance->tokenizer->load(tokenizer_path);
         if (ret) {
-            LOGE("[LOAD_MODEL] Failed to load tokenizer for model ID %d", _next_model_id);
+            LOGE("[LOAD_MODEL] Failed to load tokenizer for model ID %d", next_model_id);
             return ret_model_id;
         }
     }
@@ -220,7 +226,7 @@ int runtime::load_model(std::string model_path, std::string backend_name, std::s
     }
 
     // 5. Store the instance and return its ID
-    ret_model_id = _next_model_id++;
+    ret_model_id = next_model_id;
     _models[ret_model_id] = std::move(model_instance);
     _models[ret_model_id]->model_path = model_path;
     _models[ret_model_id]->backend_name = backend_name;

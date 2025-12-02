@@ -366,7 +366,6 @@ public:
 
 private:
     std::map<int, std::unique_ptr<ModelInstance>> _models;
-    int _next_model_id = 0;
 
 #ifdef ENABLE_LLAMACPP
     std::unique_ptr<rwkv_embedding> _embedding;
