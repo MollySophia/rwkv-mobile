@@ -27,23 +27,27 @@ int web_rwkv_backend::load_model(std::string model_path) {
 
     int ret = 0;
     if (model_path.find("prefab") != std::string::npos) {
-        load_prefab(model_path.c_str(), use_fp16, batch_size);
+        ret = load_prefab(model_path.c_str(), use_fp16, batch_size);
     } else if (model_path.find("ABC") != std::string::npos
         || model_path.find("abc") != std::string::npos
         || model_path.find("MIDI") != std::string::npos
         || model_path.find("midi") != std::string::npos) {
-        load_with_rescale(model_path.c_str(), 0, 0, 0, 999, use_fp16, batch_size);
+        ret = load_with_rescale(model_path.c_str(), 0, 0, 0, 999, use_fp16, batch_size);
     } else if (model_path.find("extended") != std::string::npos) {
-        load_extended(model_path.c_str(), 0, 0, 999, use_fp16, batch_size);
+        ret = load_extended(model_path.c_str(), 0, 0, 999, use_fp16, batch_size);
     } else {
         if (model_path.find("0.1B") != std::string::npos
         || model_path.find("0.4B") != std::string::npos
         || model_path.find("0.1b") != std::string::npos
         || model_path.find("0.4b") != std::string::npos) {
-            load(model_path.c_str(), 999, 0, 0, use_fp16, batch_size);
+            ret = load(model_path.c_str(), 999, 0, 0, use_fp16, batch_size);
         } else {
-            load(model_path.c_str(), 0, 999, 0, use_fp16, batch_size);
+            ret = load(model_path.c_str(), 0, 999, 0, use_fp16, batch_size);
         }
+    }
+    if (ret != 0) {
+        LOGE("web_rwkv_backend::load_model: failed to load model");
+        return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
 
     struct ModelInfoOutput info = get_model_info();
