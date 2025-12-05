@@ -95,6 +95,13 @@ int main(int argc, char ** argv) {
         return probs;
     };
 
+    std::map<std::string, int> choices_tokens = {
+        {" A", runtime.tokenizer_encode(model_id, " A")[0]},
+        {" B", runtime.tokenizer_encode(model_id, " B")[0]},
+        {" C", runtime.tokenizer_encode(model_id, " C")[0]},
+        {" D", runtime.tokenizer_encode(model_id, " D")[0]},
+    };
+
     // main loop
     int total_correct = 0;
     std::map<std::string, scoreboard> score_by_subject;
@@ -110,10 +117,16 @@ int main(int argc, char ** argv) {
         runtime.clear_state(model_id);
         runtime.eval_logits(model_id, prompt_tokens, output);
         auto probs = softmax(output, runtime.get_vocab_size(model_id));
-        auto output_id = std::max_element(probs.begin(), probs.end()) - probs.begin();
-        answer = runtime.tokenizer_decode(model_id, output_id);
-        // printf("Answer: %s\n", answer.c_str());
-        // printf("Target: %s\n", q.answer.c_str());
+        // auto output_id = std::max_element(probs.begin(), probs.end()) - probs.begin();
+
+        // answer = runtime.tokenizer_decode(model_id, output_id);
+        auto max_prob = 0.0f;
+        for (const auto& choice : choices_tokens) {
+            if (probs[choice.second] > max_prob) {
+                max_prob = probs[choice.second];
+                answer = choice.first;
+            }
+        }
 
         score_by_subject[q.subject].total++;
         if (answer == q.answer) {
