@@ -73,7 +73,7 @@ enum hexagon_nn_thread_type_t {
 ///
 /// @brief Type for specifying the preemption scheme
 ///
-typedef enum { COOP, FORCED, DEFERRED, ORDERED_COOP } hexagon_nn_preemption_style_t;
+typedef enum { COOP, FORCED, DEFERRED } hexagon_nn_preemption_style_t;
 
 enum MemContentType {
     Standard = 0,

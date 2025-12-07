@@ -24,29 +24,6 @@ extern "C" {
 #endif
 
 //=============================================================================
-// Error Codes
-//=============================================================================
-
-#define QNN_SYSTEM_COMMON_MIN_ERROR  QNN_MIN_ERROR_SYSTEM
-#define QNN_SYSTEM_COMMON_MAX_ERROR  QNN_MIN_ERROR_SYSTEM + 999
-#define QNN_SYSTEM_PROFILE_MIN_ERROR QNN_MIN_ERROR_SYSTEM + 1000
-#define QNN_SYSTEM_PROFILE_MAX_ERROR QNN_MIN_ERROR_SYSTEM + 1999
-
-/**
- * @brief QNN System Profile API result / error codes.
- */
-typedef enum {
-  /// Qnn System success
-  QNN_SYSTEM_COMMON_NO_ERROR = QNN_SUCCESS,
-  /// There is an API component that is not supported yet.
-  QNN_SYSTEM_COMMON_ERROR_UNSUPPORTED_FEATURE = QNN_COMMON_ERROR_NOT_SUPPORTED,
-  /// QNN System invalid handle
-  QNN_SYSTEM_COMMON_ERROR_INVALID_HANDLE = QNN_SYSTEM_COMMON_MIN_ERROR + 0,
-  /// One or more arguments to a System API is/are NULL/invalid.
-  QNN_SYSTEM_COMMON_ERROR_INVALID_ARGUMENT = QNN_SYSTEM_COMMON_MIN_ERROR + 1
-} QnnSystemCommon_Error_t;
-
-//=============================================================================
 // Macros
 //=============================================================================
 
@@ -60,7 +37,7 @@ typedef enum {
 
 // Provide values to use for API version.
 #define QNN_SYSTEM_API_VERSION_MAJOR 1
-#define QNN_SYSTEM_API_VERSION_MINOR 5
+#define QNN_SYSTEM_API_VERSION_MINOR 4
 #define QNN_SYSTEM_API_VERSION_PATCH 0
 
 // Error code space assigned to system API components

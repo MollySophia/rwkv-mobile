@@ -36,22 +36,18 @@ extern "C" {
  *        options associated with QnnContext
  */
 typedef enum {
-  QNN_HTP_CONTEXT_CONFIG_OPTION_WEIGHT_SHARING_ENABLED               = 1,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_REGISTER_MULTI_CONTEXTS              = 2,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_FILE_READ_MEMORY_BUDGET              = 3,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_DSP_MEMORY_PROFILING_ENABLED         = 4,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_SHARE_RESOURCES                      = 5,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_IO_MEM_ESTIMATION                    = 6,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_PREPARE_ONLY                         = 7,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_INIT_ACCELERATION                    = 8,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_SKIP_VALIDATION_ON_BINARY_SECTION    = 9,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_SHARE_RESOURCES_OPTIMIZATION_TYPE    = 10,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_USE_EXTENDED_UDMA                    = 11,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_REGISTER_CONCURRENT_RESOURCE_SHARING = 12,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_LORA_WEIGHT_SHARING_ENABLED          = 13,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_RESERVED_14                          = 14,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_RESERVED_15                          = 15,
-  QNN_HTP_CONTEXT_CONFIG_OPTION_UNKNOWN                              = 0x7fffffff
+  QNN_HTP_CONTEXT_CONFIG_OPTION_WEIGHT_SHARING_ENABLED            = 1,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_REGISTER_MULTI_CONTEXTS           = 2,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_FILE_READ_MEMORY_BUDGET           = 3,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_DSP_MEMORY_PROFILING_ENABLED      = 4,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_SHARE_RESOURCES                   = 5,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_IO_MEM_ESTIMATION                 = 6,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_PREPARE_ONLY                      = 7,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_INIT_ACCELERATION                 = 8,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_SKIP_VALIDATION_ON_BINARY_SECTION = 9,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_SHARE_RESOURCES_OPTIMIZATION_TYPE = 10,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_USE_EXTENDED_UDMA                 = 11,
+  QNN_HTP_CONTEXT_CONFIG_OPTION_UNKNOWN                           = 0x7fffffff
 } QnnHtpContext_ConfigOption_t;
 
 typedef struct {
@@ -73,8 +69,7 @@ typedef enum {
   SEQUENTIAL_WITH_VA_OPTIMIZATION,
   // This type is used for sequential graph execution, optimizing memory.
   SEQUENTIAL_WITHOUT_VA_OPTIMIZATION,
-  // This type is used for concurrent resource sharing, optimizing memory by sharing
-  // resources across contexts with the same priority level.
+  // Currently not supported
   CONCURRENT_OPTIMIZATION,
 } QnnHtpContext_ShareResourcesOptimizationType_t;
 
@@ -124,10 +119,6 @@ typedef enum {
  *               +----+---------------------------------------------------------------------+--------------------------------------------------+
  *               | 11 | QNN_HTP_CONTEXT_CONFIG_OPTION_USE_EXTENDED_UDMA                     | bool                                             |
  *               +----+---------------------------------------------------------------------+--------------------------------------------------+
- *               | 12 | QNN_HTP_CONTEXT_CONFIG_OPTION_REGISTER_CONCURRENT_RESOURCE_SHARING  | QnnHtpContext_GroupRegistration_t                |
- *               +----+---------------------------------------------------------------------+--------------------------------------------------+
- *               | 13 | QNN_HTP_CONTEXT_CONFIG_OPTION_LORA_WEIGHT_SHARING_ENABLED           | bool                                             |
- *               +----+---------------------------------------------------------------------+--------------------------------------------------+
  *               \endverbatim
  */
 typedef struct QnnHtpContext_CustomConfig {
@@ -144,8 +135,8 @@ typedef struct QnnHtpContext_CustomConfig {
     uint64_t fileReadMemoryBudgetInMb;
     bool dspMemoryProfilingEnabled;
     // This field enables resource optimization. When it is set to true optimizations are
-    // done based on QnnHtpContext_ShareResourcesOptimizationType_t setting.
-    // Note This configuration option is only supported when using QnnContext_createFromBinaryListAsync API.
+    // done based on QnnHtpContext_ShareResourcesOptimizationType_t setting. 
+     // Note This configuration option is only supported when using QnnContext_createFromBinaryListAsync API.
     bool shareResources;
     // This field enables I/O memory estimation during QnnContext_createFromBinary API when multiple
     // PDs are available. When enabled, it estimates the total size of the I/O tensors required by
@@ -183,12 +174,6 @@ typedef struct QnnHtpContext_CustomConfig {
     // exhausted. Total RAM usage may increase if used together with shared weights. Only available for Hexagon
     // arch v81 and above.
     bool useExtendedUdma;
-    // This field enables concurrent resource sharing among graphs with the same priority level
-    // during the QnnContext_createFromBinary API on devices that support this capability.
-    QnnHtpContext_GroupRegistration_t concurrentGroupRegistration;
-    // This field sets the lora weight sharing. When it is set to true, one additional replaceable weight blob
-    // that contains the RP shared by all graphs will be generated and maintained. It is disabled by default.
-    bool loraWeightSharingEnabled;
   };
 } QnnHtpContext_CustomConfig_t;
 
@@ -213,8 +198,6 @@ typedef enum {
   QNN_HTP_CONTEXT_GET_PROP_MAX_SPILLFILL_BUFFER_SIZE = 2,
   // get the size requirement of persistent weights buffer
   QNN_HTP_CONTEXT_GET_PROP_WEIGHTS_BUFFER_SIZE = 3,
-  QNN_HTP_CONTEXT_GET_PROP_RESERVED_4 = 4,
-  QNN_HTP_CONTEXT_GET_PROP_RESERVED_5 = 5,
   // Unused, present to ensure 32 bits.
   QNN_HTP_CONTEXT_GET_PROP_UNDEFINED = 0x7fffffff
 } QnnHtpContext_GetPropertyOption_t;

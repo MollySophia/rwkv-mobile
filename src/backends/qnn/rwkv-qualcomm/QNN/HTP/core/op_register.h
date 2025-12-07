@@ -27,36 +27,60 @@ namespace hnnx {
 PUSH_VISIBILITY(default)
 
 API_EXPORT OpFactory make_op_custom_internal(const std::string_view op_name_in, const std::string_view type_tag,
-                                             op_reg_parms const &opreg_parms, bool is_external = false,
-                                             const std::string_view file_name = "");
+                                             op_reg_parms const &opreg_parms, bool is_external = false);
 
 API_EXPORT OpFactory make_op_custom(const std::string_view op_name_in, std::string_view const type_tag,
-                                    op_reg_parms const &opreg_parmsm, std::string_view const file_name = "");
+                                    op_reg_parms const &opreg_parms);
 
 POP_VISIBILITY()
+template <bool IS_SIMPLE> struct item_return {
+};
 
-struct item_return {
+template <> struct item_return<false> {
     typedef op_reg_parms type;
+};
+
+template <> struct item_return<true> {
+    typedef simop_reg_parms type;
 };
 
 // parms_for is wrapped in this class to avoid if constexpr implementation since
 // the AUTOSAR checker doesn't evaluate if constexpr blocks properly
+template <bool IS_SIMPLE> class GetParms {
+  public:
+    template <typename Derived, int I> constexpr static typename item_return<IS_SIMPLE>::type get();
+    template <auto FP, int I> constexpr static typename item_return<IS_SIMPLE>::type get();
+};
+
 // LCOV_EXCL_START [SAFTYSWCCB-1736] constexprs resolved during compile time
 // used in pub/impl/ops_opts_registration_defs.h for internal ops with constexpr lvalue
-class GetParms {
+template <> class GetParms<false> {
   public:
-    template <typename Derived, int I> constexpr static typename item_return::type get()
+    template <typename Derived, int I> constexpr static typename item_return<false>::type get()
     {
         return op_reg_parms::parms_for<Derived, FlagCounter<Derived, I>::get()>();
     }
 
-    template <auto FP, int I> constexpr static typename item_return::type get()
+    template <auto FP, int I> constexpr static typename item_return<false>::type get()
     {
         using Derived = typename DerivedType<FP>::type;
         return op_reg_parms::parms_for<Derived, FlagCounter<Derived, I>::get()>();
     }
 };
 
+template <> class GetParms<true> {
+  public:
+    template <typename Derived, int I> constexpr static typename item_return<true>::type get()
+    {
+        return simop_reg_parms::parms_for_simple<Derived, FlagCounter<Derived, I>::get()>();
+    }
+
+    template <auto FP, int I> constexpr static typename item_return<true>::type get()
+    {
+        using Derived = typename DerivedType<FP>::type;
+        return simop_reg_parms::parms_for_simple<Derived, FlagCounter<Derived, I>::get()>();
+    }
+};
 //LCOV_EXCL_STOP
 
 } // namespace hnnx

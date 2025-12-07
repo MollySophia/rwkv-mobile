@@ -1,7 +1,7 @@
 //==============================================================================
 //
 // Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
-// All rights reserved.
+// All Rights Reserved.
 // Confidential and Proprietary - Qualcomm Technologies, Inc.
 //
 //==============================================================================
@@ -19,7 +19,6 @@
 #define QNN_CONTEXT_H
 
 #include "QnnCommon.h"
-#include "QnnMem.h"
 #include "QnnTypes.h"
 
 #ifdef __cplusplus
@@ -123,8 +122,6 @@ typedef enum {
   QNN_CONTEXT_CONFIG_BINARY_COMPATIBILITY = 8,
   /// Defer graph deserialization till first graph retrieval
   QNN_CONTEXT_CONFIG_OPTION_DEFER_GRAPH_INIT = 9,
-  /// Enables multiple Graph switching
-  QNN_CONTEXT_CONFIG_GRAPH_RETENTION_ORDER = 10,
   // Unused, present to ensure 32 bits.
   QNN_CONTEXT_CONFIG_UNDEFINED = 0x7FFFFFFF
 } QnnContext_ConfigOption_t;
@@ -194,8 +191,6 @@ typedef struct {
     QnnContext_BinaryCompatibilityType_t binaryCompatibilityType;
     /// Used with QNN_CONTEXT_CONFIG_OPTION_DEFER_GRAPH_INIT
     uint8_t isGraphInitDeferred;
-    /// Used with QNN_CONTEXT_CONFIG_GRAPH_RETENTION_ORDER
-    const char* const* graphRetentionOrder;
   };
 } QnnContext_Config_t;
 
@@ -294,252 +289,12 @@ typedef struct {
 } QnnContext_Params_t;
 
 /**
- * @brief This structure defines a request for context binary data.
- *        It specifies the offset and size of the requested data.
- */
-typedef struct {
-  /// Offset of the requested data relative to the start of the context binary.
-  Qnn_ContextBinarySize_t offset;
-  /// Size of the requested data.
-  Qnn_ContextBinarySize_t size;
-  /// A flag to indicate whether the requested buffer will be used for backend mapping.
-  /// This flag has no effect on a raw buffer callback behavior. For a dma buffer callback
-  /// If set to 1, the callback must return both memptr and memfd in the response structure.
-  /// If set to 0, only memptr is required.
-  uint8_t isBackendMappingNeeded;
-} Qnn_ContextBinaryDataRequest_t;
-
-/**
- * @brief This structure defines the response to a context binary data request
- *        for raw buffer callback.
- */
-typedef struct {
-  /// Pointer to the requested raw buffer.
-  void* memPtr;
-  /// Actual offset of the requested data relative to the start of the external buffer.
-  Qnn_ContextBinarySize_t dataStartOffset;
-  /// Aligned size of the requested data.
-  Qnn_ContextBinarySize_t alignedSize;
-} Qnn_ContextBinaryRawDataResponse_t;
-
-/**
- * @brief This structure defines the response to a context binary data request
- *        for dma buffer callback.
- */
-typedef struct {
-  /// struct includes DMA-BUF related information
-  Qnn_MemDmaBufInfo_t dmaBuffer;
-  /// Actual offset of the requested data relative to the start of the external buffer.
-  Qnn_ContextBinarySize_t dataStartOffset;
-  /// Aligned size of the requested data.
-  Qnn_ContextBinarySize_t alignedSize;
-} Qnn_ContextBinaryDmaDataResponse_t;
-
-/**
- * @brief Structure to manage the raw buffer to be released.
- *        This structure is used in the Qnn_ContextBinaryRawDataReleaseFn_t interface.
- */
-typedef struct {
-  /// Pointer to the raw buffer to be released.
-  void* memPtr;
-  /// Size of the raw buffer to be released.
-  Qnn_ContextBinarySize_t memSize;
-} Qnn_ContextBinaryRawDataMem_t;
-
-/**
- * @brief Structure to manage the dma buffer to be released.
- *        This structure is used in the Qnn_ContextBinaryDmaDataReleaseFn_t interface.
- */
-typedef struct {
-  /// dmabuffer to be released.
-  Qnn_MemDmaBufInfo_t dmaBuffer;
-  /// Size of the dma buffer to be released.
-  Qnn_ContextBinarySize_t memSize;
-} Qnn_ContextBinaryDmaDataMem_t;
-
-/**
- * @brief A client-defined callback function to provide context binary data in a raw buffer.
- *        This callback is used for allocating external raw buffers and loading data.
- *
- * @param[in] req A structure containing the request for context binary data.
- *
- * @param[out] rawDataResponse A structure to be filled with the response to the request.
- *
- * @param[in] notifyParam Client-supplied data object which may be used to identify
- *                        which context's instance this callback applies to.
- *
- * @return Error code:
- *         - QNN_SUCCESS: no error is encountered
- *         - QNN_CONTEXT_ERROR_MEM_ALLOC: memory allocation error
- *         - QNN_CONTEXT_ERROR_INVALID_ARGUMENT: one of the arguments to the API is invalid/NULL
- */
-typedef Qnn_ErrorHandle_t (*Qnn_ContextBinaryRawDataProviderFn_t)(
-    Qnn_ContextBinaryDataRequest_t req,
-    Qnn_ContextBinaryRawDataResponse_t* rawDataResponse,
-    void* notifyParam);
-
-/**
- * @brief A client-defined callback function to provide context binary data in a dma buffer.
- *        This callback is used for allocating external dma buffers and loading data.
- *
- * @param[in] req A structure containing the request for context binary data.
- *
- * @param[out] dmaDataResponse A structure to be filled with the response to the request.
- *
- * @param[in] notifyParam Client-supplied data object which may be used to identify
- *                        which context's instance this callback applies to.
- *
- * @return Error code:
- *         - QNN_SUCCESS: no error is encountered
- *         - QNN_CONTEXT_ERROR_MEM_ALLOC: memory allocation error
- *         - QNN_CONTEXT_ERROR_INVALID_ARGUMENT: one of the arguments to the API is invalid/NULL
- */
-typedef Qnn_ErrorHandle_t (*Qnn_ContextBinaryDmaDataProviderFn_t)(
-    Qnn_ContextBinaryDataRequest_t req,
-    Qnn_ContextBinaryDmaDataResponse_t* dmaDataResponse,
-    void* notifyParam);
-
-/**
- * @brief A client-defined callback function to release context binary data in a raw buffer.
- *
- * @param[in] rawDataMem A structure holding properties of the raw buffer.
- *
- * @param[in] notifyParam Client-supplied data object which may be used to identify
- *                        which context's instance this callback applies to.
- *
- * @return Error code:
- *         - QNN_SUCCESS: no error is encountered
- *         - QNN_CONTEXT_ERROR_MEM_ALLOC: memory allocation error
- *         - QNN_CONTEXT_ERROR_INVALID_ARGUMENT: one of the arguments to the API is invalid/NULL
- */
-typedef Qnn_ErrorHandle_t (*Qnn_ContextBinaryRawDataReleaseFn_t)(
-    Qnn_ContextBinaryRawDataMem_t rawDataMem, void* notifyParam);
-
-/**
- * @brief A client-defined callback function to release context binary data in a dma buffer.
- *
- * @param[in] dmaDataMem A structure holding properties of the dma buffer.
- *
- * @param[in] notifyParam Client-supplied data object which may be used to identify
- *                        which context's instance this callback applies to.
- *
- * @return Error code:
- *         - QNN_SUCCESS: no error is encountered
- *         - QNN_CONTEXT_ERROR_MEM_ALLOC: memory allocation error
- *         - QNN_CONTEXT_ERROR_INVALID_ARGUMENT: one of the arguments to the API is invalid/NULL
- */
-typedef Qnn_ErrorHandle_t (*Qnn_ContextBinaryDmaDataReleaseFn_t)(
-    Qnn_ContextBinaryDmaDataMem_t dmaDataMem, void* notifyParam);
-
-/**
- * @brief This structure defines callbacks for raw buffer operations related to context binary data.
- *        It includes pointers to the data provider and data release functions, as well as a
- *        client-supplied data object.
- */
-typedef struct {
-  /// Function pointer to provide context binary data, cannot be NULL.
-  Qnn_ContextBinaryRawDataProviderFn_t dataProvide;
-  /// Function pointer to release context binary data, cannot be NULL.
-  Qnn_ContextBinaryRawDataReleaseFn_t dataRelease;
-  /// Client-supplied data object.
-  void* notifyParam;
-} Qnn_ContextBinaryRawBufferCallbackV1_t;
-
-/**
- * @brief This structure defines callbacks for dma buffer operations related to context binary data.
- *        It includes pointers to the data provider and data release functions, as well as a
- *        client-supplied data object.
- */
-typedef struct {
-  /// Function pointer to provide context binary data, cannot be NULL.
-  Qnn_ContextBinaryDmaDataProviderFn_t dataProvide;
-  /// Function pointer to release context binary data, cannot be NULL.
-  Qnn_ContextBinaryDmaDataReleaseFn_t dataRelease;
-  /// Client-supplied data object.
-  void* notifyParam;
-} Qnn_ContextBinaryDmaBufferCallbackV1_t;
-
-/**
- * @brief Enum to distinguish various raw buffer callback definitions
- */
-typedef enum {
-  QNN_CONTEXT_CALLBACK_RAW_BUFFER_VERSION_1 = 1,
-  /// Unused, present to ensure 32 bits.
-  QNN_CONTEXT_CALLBACK_RAW_BUFFER_VERSION_UNDEFINED = 0x7FFFFFFF
-} Qnn_ContextBinaryRawBufferCallbackVersion_t;
-
-/**
- * @brief Structure which provides various versions of raw buffer callbacks
- */
-typedef struct {
-  /// Version identifier for the callback.
-  Qnn_ContextBinaryRawBufferCallbackVersion_t version;
-  union UNNAMED {
-    Qnn_ContextBinaryRawBufferCallbackV1_t v1;
-  };
-} Qnn_ContextBinaryRawBufferCallback_t;
-
-/**
- * @brief Enum to distinguish various dma buffer callback definitions
- */
-typedef enum {
-  QNN_CONTEXT_CALLBACK_DMA_BUFFER_VERSION_1 = 1,
-  /// Unused, present to ensure 32 bits.
-  QNN_CONTEXT_CALLBACK_DMA_BUFFER_VERSION_UNDEFINED = 0x7FFFFFFF
-} Qnn_ContextBinaryDmaBufferCallbackVersion_t;
-
-/**
- * @brief Structure which provides various versions of dma buffer callbacks
- */
-typedef struct {
-  /// Version identifier for the callback.
-  Qnn_ContextBinaryDmaBufferCallbackVersion_t version;
-  union UNNAMED {
-    Qnn_ContextBinaryDmaBufferCallbackV1_t v1;
-  };
-} Qnn_ContextBinaryDmaBufferCallback_t;
-
-/**
- * @brief Enum to distinguish type of context binary callback.
- */
-typedef enum {
-  // Raw buffer callback. This type-defined callback returns a raw memory pointer
-  // referring to a subsection of the context binary.
-  QNN_CONTEXT_CALLBACK_RAW_BUFFER = 1,
-  // Dma buffer callback. This type-defined callback returns a DmaBuffInfo structure
-  // referring to a subsection of the context binary.
-  QNN_CONTEXT_CALLBACK_DMA_BUFFER = 2,
-  /// Unused, present to ensure 32 bits.
-  QNN_CONTEXT_CALLBACK_UNDEFINED = 0x7FFFFFFF
-} Qnn_ContextBinaryCallbackType_t;
-
-/**
- * @brief Structure which provides different types of context binary callback.
- */
-typedef struct {
-  /// Type identifier for the callback.
-  Qnn_ContextBinaryCallbackType_t type;
-  union UNNAMED {
-    /// Raw buffer callback.
-    Qnn_ContextBinaryRawBufferCallback_t rawBufferCallback;
-    /// dma buffer callback.
-    Qnn_ContextBinaryDmaBufferCallback_t dmaBufferCallback;
-  };
-} Qnn_ContextBinaryCallback_t;
-
-/**
  * @brief Enum to distinguish type of binary section to retrieve
  */
 typedef enum {
   /// Portion of the context binary containing recent updates applied through
   /// QnnTensor_updateGraphTensors() or QnnTensor_updateContextTensors()
   QNN_CONTEXT_SECTION_UPDATABLE = 1,
-  /// Portion of the context binary containing recent static data updates applied through
-  /// QnnTensor_updateGraphTensors() or QnnTensor_updateContextTensors()
-  QNN_CONTEXT_SECTION_UPDATABLE_WEIGHTS = 2,
-  /// Portion of the context binary containing recent quantization updates applied through
-  /// QnnTensor_updateGraphTensors() or QnnTensor_updateContextTensors()
-  QNN_CONTEXT_SECTION_UPDATABLE_QUANT_PARAMS = 3,
   /// Unused, present to ensure 32 bits.
   QNN_CONTEXT_SECTION_UNDEFINED = 0x7FFFFFFF
 } QnnContext_SectionType_t;
@@ -1037,84 +792,6 @@ Qnn_ErrorHandle_t QnnContext_createFromBinaryListAsync(Qnn_BackendHandle_t backe
  */
 QNN_API
 Qnn_ErrorHandle_t QnnContext_finalize(Qnn_ContextHandle_t context, Qnn_ProfileHandle_t profile);
-
-/**
- * @brief A function to create a context from a stored binary.
- *        This interface through the callback parameter provides a registration mechanism for
- *        external dma buffer management and custom data loading scheme. The callback method is
- *        used to manage external dma buffers (including allocation and release) for shared weights
- *        and non-shared weights, and to perform the data loading process, offering a client-defined
- *        alternative to the default scheme in QnnContext_createFromBinary.
- *
- * @param[in] backend A backend handle.
- *
- * @param[in] device A device handle to set hardware affinity for the created context. NULL value
- *                   can be supplied for device handle and it is equivalent to calling
- *                   QnnDevice_create() with NULL config.
- *
- * @param[in] config Pointer to a NULL terminated array of config option pointers. NULL is allowed
- *                   and indicates no config options are provided. In case they are not provided,
- *                   all config options have a default value in accordance with the serialized
- *                   context. If the same config option type is provided multiple times, the last
- *                   option value will be used.
- *
- * @param[in] callback Pointer to the callback parameters.
- *                     The callback parameter primarily contains two client-defined callback:
- *                     Qnn_ContextBinaryDataProviderFn_t and Qnn_ContextBinaryDataReleaseFn_t.
- *
- * @param[in] binaryBuffer A pointer to the context binary.
- *
- * @param[in] binaryBufferSize Holds the size of the context binary.
- *
- * @param[out] context A handle to the created context.
- *
- * @param[in] profile The profile handle on which metrics are populated and can be queried. Use
- *                    NULL handle to disable profile collection. A handle being re-used would reset
- *                    and is populated with values from the current call.
- *
- * @param[in] signal Signal object to control the create context from binary process.
- *                   NULL may be passed to indicate that no execution control is requested,
- *                   and the create operation should continue to completion uninterrupted.
- *                   The signal object, if not NULL, is considered to be in-use for
- *                   the duration of the call including the asynchronous
- *                   deserialization/initialization.
- *
- * @return Error code:
- *         - QNN_SUCCESS: no error is encountered
- *         - QNN_CONTEXT_ERROR_UNSUPPORTED_FEATURE: a feature is not supported
- *         - QNN_CONTEXT_ERROR_INVALID_ARGUMENT: contextParams is empty or any individual
- *           contextParam's _binaryBuffer_ or notifyFunc is NULL or binaryBufferSize is 0
- *         - QNN_CONTEXT_ERROR_MEM_ALLOC: memory allocation error while creating any context
- *         - QNN_CONTEXT_ERROR_CREATE_FROM_BINARY: failed to deserialize any binary and create
- *           context from it
- *         - QNN_CONTEXT_ERROR_BINARY_VERSION: incompatible version of the binary
- *         - QNN_CONTEXT_ERROR_BINARY_CONFIGURATION: binary is not configured for this device
- *         - QNN_CONTEXT_ERROR_BINARY_SUBOPTIMAL: suboptimal binary is used when
- *           QNN_CONTEXT_BINARY_COMPATIBILITY_STRICT is specified in the config option
- *         - QNN_CONTEXT_ERROR_SET_PROFILE: failed to set profiling info
- *         - QNN_CONTEXT_ERROR_INVALID_HANDLE: _backend_, _device_, __signal__ or any individual
- *           contextParam's _profile_ is not a valid handle
- *         - QNN_CONTEXT_ERROR_INVALID_CONFIG: one or more config values in either listConfig or
- *           any individual contextParam's config is invalid
- *         - QNN_CONTEXT_ERROR_ABORTED: the call is aborted before completion due to user
- *           cancellation including during any individual asynchronous
- *           deserialization/initialization
- *         - QNN_CONTEXT_ERROR_TIMED_OUT: the call is aborted before completion due to a timeout
- *           including during any individual asynchronous deserialization/initialization
- *
- * @note Use corresponding API through QnnInterface_t.
- */
-QNN_API
-Qnn_ErrorHandle_t QnnContext_createFromBinaryWithCallback(
-    Qnn_BackendHandle_t backend,
-    Qnn_DeviceHandle_t device,
-    const QnnContext_Config_t** config,
-    const Qnn_ContextBinaryCallback_t* callback,
-    const void* binaryBuffer,
-    Qnn_ContextBinarySize_t binaryBufferSize,
-    Qnn_ContextHandle_t* context,
-    Qnn_ProfileHandle_t profile,
-    Qnn_SignalHandle_t signal);
 
 /**
  * @brief Retrieve a section of the binary as specified by __section__. The size of this section

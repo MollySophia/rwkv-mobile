@@ -44,7 +44,7 @@ extern "C" {
 
 // Provide values to use for API version.
 #define QNN_API_VERSION_MAJOR 2
-#define QNN_API_VERSION_MINOR 29
+#define QNN_API_VERSION_MINOR 26
 #define QNN_API_VERSION_PATCH 0
 
 /// NULL backend identifier.
@@ -98,8 +98,6 @@ extern "C" {
 #define QNN_MAX_ERROR_PERF_INFRASTRUCTURE 13999
 #define QNN_MIN_ERROR_DEVICE              14000
 #define QNN_MAX_ERROR_DEVICE              14999
-#define QNN_MIN_ERROR_GLOBAL_CONFIG       15000
-#define QNN_MAX_ERROR_GLOBAL_CONFIG       15999
 // Reserved range for QNN system APIs: 30000-50000
 #define QNN_MIN_ERROR_SYSTEM    30000
 #define QNN_MAX_ERROR_SYSTEM    49999

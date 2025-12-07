@@ -132,7 +132,7 @@
 /// @brief SAME_DTYPE_QUANT("A", "B") -> true if the operands have the same dtype, stepsize and zero offset
 #define SAME_DTYPE_QUANT(OPA, OPB)                                                                                     \
     AND(EQ(DTYPE_OF(OPA), DTYPE_OF(OPB)), EQ(STEPSIZE_OF(OPA), STEPSIZE_OF(OPB)),                                      \
-        EQ(ZERO_OFFSET_OF(OPA), ZERO_OFFSET_OF(OPB)))
+        EQ(ZERO_OFFSET_OF(OPA), ZERO_OFFSET_OF(OPB)), NOT(OPTION_BOOL("quant_is_updateable")))
 
 /// @brief MIN_QU8(X) -> min of range defined by a scale/offset for a qu8 tensor
 #define MIN_QU8(X) MUL(STEPSIZE_OF(X), MUL(-1.0f, ZERO_OFFSET_OF(X)))
@@ -435,10 +435,11 @@
 // the low power implementation of convolution
 // else
 // if u16, w>4 && w%4 == 0, not fully utilizing the crouton, but still much better performance
-// make sure w < 32, if w > 32, rearrange to 1,8,round(w/8,4),d is better than reshape 1,4,w/4,d
+// TODO: Will remove the second rule once the space rearrange is fully implemented to reshape
+// the entire model from Input toward the output
 #define WIDTH_TO_HEIGHTX_CONSTRAINT(OPSTR)                                                                             \
     OR(AND(GT(DIM_WIDTH(OPSTR), TILE_HEIGHT), EQ(REM(DIM_WIDTH(OPSTR), TILE_HEIGHT), 0)),                              \
-       AND(IS_QUINT16(OPSTR), LT(DIM_WIDTH(OPSTR), 32), GT(DIM_WIDTH(OPSTR), 4), EQ(REM(DIM_WIDTH(OPSTR), 4), 0)))
+       AND(IS_QUINT16(OPSTR), GT(DIM_WIDTH(OPSTR), 4), EQ(REM(DIM_WIDTH(OPSTR), 4), 0)))
 
 #define HEIGHTX_SHAPE(OPSTR)                                                                                           \
     SELECT(EQ(REM(DIM_WIDTH(OPSTR), TILE_HEIGHT), 0),                                                                  \
@@ -454,7 +455,8 @@
 
 #define HEIGHT84_SHAPE(OPSTR)                                                                                          \
     SELECT(EQ(REM(DIM_WIDTH(OPSTR), TILE_HEIGHT), 0),                                                                  \
-           SELECT(AND(LE(DIM_WIDTH(OPSTR), 16), IS_QUINT16(OPSTR), NOT(OPTION_BOOL("dynamic_graph_input"))),           \
+           SELECT(AND(EQ(DIM_HEIGHT(OPSTR), 1), LE(DIM_WIDTH(OPSTR), 16), IS_QUINT16(OPSTR),                           \
+                      NOT(OPTION_BOOL("dynamic_graph_input"))),                                                        \
                   gen_Shape(DIM_BATCHES(OPSTR), DIV(DIM_WIDTH(OPSTR), 4), 4, DIM_DEPTH(OPSTR)),                        \
                   gen_Shape(DIM_BATCHES(OPSTR), TILE_HEIGHT, DIV(DIM_WIDTH(OPSTR), TILE_HEIGHT), DIM_DEPTH(OPSTR))),   \
            gen_Shape(DIM_BATCHES(OPSTR), 4, DIV(DIM_WIDTH(OPSTR), 4), DIM_DEPTH(OPSTR)))

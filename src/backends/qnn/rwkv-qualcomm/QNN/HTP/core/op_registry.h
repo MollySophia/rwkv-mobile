@@ -47,10 +47,11 @@ namespace hnnx {
 
 // An op factory function.  Just a bare function poiner in order to keep
 // things as small as possible.
-using OpFactory = uptr_Op (*)(OpIoPtrs const &, const OpId);
+using OpFactory = uptr_Op (*)(OpIoPtrs const &, const OpId, SimpleOpFactory);
 
 struct op_reg_info_t {
     OpFactory op_factory{nullptr}; // function pointer for generating ops
+    SimpleOpFactory simple_op_factory{nullptr}; // function pointer for generating SimpleOp's for SimpleOpWrapper's
     bool is_external{false};
 };
 using OpRegistry_map_t = std::multimap<opname_tag_t, struct op_reg_info_t>;
@@ -61,7 +62,8 @@ PUSH_VISIBILITY(default)
 	 * Returns a reference to the op once emplaced.
 	 * Why? Because that allows us to create static variables with the results, causing the functions to be loaded automatically...
 	 */
-extern API_FUNC_EXPORT OpFactory register_op(opname_tag_t name, OpFactory newop, bool is_external);
+extern API_FUNC_EXPORT OpFactory register_op(opname_tag_t name, OpFactory newop, SimpleOpFactory simop,
+                                             bool is_external);
 
 /*
 	 * Generate an op
@@ -84,6 +86,8 @@ extern API_FUNC_EXPORT void clear_pkg_ops_in_op_maps();
 //
 API_FUNC_EXPORT void register_optype_by_factory(OpFactory fp, hnnx::opname_tag_t opname_tag, std::type_info const &typ,
                                                 const std::string_view type_tag);
+API_FUNC_EXPORT void register_optype_by_factory(SimpleOpFactory fp, hnnx::opname_tag_t opname_tag,
+                                                std::type_info const &typ, const std::string_view type_tag);
 
 POP_VISIBILITY()
 

@@ -56,7 +56,7 @@ typedef struct {
 
 /**
  * data struture to configure a device to running in Secure/normal Domain.
- * running in secure process domain (SecurePD) is only supported in V81 and SecurePD is part of add-on SDK.
+ * running in secure process domain is only supported in V81.
  */
 typedef struct {
   uint32_t deviceId;

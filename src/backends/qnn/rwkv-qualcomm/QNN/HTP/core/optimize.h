@@ -2560,76 +2560,15 @@ DECLARE_PACKAGE_OPTIMIZATION_DEF()
 #define REGISTER_PACKAGE_OPTIMIZATIONS()
 #endif // PREPARE_DISABLED
 
-struct Recompilable_param {
-    const Op *op_ptr = nullptr;
-    Recompilable_param *next = nullptr;
-};
-
-#define COMPILER_FOR_UPDATEABLE_QUANT_WITH_CHECKS(XXF, FUNC, PARA, PRE, POST)                                          \
+#define COMPILER_FOR(XXF, FUNC, PARA)                                                                                  \
     template <> constexpr bool has_compile_method<XXF> = true;                                                         \
     template <> struct OpaqueT_FOR<XXF> {                                                                              \
         using type = PARA;                                                                                             \
     };                                                                                                                 \
-    template <> bool hnnx::TypicalOpWithCompiler<XXF, PARA>::check_constraint_for_recompile(Graph &graph_in) const     \
-    {                                                                                                                  \
-        return POST(graph_in, this);                                                                                   \
-    }                                                                                                                  \
     template <> hnnx::Executable::ItemType hnnx::TypicalOpWithCompiler<XXF, PARA>::compile(Graph &graph_in) const      \
     {                                                                                                                  \
         static_assert(check_szal());                                                                                   \
-        auto [f, v] = FUNC(graph_in, this);                                                                            \
-        auto pre_check_res = PRE(graph_in, this);                                                                      \
-        Recompilable_param *const recomp_ptr = (pre_check_res) ? (Recompilable_param *)(&this->opaque) : nullptr;      \
-        if (!graph_in.recompile_for_updated_quant && pre_check_res) {                                                  \
-            recomp_ptr->op_ptr = this;                                                                                 \
-            recomp_ptr->next = nullptr;                                                                                \
-            hnnx::nn_mutex_lock(&(graph_in.linked_params_lock));                                                       \
-            param_list &cur_list = graph_in.linked_params[graph_in.linked_params_cur_ind];                             \
-            if (cur_list.head == nullptr) {                                                                            \
-                cur_list.head = recomp_ptr;                                                                            \
-                cur_list.tail = recomp_ptr;                                                                            \
-            } else {                                                                                                   \
-                cur_list.tail->next = recomp_ptr;                                                                      \
-                cur_list.tail = recomp_ptr;                                                                            \
-            }                                                                                                          \
-            graph_in.linked_params_cur_ind =                                                                           \
-                    (graph_in.linked_params_cur_ind + 1) % graph_in.num_threads_for_recompile;                         \
-            hnnx::nn_mutex_unlock(&(graph_in.linked_params_lock));                                                     \
-        }                                                                                                              \
-        return hnnx::Executable::ItemType(f, v);                                                                       \
+        return FUNC(graph_in, this);                                                                                   \
     }
-
-template <typename T> bool default_pre_check_for_recompile(Graph &graph_in, T *const op)
-{
-    return true;
-}
-
-// the precheck is useful here for disabling recompile, set the precheck return to false
-template <typename T> bool pre_check_for_non_updateable(Graph &graph_in, T *const op)
-{
-    return false;
-}
-
-template <typename T> bool default_post_check_for_recompile(Graph &graph_in, T *const op)
-{
-    return op->hnnx::Executable::check_constraint_for_recompile(graph_in);
-}
-
-// only performs post check
-#define COMPILER_FOR_UPDATEABLE_QUANT_WITH_POST(XXF, FUNC, PARA, POST)                                                 \
-    COMPILER_FOR_UPDATEABLE_QUANT_WITH_CHECKS(XXF, FUNC, PARA, default_pre_check_for_recompile, POST)
-
-// only performs pre check
-#define COMPILER_FOR_UPDATEABLE_QUANT_WITH_PRE(XXF, FUNC, PARA, PRE)                                                   \
-    COMPILER_FOR_UPDATEABLE_QUANT_WITH_CHECKS(XXF, FUNC, PARA, PRE, default_post_check_for_recompile)
-
-// performs no check
-#define COMPILER_FOR_UPDATEABLE_QUANT(XXF, FUNC, PARA)                                                                 \
-    COMPILER_FOR_UPDATEABLE_QUANT_WITH_CHECKS(XXF, FUNC, PARA, default_pre_check_for_recompile,                        \
-                                              default_post_check_for_recompile)
-
-#define COMPILER_FOR(XXF, FUNC, PARA)                                                                                  \
-    COMPILER_FOR_UPDATEABLE_QUANT_WITH_CHECKS(XXF, FUNC, PARA, pre_check_for_non_updateable,                           \
-                                              default_post_check_for_recompile)
 
 #endif // OPTIMIZE_H

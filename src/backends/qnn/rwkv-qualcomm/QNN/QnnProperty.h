@@ -177,35 +177,6 @@ extern "C" {
  */
 #define QNN_PROPERTY_CONTEXT_SUPPORT_DEFERRED_GRAPH_INIT (QNN_PROPERTY_GROUP_CONTEXT + 16)
 
-/**
- * @brief Property key for determining whether a backend supports creation and application of
- *        weight only updates for an existing context binary. This determines support for
- *        QnnContext_getBinarySectionSize(), QnnContext_retrieveBinarySection(), and
- *        QnnContext_applyBinarySection() with QNN_CONTEXT_SECTION_UPDATABLE_WEIGHTS.
- */
-#define QNN_PROPERTY_CONTEXT_SUPPORT_BINARY_WEIGHT_ONLY_UPDATES (QNN_PROPERTY_GROUP_CONTEXT + 17)
-
-/**
- * @brief Property key for determining whether a backend supports creation and application of
- *        quant param only updates for an existing context binary. This determines support for
- *        QnnContext_getBinarySectionSize(), QnnContext_retrieveBinarySection(), and
- *        QnnContext_applyBinarySection() with QNN_CONTEXT_SECTION_UPDATABLE_QUANT_PARAMS.
- */
-#define QNN_PROPERTY_CONTEXT_SUPPORT_BINARY_QUANT_ONLY_UPDATES (QNN_PROPERTY_GROUP_CONTEXT + 18)
-
-/**
- * @brief Property key for determining whether a backend supports creating contexts with a client
- *        callback function. It determines support for QnnContext_createFromBinaryWithCallback.
- */
-#define QNN_PROPERTY_CONTEXT_SUPPORT_CREATE_FROM_BINARY_WITH_CALLBACK \
-  (QNN_PROPERTY_GROUP_CONTEXT + 19)
-
-/**
- * @brief Property key for determining whether a backend supports multi switching. See
- * QNN_CONTEXT_CONFIG_GRAPH_RETENTION_ORDER
- */
-#define QNN_PROPERTY_CONTEXT_SUPPORT_GRAPH_RETENTION_ORDER (QNN_PROPERTY_GROUP_CONTEXT + 20)
-
 ///
 /// Definition of QNN_PROPERTY_GROUP_GRAPH property group. This group is Core (non-optional) API.
 ///

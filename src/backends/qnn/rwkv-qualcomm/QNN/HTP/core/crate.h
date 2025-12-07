@@ -238,15 +238,6 @@ class Crate {
     size_t size() const { return m_records; }
     //! The number of chunks in use
     size_t chunk_count() const { return m_chunks.size(); }
-    //! The size of crate used cross all recorded chunks
-    unsigned get_crate_used() const
-    {
-        unsigned total_crate = 0;
-        for (auto const &chunk_ptr : m_chunks) {
-            total_crate += hdr_of(chunk_ptr)->data_len;
-        }
-        return total_crate;
-    }
     //! The amount of space left in the current chunk, approximately.
     /// DO NOT CALL unless chunk_count() > 0
     size_t current_chunk_space_remain() const { return hdr_of(this->m_chunks.back())->space_avail(); }
