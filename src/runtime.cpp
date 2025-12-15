@@ -2303,12 +2303,12 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         }
     }
     if (!supported) {
-        LOGE("chat_batch: batch size %d is not supported\n", batch_size);
+        LOGE("gen_completion_batch: batch size %d is not supported\n", batch_size);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_UNSUPPORTED;
     }
 
     if (prompts.size() != batch_size) {
-        LOGE("chat_batch: prompts size %d is not equal to batch size %d\n", prompts.size(), batch_size);
+        LOGE("gen_completion_batch: prompts size %d is not equal to batch size %d\n", prompts.size(), batch_size);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
 
@@ -2321,31 +2321,39 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
 
     std::vector<int> decoded_idx_batch(batch_size);
     std::vector<std::string> decoded_text_batch(batch_size);
-    std::vector<std::any> state_batch(batch_size);
+    std::vector<state_node*> nodes_batch(batch_size);
     float *logits = nullptr;
 
     std::vector<std::map<int, float>> occurences_batch(batch_size);
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
-        model->backend->get_state_on_batch_slot(batch_idx, state_batch[batch_idx]);
         model->response_buffer_batch[batch_idx] = "";
         model->response_buffer_ids_batch[batch_idx].clear();
         model->response_buffer_eos_found_batch[batch_idx] = false;
-    }
 
-    for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
         std::vector<int> ids = model->tokenizer->encode(prompts[batch_idx]);
-        _prefill_progress_start(ids.size());
-        model->backend->set_state(state_batch[batch_idx]);
+        std::vector<int> tokens_to_prefill;
+        nodes_batch[batch_idx] = model->backend->match_and_load_state(ids, tokens_to_prefill);
+        _prefill_progress_start(tokens_to_prefill.size());
 
-        int ret = eval_logits(model_id, ids, logits);
-        if (ret || !logits) {
-            LOGE("gen_completion_batch: Error evaluating logits");
-            model->is_generating = false;
-            return ret;
+        // save a state checkpoint every about 256 tokens
+        int checkpoint_interval = 256;
+        for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
+            std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
+            int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
+            if (ret || !logits) {
+                LOGE("gen_completion_batch: Error evaluating logits");
+                model->is_generating = false;
+                return ret;
+            }
+            ret = model->backend->register_state_checkpoint(nodes_batch[batch_idx], tokens_to_prefill_chunk, logits);
+            if (ret) {
+                LOGE("gen_completion_batch: Error registering state checkpoint");
+                model->is_generating = false;
+                return ret;
+            }
+            LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
         }
         _prefill_progress_finish();
-
-        model->backend->get_state(state_batch[batch_idx]);
 
         model->response_buffer_batch[batch_idx] = prompts[batch_idx];
         model->response_buffer_ids_batch[batch_idx] = ids;
@@ -2357,7 +2365,7 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     }
 
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
-        model->backend->set_state_on_batch_slot(batch_idx, state_batch[batch_idx]);
+        model->backend->set_state_on_batch_slot(batch_idx, nodes_batch[batch_idx]->state);
     }
 
     for (int i = 0; i < max_length; i++) {
@@ -2421,14 +2429,28 @@ int runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     model->sampler->clear_occurences();
 
     std::vector<int> ids = model->tokenizer->encode(prompt);
-    _prefill_progress_start(ids.size());
+    std::vector<int> tokens_to_prefill;
+    state_node* node = model->backend->match_and_load_state(ids, tokens_to_prefill);
+    _prefill_progress_start(tokens_to_prefill.size());
 
     float *logits = nullptr;
-    int ret = eval_logits(model_id, ids, logits);
-    if (ret || !logits) {
-        LOGE("gen_completion: Error evaluating logits");
-        model->is_generating = false;
-        return ret;
+    // save a state checkpoint every about 256 tokens
+    int checkpoint_interval = 256;
+    for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
+        std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
+        int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
+        if (ret || !logits) {
+            LOGE("gen_completion: Error evaluating logits");
+            model->is_generating = false;
+            return ret;
+        }
+        ret = model->backend->register_state_checkpoint(node, tokens_to_prefill_chunk, logits);
+        if (ret) {
+            LOGE("gen_completion: Error registering state checkpoint");
+            model->is_generating = false;
+            return ret;
+        }
+        LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
     }
     _prefill_progress_finish();
 
@@ -2444,7 +2466,7 @@ int runtime::gen_completion(int model_id, std::string prompt, int max_length, in
         std::string next = model->tokenizer->decode(idx);
         model->response_buffer += next;
         model->response_buffer_ids.push_back(idx);
-        ret = eval_logits(model_id, idx, logits);
+        int ret = eval_logits(model_id, idx, logits);
         if (ret) {
             model->is_generating = false;
             LOGE("failed to eval logits\n");
