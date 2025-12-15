@@ -1013,17 +1013,12 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     }
 
     if (logits == nullptr) {
-        if (node->logits.size() == model->backend->get_num_vocab()) {
+        if (!node->logits.empty()) {
             logits = node->logits.data();
         } else {
             LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
-            ret = eval_logits(model_id, text_ids.back(), logits);
-            if (ret) {
-                model->is_generating = false;
-                LOGE("failed to eval logits\n");
-                return ret;
-            }
-            response_ids_raw.emplace_back(text_ids.back());
+            // this should never happen
+            return RWKV_ERROR_RUNTIME;
         }
     }
 
@@ -1224,16 +1219,11 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         _prefill_progress_finish();
 
         if (logits == nullptr) {
-            if (nodes_batch[batch_idx]->logits.size() == num_vocab) {
+            if (!nodes_batch[batch_idx]->logits.empty()) {
                 logits = nodes_batch[batch_idx]->logits.data();
             } else {
                 LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
-                ret = eval_logits(model_id, text_ids_batch[batch_idx].back(), logits);
-                if (ret) {
-                    model->is_generating = false;
-                    LOGE("failed to eval logits\n");
-                    return ret;
-                }
+                return RWKV_ERROR_RUNTIME;
             }
         }
 
@@ -2357,6 +2347,15 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
 
         model->response_buffer_batch[batch_idx] = prompts[batch_idx];
         model->response_buffer_ids_batch[batch_idx] = ids;
+
+        if (logits == nullptr) {
+            if (!nodes_batch[batch_idx]->logits.empty()) {
+                logits = nodes_batch[batch_idx]->logits.data();
+            } else {
+                LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
+                return RWKV_ERROR_RUNTIME;
+            }
+        }
 
         model->sampler->apply_penalties(logits, model->backend->get_num_vocab(), occurences_batch[batch_idx],
             model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
