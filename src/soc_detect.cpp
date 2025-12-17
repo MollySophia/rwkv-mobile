@@ -12,14 +12,19 @@
 #include <vector>
 #endif
 
+#ifdef __ANDROID__
+#include <sys/system_properties.h>
+#endif
+
 namespace rwkvmobile {
 
 const char * platform_name[] = {
     "Snapdragon",
+    "MediaTek",
     "Unknown",
 };
 
-snapdragon_soc_id snapdragon_soc_ids[] = {
+snapdragon_soc_info snapdragon_soc_ids[] = {
     {475, "SM7325", "778", "v68"},
     {439, "SM8350", "888", "v68"},
     {457, "SM8450", "8 Gen 1", "v69"},
@@ -44,6 +49,10 @@ snapdragon_soc_id snapdragon_soc_ids[] = {
     // TODO: add more
 };
 
+mediatek_soc_info mediatek_soc_ids[] = {
+    {"6989", "Dimensity 9300"},
+};
+
 soc_detect::soc_detect() {
 }
 
@@ -59,9 +68,21 @@ int soc_detect::detect_platform() {
         file.close();
     }
 
+#ifdef __ANDROID__
+    char ro_hardware[PROP_VALUE_MAX] = {0};
+    __system_property_get("ro.hardware", ro_hardware);
+    std::string ro_hardware_str(ro_hardware);
+#endif
+
     if (tmp == "Snapdragon") {
         m_platform_type = PLATFORM_SNAPDRAGON;
-    } else {
+    }
+#ifdef __ANDROID__
+    else if (ro_hardware_str.find("mt") != std::string::npos || ro_hardware_str.find("MT") != std::string::npos) {
+        m_platform_type = PLATFORM_MEDIATEK;
+    }
+#endif
+    else {
         m_platform_type = PLATFORM_UNKNOWN;
     }
 
@@ -81,7 +102,19 @@ int soc_detect::detect_platform() {
             }
         }
     }
-#else
+#ifdef __ANDROID__
+    else if (m_platform_type == PLATFORM_MEDIATEK) {
+        for (int i = 0; i < sizeof(mediatek_soc_ids) / sizeof(mediatek_soc_ids[0]); i++) {
+            if (ro_hardware_str.find(mediatek_soc_ids[i].soc_partname) != std::string::npos) {
+                m_soc_name = mediatek_soc_ids[i].soc_name;
+                m_soc_partname = mediatek_soc_ids[i].soc_partname;
+                break;
+            }
+        }
+    }
+#endif
+
+#else // _WIN32
     // TODO
 #endif
 

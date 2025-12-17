@@ -6,15 +6,21 @@
 namespace rwkvmobile {
 
 enum platform_type {
-    PLATFORM_SNAPDRAGON, // lets add snapdragon support first
+    PLATFORM_SNAPDRAGON,
+    PLATFORM_MEDIATEK,
     PLATFORM_UNKNOWN,
 };
 
-struct snapdragon_soc_id {
+struct snapdragon_soc_info {
     int soc_id;
     const char * soc_partname;
     const char * soc_name;
     const char * htp_arch;
+};
+
+struct mediatek_soc_info {
+    const char * soc_partname;
+    const char * soc_name;
 };
 
 class soc_detect {
