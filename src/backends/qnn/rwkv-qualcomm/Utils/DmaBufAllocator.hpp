@@ -34,14 +34,14 @@ struct DmaBufferData {
         totalBufferSize(sizeIn) {}
 };
 
-class DmaBufferAllocator final : public IBufferAlloc {
+class QnnDmaBufferAllocator final : public IBufferAlloc {
  public:
-  DmaBufferAllocator(Qnn_ContextHandle_t contextHandle, QNN_INTERFACE_VER_TYPE* qnnInterface);
+  QnnDmaBufferAllocator(Qnn_ContextHandle_t contextHandle, QNN_INTERFACE_VER_TYPE* qnnInterface);
   // Disable copy constructors, r-value referencing, etc
-  DmaBufferAllocator(const DmaBufferAllocator&)            = delete;
-  DmaBufferAllocator& operator=(const DmaBufferAllocator&) = delete;
-  DmaBufferAllocator(DmaBufferAllocator&&)                 = delete;
-  DmaBufferAllocator& operator=(DmaBufferAllocator&&)      = delete;
+  QnnDmaBufferAllocator(const QnnDmaBufferAllocator&)            = delete;
+  QnnDmaBufferAllocator& operator=(const QnnDmaBufferAllocator&) = delete;
+  QnnDmaBufferAllocator(QnnDmaBufferAllocator&&)                 = delete;
+  QnnDmaBufferAllocator& operator=(QnnDmaBufferAllocator&&)      = delete;
 
   bool initialize() override;
   void* getBuffer(Qnn_Tensor_t* tensor) override;
@@ -55,7 +55,7 @@ class DmaBufferAllocator final : public IBufferAlloc {
   bool allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tensorDataSize) override;
   bool useSameMemory(Qnn_Tensor_t* dest, Qnn_Tensor_t* src) override;
 
-  virtual ~DmaBufferAllocator();
+  virtual ~QnnDmaBufferAllocator();
 
   bool beforeWriteToBuffer(Qnn_Tensor_t* tensor) override;
   bool afterWriteToBuffer(Qnn_Tensor_t* tensor) override;

@@ -34,12 +34,12 @@ bool IOTensor::initialize(Qnn_ContextHandle_t contextHandle) {
     rwkvmobile::LOGI("[QNN] Using RpcMem as buffer manager");
     m_bufferManager = std::unique_ptr<IBufferAlloc>(new RpcMem(contextHandle, m_qnnInterface));
   } else if (m_bufferAlloc == BufferAlloc::DMABUF) {
-    rwkvmobile::LOGI("[QNN] Using DmaBufferAllocator as buffer manager");
+    rwkvmobile::LOGI("[QNN] Using QnnDmaBufferAllocator as buffer manager");
 #ifdef _WIN32
     return false;
 #else
     m_bufferManager =
-        std::unique_ptr<IBufferAlloc>(new DmaBufferAllocator(contextHandle, m_qnnInterface));
+        std::unique_ptr<IBufferAlloc>(new QnnDmaBufferAllocator(contextHandle, m_qnnInterface));
 #endif
   }
 

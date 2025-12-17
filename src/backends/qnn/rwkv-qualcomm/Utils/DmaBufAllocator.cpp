@@ -26,8 +26,8 @@
 #include "QnnMem.h"
 #include "QnnTypeMacros.hpp"
 
-DmaBufferAllocator::DmaBufferAllocator(Qnn_ContextHandle_t contextHandle,
-                                       QNN_INTERFACE_VER_TYPE* qnnInterface)
+QnnDmaBufferAllocator::QnnDmaBufferAllocator(Qnn_ContextHandle_t contextHandle,
+                                             QNN_INTERFACE_VER_TYPE* qnnInterface)
     : m_libDmaBufHeapHandle(nullptr),
       m_dmaBufCreate(nullptr),
       m_dmaBufAlloc(nullptr),
@@ -35,7 +35,7 @@ DmaBufferAllocator::DmaBufferAllocator(Qnn_ContextHandle_t contextHandle,
       m_qnnInterface(qnnInterface),
       m_contextHandle(contextHandle) {}
 
-bool DmaBufferAllocator::initialize() {
+bool QnnDmaBufferAllocator::initialize() {
   // On Android, 32-bit and 64-bit libdmaBufheap.so can be found at /system/lib and /system/lib64
   //  respectively.
   const std::string defaultLibPaths[] = {"libdmabufheap.so", "libdmabufheap.so.0"};
@@ -60,21 +60,21 @@ bool DmaBufferAllocator::initialize() {
   return true;
 }
 
-DmaBufferAllocator::~DmaBufferAllocator() {
+QnnDmaBufferAllocator::~QnnDmaBufferAllocator() {
   if (m_libDmaBufHeapHandle) {
     dlclose(m_libDmaBufHeapHandle);
     m_libDmaBufHeapHandle = nullptr;
   }
 }
 
-DmaBufferData* DmaBufferAllocator::getDmaBufTensorData(Qnn_Tensor_t* tensor) {
+DmaBufferData* QnnDmaBufferAllocator::getDmaBufTensorData(Qnn_Tensor_t* tensor) {
   if (tensor == nullptr) return nullptr;
   Qnn_MemHandle_t mem_handle = QNN_TENSOR_GET_MEM_HANDLE(tensor);
   if (mem_handle == nullptr) return nullptr;
   return &m_memHandleToDmaBufMem.at(mem_handle);
 }
 
-void* DmaBufferAllocator::getBuffer(Qnn_Tensor_t* tensor) {
+void* QnnDmaBufferAllocator::getBuffer(Qnn_Tensor_t* tensor) {
   if (!tensor) {
     rwkvmobile::LOGW("DmaBufferAllocator: getBuffer: received a null pointer to a tensor");
     return nullptr;
@@ -87,7 +87,7 @@ void* DmaBufferAllocator::getBuffer(Qnn_Tensor_t* tensor) {
   return dmaBufferData.memPointer;
 }
 
-int DmaBufferAllocator::getFd(Qnn_Tensor_t* tensor) {
+int QnnDmaBufferAllocator::getFd(Qnn_Tensor_t* tensor) {
   DmaBufferData* data = getDmaBufTensorData(tensor);
   if (data == nullptr) {
     rwkvmobile::LOGE("DmaBufferAllocator: getFd : Couldn't find tensor %p", tensor);
@@ -96,7 +96,7 @@ int DmaBufferAllocator::getFd(Qnn_Tensor_t* tensor) {
   return data->fd;
 }
 
-size_t DmaBufferAllocator::getOffset(Qnn_Tensor_t* tensor) {
+size_t QnnDmaBufferAllocator::getOffset(Qnn_Tensor_t* tensor) {
   DmaBufferData* data = getDmaBufTensorData(tensor);
   if (data == nullptr) {
     rwkvmobile::LOGE("DmaBufferAllocator: getOffset : Couldn't find tensor %p", tensor);
@@ -105,7 +105,7 @@ size_t DmaBufferAllocator::getOffset(Qnn_Tensor_t* tensor) {
   return data->offset;
 }
 
-size_t DmaBufferAllocator::getBufferSize(Qnn_Tensor_t* tensor) {
+size_t QnnDmaBufferAllocator::getBufferSize(Qnn_Tensor_t* tensor) {
   DmaBufferData* data = getDmaBufTensorData(tensor);
   if (data == nullptr) {
     rwkvmobile::LOGE("DmaBufferAllocator: getBufferSize : Couldn't find tensor %p", tensor);
@@ -114,7 +114,7 @@ size_t DmaBufferAllocator::getBufferSize(Qnn_Tensor_t* tensor) {
   return data->totalBufferSize;
 };
 
-size_t DmaBufferAllocator::getTotalBufferSize(Qnn_Tensor_t* tensor) {
+size_t QnnDmaBufferAllocator::getTotalBufferSize(Qnn_Tensor_t* tensor) {
   DmaBufferData* data = getDmaBufTensorData(tensor);
   if (data == nullptr) {
     rwkvmobile::LOGE("DmaBufferAllocator: getTotalBufferSize : Couldn't find tensor %p", tensor);
@@ -123,7 +123,7 @@ size_t DmaBufferAllocator::getTotalBufferSize(Qnn_Tensor_t* tensor) {
   return data->totalBufferSize;
 }
 
-bool DmaBufferAllocator::allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tensorDataSize) {
+bool QnnDmaBufferAllocator::allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tensorDataSize) {
   if (m_libDmaBufHeapHandle == nullptr) {
     rwkvmobile::LOGE("DmaBufferAllocator not initialized");
     return false;
@@ -184,7 +184,7 @@ bool DmaBufferAllocator::allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tenso
   return true;
 }
 
-bool DmaBufferAllocator::freeTensorBuffer(Qnn_Tensor_t* tensor) {
+bool QnnDmaBufferAllocator::freeTensorBuffer(Qnn_Tensor_t* tensor) {
   if (!tensor) {
     rwkvmobile::LOGE("DmaBufferAllocator: Received nullptr for tensor");
     return false;
@@ -209,7 +209,7 @@ bool DmaBufferAllocator::freeTensorBuffer(Qnn_Tensor_t* tensor) {
   return true;
 }
 
-bool DmaBufferAllocator::useSameMemory(Qnn_Tensor_t* dest, Qnn_Tensor_t* src) {
+bool QnnDmaBufferAllocator::useSameMemory(Qnn_Tensor_t* dest, Qnn_Tensor_t* src) {
   if (nullptr == dest || nullptr == src) {
     rwkvmobile::LOGE("DmaBufferAllocator: Received nullptr");
     return false;
@@ -226,7 +226,7 @@ bool DmaBufferAllocator::useSameMemory(Qnn_Tensor_t* dest, Qnn_Tensor_t* src) {
   return true;
 }
 
-bool DmaBufferAllocator::beforeWriteToBuffer(Qnn_Tensor_t* tensor) {
+bool QnnDmaBufferAllocator::beforeWriteToBuffer(Qnn_Tensor_t* tensor) {
   if (!tensor) {
     rwkvmobile::LOGW("beforeWriteToBuffer: received a null pointer to a tensor");
     return false;
@@ -249,7 +249,7 @@ bool DmaBufferAllocator::beforeWriteToBuffer(Qnn_Tensor_t* tensor) {
   return true;
 }
 
-bool DmaBufferAllocator::afterWriteToBuffer(Qnn_Tensor_t* tensor) {
+bool QnnDmaBufferAllocator::afterWriteToBuffer(Qnn_Tensor_t* tensor) {
   if (!tensor) {
     rwkvmobile::LOGW("afterWriteToBuffer: received a null pointer to a tensor");
     return false;
@@ -272,7 +272,7 @@ bool DmaBufferAllocator::afterWriteToBuffer(Qnn_Tensor_t* tensor) {
   return true;
 }
 
-bool DmaBufferAllocator::beforeReadFromBuffer(Qnn_Tensor_t* tensor) {
+bool QnnDmaBufferAllocator::beforeReadFromBuffer(Qnn_Tensor_t* tensor) {
   if (!tensor) {
     rwkvmobile::LOGW("beforeReadFromBuffer: received a null pointer to a tensor");
     return false;
@@ -295,7 +295,7 @@ bool DmaBufferAllocator::beforeReadFromBuffer(Qnn_Tensor_t* tensor) {
   return true;
 }
 
-bool DmaBufferAllocator::afterReadFromBuffer(Qnn_Tensor_t* tensor) {
+bool QnnDmaBufferAllocator::afterReadFromBuffer(Qnn_Tensor_t* tensor) {
   if (!tensor) {
     rwkvmobile::LOGW("afterReadFromBuffer: received a null pointer to a tensor");
     return false;
