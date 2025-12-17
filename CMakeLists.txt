@@ -16,6 +16,7 @@ option(ENABLE_WEBRWKV_BACKEND "Enable WebRWKV backend" ON)
 option(ENABLE_LLAMACPP_BACKEND "Enable llama.cpp backend" ON)
 option(ENABLE_QNN_BACKEND "Enable QNN backend" OFF)
 option(ENABLE_MNN_BACKEND "Enable MNN backend" ON)
+option(ENABLE_MTK_NP7_BACKEND "Enable MediaTek NP7 backend" OFF)
 option(ENABLE_COREML_BACKEND "Enable CoreML backend" OFF)
 option(ENABLE_MLX_BACKEND "Enable MLX backend" OFF)
 
@@ -157,6 +158,10 @@ if (ENABLE_MNN_BACKEND)
     # target_compile_definitions(Express PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
     target_compile_definitions(MNNCore PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
     target_compile_definitions(MNNCPU PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
+endif()
+
+if (ENABLE_MTK_NP7_BACKEND)
+    set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS} src/backends/mtk_np7/mtk_np7_backend.cpp)
 endif()
 
 if (ENABLE_LLAMACPP_BACKEND)
@@ -536,6 +541,24 @@ if (ENABLE_MNN_BACKEND)
         $<LINK_LIBRARY:WHOLE_ARCHIVE,MNN>
     )
     target_include_directories(rwkv_mobile_internal PUBLIC src/backends/mnn ${mnn_SOURCE_DIR}/include)
+endif()
+
+if (ENABLE_MTK_NP7_BACKEND)
+    if (NOT ANDROID)
+        message(FATAL_ERROR "mtk_np7 backend is only supported on Android builds")
+    endif()
+
+    target_compile_definitions(rwkv_mobile_internal PUBLIC ENABLE_MTK_NP7)
+    target_include_directories(rwkv_mobile_internal PUBLIC
+        src/backends/mtk_np7
+        src/backends/mtk_np7/include
+    )
+
+    add_library(rwkv_mtk_prebuilt STATIC IMPORTED)
+    set_target_properties(rwkv_mtk_prebuilt PROPERTIES
+        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/mtk_np7/prebuilt/${ANDROID_ABI}/librwkv_mtk.a"
+    )
+    target_link_libraries(rwkv_mobile_internal PUBLIC rwkv_mtk_prebuilt)
 endif()
 
 if (BUILD_EXAMPLES)

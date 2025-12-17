@@ -30,6 +30,10 @@
 #include "mnn_rwkv_backend.h"
 #endif
 
+#ifdef ENABLE_MTK_NP7
+#include "mtk_np7_backend.h"
+#endif
+
 #ifdef ENABLE_COREML
 #include "coreml_rwkv_backend.h"
 #endif
@@ -69,6 +73,8 @@ std::string backend_enum_to_str(int backend) {
             return "qnn";
         case RWKV_BACKEND_MNN:
             return "mnn";
+        case RWKV_BACKEND_MTK_NP7:
+            return "mtk_np7";
         case RWKV_BACKEND_COREML:
             return "coreml";
         case RWKV_BACKEND_MLX:
@@ -89,6 +95,8 @@ int backend_str_to_enum(std::string backend) {
         return RWKV_BACKEND_QNN;
     } else if (backend == "mnn") {
         return RWKV_BACKEND_MNN;
+    } else if (backend == "mtk_np7") {
+        return RWKV_BACKEND_MTK_NP7;
     } else if (backend == "coreml") {
         return RWKV_BACKEND_COREML;
     } else if (backend == "mlx") {
@@ -150,6 +158,14 @@ int runtime::load_model(std::string model_path, std::string backend_name, std::s
             [](execution_provider *p) { delete (mnn_rwkv_backend*)p; });
 #else
         LOGE("MNN backend is not supported on this platform\n");
+        return ret_model_id;
+#endif
+    } else if (backend_id == RWKV_BACKEND_MTK_NP7) {
+#ifdef ENABLE_MTK_NP7
+        model_instance->backend = std::unique_ptr<execution_provider, std::function<void(execution_provider*)>>(new mtk_np7_backend,
+            [](execution_provider *p) { delete (mtk_np7_backend*)p; });
+#else
+        LOGE("mtk_np7 backend is not supported on this platform\n");
         return ret_model_id;
 #endif
     } else if (backend_id == RWKV_BACKEND_COREML) {
@@ -318,6 +334,12 @@ int runtime::get_available_backend_ids(std::vector<int> &backend_ids) {
         if (std::find(supported_soc_names.begin(), supported_soc_names.end(), _soc_detect.get_soc_partname()) != supported_soc_names.end()) {
             backend_ids.push_back(RWKV_BACKEND_QNN);
         }
+    }
+#endif
+
+#ifdef ENABLE_MTK_NP7
+    if (_soc_detect.get_platform_type() == PLATFORM_MEDIATEK) {
+        backend_ids.push_back(RWKV_BACKEND_MTK_NP7);
     }
 #endif
 
