@@ -22,6 +22,7 @@ public:
 
     int eval(int id, Tensor1D & logits) override;
     int eval(std::vector<int> ids, Tensor1D & logits) override;
+    int eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) override;
 
     bool is_available() override;
 

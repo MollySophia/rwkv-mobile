@@ -54,6 +54,8 @@ void* neuron_rwkv_inference_once(void* runtime, const int input_token);
 
 void* neuron_rwkv_prefill(void* runtime, const int* input_tokens, const size_t num_tokens);
 
+void* neuron_rwkv_eval_with_embeddings(void* runtime, const float* embeddings, const size_t num_tokens);
+
 void neuron_rwkv_reset(void* runtime);
 
 // ===== Runtime state IO (input-state only; output->input copy happens after each inference) =====

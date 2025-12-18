@@ -221,6 +221,24 @@ int mtk_np7_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     return RWKV_SUCCESS;
 }
 
+int mtk_np7_backend::eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) {
+    if (_runtime == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    if (embeddings == nullptr || n_tokens <= 0) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    void* logits_ptr = neuron_rwkv_eval_with_embeddings(_runtime, embeddings, (size_t)n_tokens);
+    if (!logits_ptr) {
+        return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+    }
+
+    _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
+    logits = _logits_fp16_view;
+    return RWKV_SUCCESS;
+}
+
 bool mtk_np7_backend::is_available() {
     return true;
 }
