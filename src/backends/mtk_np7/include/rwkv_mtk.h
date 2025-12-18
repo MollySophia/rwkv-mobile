@@ -40,6 +40,11 @@ typedef struct RWKVRuntimeOptions {
     size_t embBufferSize = 0;
 } RWKVRuntimeOptions;
 
+// ===== Logging (optional) =====
+// severity values match internal LogSeverity enum (DEBUG=0..FATAL=4).
+typedef void (*neuron_rwkv_log_callback_t)(void* user_data, int severity, const char* tag, const char* msg);
+void neuron_rwkv_set_log_callback(neuron_rwkv_log_callback_t cb, void* user_data);
+
 bool neuron_rwkv_init(void** runtime, const RWKVModelOptions& modelOptions,
                        const RWKVRuntimeOptions& runtimeOptions);
 

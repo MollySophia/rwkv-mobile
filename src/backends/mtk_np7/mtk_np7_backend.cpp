@@ -109,10 +109,35 @@ static LoadedRMPackModel loadFromRMPack(const std::string& rmpackPath) {
     return out;
 }
 
+static void mtk_np7_librwkv_mtk_log_cb(void* /*user_data*/, int severity, const char* tag, const char* msg) {
+    const char* safe_tag = tag ? tag : "librwkv_mtk";
+    const char* safe_msg = msg ? msg : "";
+    switch (severity) {
+        case 0: // DEBUG
+            LOGD("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            break;
+        case 1: // INFO
+            LOGI("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            break;
+        case 2: // WARN
+            LOGW("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            break;
+        case 3: // ERROR
+            LOGE("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            break;
+        case 4: // FATAL
+        default:
+            LOGE("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            break;
+    }
+}
+
 } // namespace
 
 int mtk_np7_backend::init(void * extra) {
     (void)extra;
+    // Route librwkv_mtk logs through rwkv-mobile logger.
+    neuron_rwkv_set_log_callback(mtk_np7_librwkv_mtk_log_cb, nullptr);
     return RWKV_SUCCESS;
 }
 
@@ -131,6 +156,9 @@ int mtk_np7_backend::load_model(std::string model_path) {
         LOGE("[mtk_np7] Failed to load rmpack: %s\n", e.what());
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
+
+    // Ensure callback is set before runtime init so init-time logs are captured.
+    neuron_rwkv_set_log_callback(mtk_np7_librwkv_mtk_log_cb, nullptr);
 
     if (!neuron_rwkv_init(&_runtime, loaded.modelOptions, loaded.runtimeOptions)) {
         LOGE("[mtk_np7] neuron_rwkv_init failed\n");
