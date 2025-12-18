@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
 
     int vocab_size = runtime.get_vocab_size(model_id);
 
-    float *logits = nullptr;
+    rwkvmobile::Tensor1D logits;
 
     std::vector<int> ids(batch_size);
     for (int i = 0; i < 128; i++) {

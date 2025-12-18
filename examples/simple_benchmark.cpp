@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 512; i++) {
         prompt_ids[i] = rand() % vocab_size;
     }
-    float *logits = nullptr;
+    rwkvmobile::Tensor1D logits;
     runtime.eval_logits(model_id, prompt_ids, logits);
 
     std::cout << "Prefill speed: " << runtime.get_avg_prefill_speed(model_id) << " tokens/s" << std::endl;

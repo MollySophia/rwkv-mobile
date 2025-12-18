@@ -62,7 +62,7 @@ int ncnn_rwkv_backend::load_model(std::string model_path) {
     return RWKV_SUCCESS;
 }
 
-int ncnn_rwkv_backend::eval(int id, float *& logits) {
+int ncnn_rwkv_backend::eval(int id, Tensor1D & logits) {
     int token = id;
     ncnn::Mat input = ncnn::Mat(1, &token);
     ncnn::Extractor ex = net.create_extractor();
@@ -81,12 +81,12 @@ int ncnn_rwkv_backend::eval(int id, float *& logits) {
     }
 
     ex.extract("logits", logits_mat);
-    logits = logits_mat.channel(0);
+    logits = Tensor1D::make((void*)logits_mat.channel(0), TensorDType::F32, (size_t)vocab_size);
 
     return RWKV_SUCCESS;
 }
 
-int ncnn_rwkv_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_copy) {
+int ncnn_rwkv_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     // TODO: sequential prefill
     for (int i = 0; i < ids.size(); i++) {
         int id = ids[i];
@@ -101,9 +101,9 @@ int ncnn_rwkv_backend::eval(std::vector<int> ids, float *& logits, bool skip_log
         ex.input("token", input);
 
         if (i == ids.size() - 1) {
-            ncnn::Mat logits_mat;
+            // Use member logits_mat to keep the underlying buffer alive after returning.
             ex.extract("logits", logits_mat);
-            logits = logits_mat.channel(0);
+            logits = Tensor1D::make((void*)logits_mat.channel(0), TensorDType::F32, (size_t)vocab_size);
         }
         for (int i = 0; i < n_layers; i++) {
             ex.extract(("state_" + std::to_string(3 * i) + "_out").c_str(), states[i * 3]);

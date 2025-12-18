@@ -2,6 +2,7 @@
 #define MTK_NP7_BACKEND_H
 
 #include "backend.h"
+#include "tensor.h"
 
 #include <memory>
 #include <string>
@@ -9,7 +10,6 @@
 
 namespace rwkvmobile {
 
-// MediaTek NP7 backend (prebuilt librwkv_mtk.a + public headers only).
 class mtk_np7_backend : public execution_provider {
 public:
     ~mtk_np7_backend() {
@@ -20,8 +20,8 @@ public:
     int init(void * extra) override;
     int load_model(std::string model_path) override;
 
-    int eval(int id, float *& logits) override;
-    int eval(std::vector<int> ids, float *& logits, bool skip_logits_copy = false) override;
+    int eval(int id, Tensor1D & logits) override;
+    int eval(std::vector<int> ids, Tensor1D & logits) override;
 
     bool is_available() override;
 
@@ -37,6 +37,7 @@ public:
 private:
     void* _runtime = nullptr;
     std::vector<float> _logits_buffer;
+    Tensor1D _logits_fp16_view;
 };
 
 } // namespace rwkvmobile

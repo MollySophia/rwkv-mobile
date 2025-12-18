@@ -157,7 +157,7 @@ int mtk_np7_backend::load_model(std::string model_path) {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::eval(int id, float *& logits) {
+int mtk_np7_backend::eval(int id, Tensor1D & logits) {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -167,20 +167,15 @@ int mtk_np7_backend::eval(int id, float *& logits) {
     }
 
     // RWKV MTK runtime returns fp16 logits buffer.
-    const half_float::half* h = reinterpret_cast<const half_float::half*>(logits_ptr);
-    if ((int)_logits_buffer.size() != vocab_size) {
-        _logits_buffer.resize(vocab_size);
-    }
-    for (int i = 0; i < vocab_size; ++i) {
-        _logits_buffer[i] = (float)h[i];
-    }
-    // TODO: sampling on fp16 logits
-    logits = _logits_buffer.data();
+    _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
+
+    // Prefer returning fp16 logits to avoid an expensive full-vocab conversion.
+    // Callers that require fp32 can convert on-demand (e.g. before sampling).
+    logits = _logits_fp16_view;
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_copy) {
-    (void)skip_logits_copy;
+int mtk_np7_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -193,14 +188,8 @@ int mtk_np7_backend::eval(std::vector<int> ids, float *& logits, bool skip_logit
         return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
     }
 
-    const half_float::half* h = reinterpret_cast<const half_float::half*>(logits_ptr);
-    if ((int)_logits_buffer.size() != vocab_size) {
-        _logits_buffer.resize(vocab_size);
-    }
-    for (int i = 0; i < vocab_size; ++i) {
-        _logits_buffer[i] = (float)h[i];
-    }
-    logits = _logits_buffer.data();
+    _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
+    logits = _logits_fp16_view;
     return RWKV_SUCCESS;
 }
 

@@ -4,10 +4,13 @@
 #include <string>
 #include <map>
 #include <memory>
+#include <deque>
 #include <functional>
 #include <cstdlib>
 #include <any>
 #include <thread>
+#include <mutex>
+#include <cstdint>
 #include "backend.h"
 #include "tokenizer.h"
 #include "sampler.h"
@@ -77,6 +80,14 @@ struct ModelInstance {
     bool is_generating = false;
     bool stop_signal = false;
 
+    struct SpeedSample {
+        int tokens = 0;
+        int64_t duration_us = 0;
+    };
+    mutable std::mutex speed_samples_mutex;
+    std::deque<SpeedSample> decode_samples_us;
+    std::deque<SpeedSample> prefill_samples_us;
+
 #if defined(ENABLE_VISION) || defined(ENABLE_WHISPER)
     std::unique_ptr<MultimodalEncoder> multimodal_encoder;
 #endif
@@ -98,10 +109,10 @@ public:
     int release_model(int model_id);
     int release();
 
-    int eval_logits(int model_id, int id, float *& logits);
-    int eval_logits(int model_id, std::vector<int> ids, float *& logits);
-    int eval_logits_with_embeddings(int model_id, const float *embeddings, int n_tokens, float *& logits);
-    int eval_logits_batch_decode(int model_id, std::vector<int> ids, float *& logits);
+    int eval_logits(int model_id, int id, Tensor1D & logits);
+    int eval_logits(int model_id, std::vector<int> ids, Tensor1D & logits);
+    int eval_logits_with_embeddings(int model_id, const float *embeddings, int n_tokens, Tensor1D & logits);
+    int eval_logits_batch_decode(int model_id, std::vector<int> ids, Tensor1D & logits);
 
     // with history
     int chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *) = nullptr, bool enable_reasoning = false);
@@ -373,6 +384,15 @@ private:
 
     double _prefill_speed = -1;
     double _decode_speed = -1;
+
+    static constexpr size_t _speed_samples_max = 256; // sliding window size
+    static constexpr double _speed_trim_ratio_total = 0.10; // keep 90%
+
+    void _record_speed_sample(ModelInstance& model, bool is_prefill, int tokens, int64_t duration_us);
+    static double _compute_trimmed_mean_speed_tokens_per_s(
+        const std::deque<ModelInstance::SpeedSample>& samples,
+        double trim_ratio_total
+    );
 
     const int _prefill_chunk_size = 64;
 

@@ -52,12 +52,25 @@ int rwkvmobile_runtime_eval_logits(rwkvmobile_runtime_t handle, int model_id, co
     }
     auto rt = static_cast<class runtime *>(handle);
     std::vector<int> ids_vec(ids, ids + ids_len);
-    float *logits_ret = nullptr;
+    Tensor1D logits_ret;
     auto ret = rt->eval_logits(model_id, ids_vec, logits_ret);
     if (ret != RWKV_SUCCESS) {
         return ret;
     }
-    memcpy(logits, logits_ret, logits_len * sizeof(float));
+    const int n = std::min<int>(logits_len, (int)logits_ret.count);
+    if (n <= 0 || logits_ret.data_ptr == nullptr) {
+        return RWKV_ERROR_RUNTIME;
+    }
+    if (logits_ret.dtype == TensorDType::F32) {
+        memcpy(logits, logits_ret.data_ptr, (size_t)n * sizeof(float));
+    } else if (logits_ret.dtype == TensorDType::F16) {
+        const half_float::half* h = reinterpret_cast<const half_float::half*>(logits_ret.data_ptr);
+        for (int i = 0; i < n; ++i) {
+            logits[i] = (float)h[i];
+        }
+    } else {
+        return RWKV_ERROR_UNSUPPORTED;
+    }
     return RWKV_SUCCESS;
 }
 

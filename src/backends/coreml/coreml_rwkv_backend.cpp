@@ -27,13 +27,13 @@ int coreml_rwkv_backend::load_model(std::string model_path) {
     return RWKV_SUCCESS;
 }
 
-int coreml_rwkv_backend::eval(int id, float *& logits) {
+int coreml_rwkv_backend::eval(int id, Tensor1D & logits) {
     rwkv_coreml_decode(ctx, id);
-    logits = rwkv_coreml_get_logits(ctx);
+    logits = Tensor1D::make((void*)rwkv_coreml_get_logits(ctx), TensorDType::F32, (size_t)vocab_size);
     return RWKV_SUCCESS;
 }
 
-int coreml_rwkv_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_copy) {
+int coreml_rwkv_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     // TODO: sequential prefill
     for (int i = 0; i < ids.size(); i++) {
         int ret = eval(ids[i], logits);

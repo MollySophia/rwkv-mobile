@@ -1753,7 +1753,7 @@ int qnn_backend::execute_batch_decode_graph(int bsz) {
                         outputTensorsBatchDecode[needed_bsz]);
 }
 
-int qnn_backend::post_graph_execute(float *& logits) {
+int qnn_backend::post_graph_execute(Tensor1D & logits) {
     if (logits_buffer.empty()) {
         logits_buffer.resize(vocab_size);
     }
@@ -1800,7 +1800,7 @@ int qnn_backend::post_graph_execute(float *& logits) {
             return RWKV_ERROR_IO;
         }
     }
-    logits = logits_buffer.data();
+    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t)vocab_size);
     return RWKV_SUCCESS;
 }
 
@@ -1881,7 +1881,7 @@ int qnn_backend::debug_dump_state() {
     return RWKV_SUCCESS;
 }
 
-int qnn_backend::eval(int id, float *& logits) {
+int qnn_backend::eval(int id, Tensor1D & logits) {
     {
         std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
         if (!isTensorInitialized) {
@@ -1942,7 +1942,7 @@ int qnn_backend::eval(int id, float *& logits) {
     return post_graph_execute(logits);
 }
 
-int qnn_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_copy) {
+int qnn_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     if (ids.empty()) {
         return RWKV_ERROR_EVAL;
     }
@@ -2081,13 +2081,10 @@ int qnn_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_co
     }
 
     // copy logits
-    if (!skip_logits_copy) {
-        return post_graph_execute(logits);
-    }
-    return RWKV_SUCCESS;
+    return post_graph_execute(logits);
 }
 
-int qnn_backend::eval_with_embeddings(const float *embeddings, int n_tokens, float *& logits) {
+int qnn_backend::eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) {
     {
         std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
         if (!isTensorInitialized) return RWKV_ERROR_EVAL;
@@ -2122,7 +2119,7 @@ int qnn_backend::eval_with_embeddings(const float *embeddings, int n_tokens, flo
     return post_graph_execute(logits);
 }
 
-int qnn_backend::eval_batch(std::vector<std::vector<int>> ids, float *& logits) {
+int qnn_backend::eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) {
     if (supported_batch_sizes.size() == 0) {
         return RWKV_ERROR_UNSUPPORTED;
     }
@@ -2174,7 +2171,7 @@ int qnn_backend::eval_batch(std::vector<std::vector<int>> ids, float *& logits) 
             return RWKV_ERROR_IO;
         }
     }
-    logits = logits_buffer.data();
+    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t)(vocab_size * batch_size));
     return RWKV_SUCCESS;
 }
 

@@ -52,10 +52,10 @@ public:
 
     int init(void * extra) override;
     int load_model(std::string model_path) override;
-    int eval(int id, float *& logits) override;
-    int eval(std::vector<int> ids, float *& logits, bool skip_logits_copy = false) override;
-    int eval_with_embeddings(const float *embeddings, int n_tokens, float *& logits) override;
-    int eval_batch(std::vector<std::vector<int>> ids, float *& logits) override;
+    int eval(int id, Tensor1D & logits) override;
+    int eval(std::vector<int> ids, Tensor1D & logits) override;
+    int eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) override;
+    int eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) override;
 
     bool is_available() override;
     int zero_state() override;
@@ -82,7 +82,7 @@ public:
 
     int copy_qnn_tensor_to_float(Qnn_Tensor_t *qnn_tensor, float *buffer, size_t element_count);
 
-    int post_graph_execute(float *& logits);
+    int post_graph_execute(Tensor1D & logits);
 
     int deep_embedding_size = 0;
     bool has_deep_embedding = false;

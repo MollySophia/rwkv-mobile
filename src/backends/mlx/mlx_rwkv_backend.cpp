@@ -44,7 +44,7 @@ int mlx_rwkv_backend::load_model(std::string model_path) {
     return RWKV_SUCCESS;
 }
 
-int mlx_rwkv_backend::eval(int id, float *& logits) {
+int mlx_rwkv_backend::eval(int id, Tensor1D & logits) {
     if (!model_handle) {
         LOGE("MLX model not loaded\n");
         return RWKV_ERROR_EVAL;
@@ -60,11 +60,11 @@ int mlx_rwkv_backend::eval(int id, float *& logits) {
         return RWKV_ERROR_EVAL;
     }
 
-    logits = logits_buffer.data();
+    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t)vocab_size);
     return RWKV_SUCCESS;
 }
 
-int mlx_rwkv_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_copy) {
+int mlx_rwkv_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     if (!model_handle) {
         LOGE("MLX model not loaded\n");
         return RWKV_ERROR_EVAL;
@@ -81,7 +81,7 @@ int mlx_rwkv_backend::eval(std::vector<int> ids, float *& logits, bool skip_logi
         return RWKV_ERROR_EVAL;
     }
 
-    logits = logits_buffer.data();
+    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t)vocab_size);
     return RWKV_SUCCESS;
 }
 

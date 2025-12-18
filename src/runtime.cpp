@@ -4,6 +4,8 @@
 #include <functional>
 #include <filesystem>
 #include <chrono>
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <cstdlib>
 #include <cstring>
@@ -60,6 +62,61 @@
 #endif
 
 namespace rwkvmobile {
+
+void runtime::_record_speed_sample(ModelInstance& model, bool is_prefill, int tokens, int64_t duration_us) {
+    if (tokens <= 0 || duration_us <= 0) {
+        return;
+    }
+    ModelInstance::SpeedSample sample;
+    sample.tokens = tokens;
+    sample.duration_us = duration_us;
+
+    std::lock_guard<std::mutex> lock(model.speed_samples_mutex);
+    auto& q = is_prefill ? model.prefill_samples_us : model.decode_samples_us;
+    q.push_back(sample);
+    while (q.size() > _speed_samples_max) {
+        q.pop_front();
+    }
+}
+
+double runtime::_compute_trimmed_mean_speed_tokens_per_s(
+    const std::deque<ModelInstance::SpeedSample>& samples,
+    double trim_ratio_total
+) {
+    if (samples.empty()) {
+        return 0.0;
+    }
+
+    std::vector<double> speeds;
+    speeds.reserve(samples.size());
+    for (const auto& s : samples) {
+        if (s.tokens <= 0 || s.duration_us <= 0) {
+            continue;
+        }
+        speeds.push_back((double)s.tokens * 1e6 / (double)s.duration_us);
+    }
+    if (speeds.empty()) {
+        return 0.0;
+    }
+
+    std::sort(speeds.begin(), speeds.end());
+    const size_t n = speeds.size();
+
+    // Keep middle (1 - trim_ratio_total). Default is 90% (trim 5% on each side).
+    const double half_trim = std::max(0.0, std::min(0.5, trim_ratio_total * 0.5));
+    size_t trim_each_side = (size_t)std::floor((double)n * half_trim);
+    if (trim_each_side * 2 >= n) {
+        trim_each_side = 0;
+    }
+
+    const size_t begin = trim_each_side;
+    const size_t end = n - trim_each_side;
+    double sum = 0.0;
+    for (size_t i = begin; i < end; i++) {
+        sum += speeds[i];
+    }
+    return sum / (double)(end - begin);
+}
 
 std::string backend_enum_to_str(int backend) {
     switch (backend) {
@@ -428,7 +485,7 @@ void runtime::unload_initial_state(int model_id, std::string state_path) {
     }
 }
 
-int runtime::eval_logits(int model_id, int id, float *& logits) {
+int runtime::eval_logits(int model_id, int id, Tensor1D & logits) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -439,11 +496,12 @@ int runtime::eval_logits(int model_id, int id, float *& logits) {
     auto start = std::chrono::high_resolution_clock::now();
     int ret = model->backend->eval(id, logits);
     auto end = std::chrono::high_resolution_clock::now();
-    _decode_speed = 1e6f / std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    _record_speed_sample(*model, /*is_prefill=*/false, /*tokens=*/1, duration_us);
     return ret;
 }
 
-int runtime::eval_logits(int model_id, std::vector<int> ids, float *& logits) {
+int runtime::eval_logits(int model_id, std::vector<int> ids, Tensor1D & logits) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -475,11 +533,12 @@ int runtime::eval_logits(int model_id, std::vector<int> ids, float *& logits) {
         }
     }
     auto end = std::chrono::high_resolution_clock::now();
-    _prefill_speed = ids.size() * 1e6f / std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    _record_speed_sample(*model, /*is_prefill=*/true, /*tokens=*/(int)ids.size(), duration_us);
     return ret;
 }
 
-int runtime::eval_logits_with_embeddings(int model_id, const float *embeddings, int n_tokens, float *& logits) {
+int runtime::eval_logits_with_embeddings(int model_id, const float *embeddings, int n_tokens, Tensor1D & logits) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -490,15 +549,12 @@ int runtime::eval_logits_with_embeddings(int model_id, const float *embeddings, 
     auto start = std::chrono::high_resolution_clock::now();
     auto ret = model->backend->eval_with_embeddings(embeddings, n_tokens, logits);
     auto end = std::chrono::high_resolution_clock::now();
-    if (n_tokens > 1) {
-        _prefill_speed = n_tokens * 1e6f / std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-    } else {
-        _decode_speed = 1e6f / std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-    }
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    _record_speed_sample(*model, /*is_prefill=*/(n_tokens > 1), /*tokens=*/n_tokens, duration_us);
     return ret;
 }
 
-int runtime::eval_logits_batch_decode(int model_id, std::vector<int> ids, float *& logits) {
+int runtime::eval_logits_batch_decode(int model_id, std::vector<int> ids, Tensor1D & logits) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -515,7 +571,8 @@ int runtime::eval_logits_batch_decode(int model_id, std::vector<int> ids, float 
 
     int ret = model->backend->eval_batch(ids_batch, logits);
     auto end = std::chrono::high_resolution_clock::now();
-    _decode_speed = ids.size() * 1e6f / std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    _record_speed_sample(*model, /*is_prefill=*/false, /*tokens=*/(int)ids.size(), duration_us);
     return ret;
 }
 
@@ -880,7 +937,8 @@ int runtime::load_history_state_to_memory(int model_id, std::string state_path) 
 
     std::vector<int> tokens_to_prefill;
     auto node = model->backend->match_and_load_state(ids_data, tokens_to_prefill);
-    model->backend->register_state_checkpoint_with_state(node, tokens_to_prefill, logits_data.data(), runtime_state);
+    Tensor1D logits_tensor = Tensor1D::make(logits_data.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
+    model->backend->register_state_checkpoint_with_state(node, tokens_to_prefill, logits_tensor, runtime_state);
     LOGI("loaded state from disk for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
 
     return RWKV_SUCCESS;
@@ -938,7 +996,7 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     }
     LOGD("%s\n", debug_msg.c_str());
 
-    float *logits = nullptr;
+    Tensor1D logits;
     std::vector<int> tokens_to_prefill;
     auto node = model->backend->match_and_load_state(text_ids, tokens_to_prefill);
     LOGI("matched state cache for prefix: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
@@ -1034,9 +1092,9 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
         }
     }
 
-    if (logits == nullptr) {
+    if (logits.data_ptr == nullptr) {
         if (!node->logits.empty()) {
-            logits = node->logits.data();
+            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
         } else {
             LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
             // this should never happen
@@ -1056,10 +1114,10 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
 
         if ((i == 0 || i == 1) && first_token_ban_thinking_tag) {
             // token 61 is '<', 261 is '\n\n'
-            logits[11] = -1e9f;
-            logits[61] = -1e9f;
-            logits[261] = -1e9f;
-            logits[0] = -1e9f;
+            tensor1d_set_f32(logits, 11, -1e9f);
+            tensor1d_set_f32(logits, 61, -1e9f);
+            tensor1d_set_f32(logits, 261, -1e9f);
+            tensor1d_set_f32(logits, 0, -1e9f);
         }
 
         decoded_idx = model->sampler->sample(logits, model->backend->get_num_vocab());
@@ -1186,7 +1244,7 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     std::vector<std::string> input_texts(batch_size);
     std::vector<std::vector<int>> text_ids_batch(batch_size);
     // std::vector<float*> logits_batch(batch_size, nullptr);
-    float *logits = nullptr;
+    Tensor1D logits;
     std::vector<state_node*> nodes_batch(batch_size);
 
     std::vector<std::map<int, float>> occurences_batch(batch_size);
@@ -1240,9 +1298,9 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         }
         _prefill_progress_finish();
 
-        if (logits == nullptr) {
+        if (logits.data_ptr == nullptr) {
             if (!nodes_batch[batch_idx]->logits.empty()) {
-                logits = nodes_batch[batch_idx]->logits.data();
+                logits = Tensor1D::make(nodes_batch[batch_idx]->logits.data(), TensorDType::F32, (size_t)num_vocab);
             } else {
                 LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
                 return RWKV_ERROR_RUNTIME;
@@ -1251,10 +1309,8 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
         is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
         model->sampler->apply_penalties(logits, num_vocab);
-
-        logits[61] = -1e9f;
-        logits[261] = -1e9f;
-
+        tensor1d_set_f32(logits, 61, -1e9f);
+        tensor1d_set_f32(logits, 261, -1e9f);
         decoded_idx[batch_idx] = model->sampler->sample(logits, num_vocab);
 
         model->backend->get_state(state_batch[batch_idx]);
@@ -1278,12 +1334,13 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         if (i != 0) {
             for (int j = 0; j < current_batch_size; j++) {
                 int original_j = active_batch_indices[j];
-                model->sampler->apply_penalties(logits + j * num_vocab, num_vocab, occurences_batch[original_j],
+                Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
+                model->sampler->apply_penalties(view, num_vocab, occurences_batch[original_j],
                     model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
                     model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
 
                 if (is_pseudo_thinking_batch[original_j] && i == 1) {
-                    logits[j * num_vocab + 61] = -1e9f;
+                    tensor1d_set_f32(view, 61, -1e9f);
                 }
             }
 
@@ -1365,18 +1422,22 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 }
 
                 // rearrange logits for new active batches
+                if (logits.dtype != TensorDType::F32 || logits.data_ptr == nullptr) {
+                    return RWKV_ERROR_UNSUPPORTED;
+                }
+                float* logits_f32 = reinterpret_cast<float*>(logits.data_ptr);
                 std::vector<float> temp_logits(new_active_count * num_vocab);
                 for (int k = 0; k < new_active_count; k++) {
                     int original_batch_idx = new_active_batch_indices[k];
                     int current_slot_idx = original_to_active_mapping[original_batch_idx];
                     if (current_slot_idx >= 0 && current_slot_idx < current_batch_size) {
                         memcpy(temp_logits.data() + k * num_vocab, 
-                            logits + current_slot_idx * num_vocab, 
+                            logits_f32 + current_slot_idx * num_vocab, 
                             num_vocab * sizeof(float));
                     }
                 }
                 // copy rearranged logits back
-                memcpy(logits, temp_logits.data(), new_active_count * num_vocab * sizeof(float));
+                memcpy(logits_f32, temp_logits.data(), (size_t)new_active_count * (size_t)num_vocab * sizeof(float));
 
                 // rearrange decoded_idx for new active batches
                 std::vector<int> temp_decoded_idx(new_active_count);
@@ -1507,7 +1568,7 @@ int runtime::set_prompt(int model_id, std::string prompt) {
     model->prompt = prompt;
     model->backend->set_state(node->state);
 
-    float *logits = nullptr;
+    Tensor1D logits;
     int ret = eval_logits(model_id, ids, logits);
     if (ret) {
         return ret;
@@ -1554,7 +1615,7 @@ int runtime::set_audio_prompt(int model_id, std::string path) {
     auto end = std::chrono::high_resolution_clock::now();
     LOGI("whisper duration: %lld ms", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
 
-    float *logits = nullptr;
+    Tensor1D logits;
 
     int ret = eval_logits_with_embeddings(model_id, embeddings.data(), n_tokens, logits);
     if (ret) {
@@ -1573,7 +1634,7 @@ int generate_tts_output(
     int model_id,
     NucleusSampler* sampler,
     execution_provider* backend,
-    float*& logits,
+    Tensor1D& logits,
     std::vector<int>& output_tokens
 ) {
     static const int tts_max_length = 3000;
@@ -1591,7 +1652,7 @@ int generate_tts_output(
 
         output_tokens.push_back(idx);
         int ret = rt->eval_logits(model_id, idx, logits);
-        if (ret || !logits) {
+        if (ret || logits.data_ptr == nullptr) {
             LOGE("[TTS] Error evaluating logits");
             return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
         }
@@ -1711,9 +1772,9 @@ int runtime::run_spark_tts_zeroshot(int model_id, std::string tts_text, std::str
     auto start = std::chrono::high_resolution_clock::now();
 
     clear_state(model_id);
-    float *logits = nullptr;
+    Tensor1D logits;
     int ret = eval_logits(model_id, input_tokens, logits);
-    if (ret || !logits) {
+    if (ret || logits.data_ptr == nullptr) {
         LOGE("[TTS] Error evaluating logits");
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1771,19 +1832,20 @@ int runtime::run_spark_tts_with_properties(int model_id, std::string tts_text, s
     input_tokens.push_back(tts_tag_token_offset + 0); // tag_0
 
     clear_state(model_id);
-    float *logits = nullptr;
+    Tensor1D logits;
     int ret = eval_logits(model_id, input_tokens, logits);
-    if (ret || !logits) {
+    if (ret || logits.data_ptr == nullptr) {
         LOGE("[TTS] Error evaluating logits");
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
 
+    std::vector<float> logits_scratch;
     for (int i = 0; i < 32; i++) { // generate 32 global_tokens
         int idx = model->sampler->sample(logits, 4096, 1.0, 20, 0.95);
 
         global_tokens.push_back(idx + global_token_offset);
         ret = eval_logits(model_id, idx + global_token_offset, logits);
-        if (ret || !logits) {
+        if (ret || logits.data_ptr == nullptr) {
             LOGE("[TTS] Error evaluating logits");
             return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
         }
@@ -1792,7 +1854,7 @@ int runtime::run_spark_tts_with_properties(int model_id, std::string tts_text, s
     _global_tokens_output = global_tokens;
 
     ret = eval_logits(model_id, tts_tag_token_offset + 1, logits);
-    if (ret || !logits) {
+    if (ret || logits.data_ptr == nullptr) {
         LOGE("[TTS] Error evaluating logits");
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1847,9 +1909,9 @@ int runtime::run_spark_tts_with_global_tokens(int model_id, std::string tts_text
     input_tokens.push_back(tts_tag_token_offset + 1); // tag_1
 
     clear_state(model_id);
-    float *logits = nullptr;
+    Tensor1D logits;
     int ret = eval_logits(model_id, input_tokens, logits);
-    if (ret || !logits) {
+    if (ret || logits.data_ptr == nullptr) {
         LOGE("[TTS] Error evaluating logits");
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1955,14 +2017,14 @@ int runtime::run_spark_tts_zeroshot_streaming(int model_id, std::string tts_text
             }
 
             clear_state(model_id);
-            float *logits = nullptr;
+            Tensor1D logits;
             int ret = eval_logits(model_id, input_tokens, logits);
-            if (ret || !logits) {
+            if (ret || logits.data_ptr == nullptr) {
                 LOGE("[TTS] Error evaluating logits");
                 generation_finished = true;
                 return;
             }
-            logits[tts_eos_token] = -1e9;
+            tensor1d_set_f32(logits, (size_t)tts_eos_token, -1e9f);
 
             for (int i = 0; i < tts_max_length; i++) {
                 int idx = model->sampler->sample(logits, tts_tag_token_offset, tts_temperature, tts_top_k, tts_top_p);
@@ -1973,7 +2035,7 @@ int runtime::run_spark_tts_zeroshot_streaming(int model_id, std::string tts_text
 
                 output_tokens.push_back(idx);
                 ret = eval_logits(model_id, idx, logits);
-                if (ret || !logits) {
+                if (ret || logits.data_ptr == nullptr) {
                     LOGE("[TTS] Error evaluating logits");
                     generation_finished = true;
                     return;
@@ -2059,7 +2121,7 @@ int runtime::run_spark_tts_with_properties_streaming(int model_id, std::string t
             }
 
             clear_state(model_id);
-            float *logits = nullptr;
+            Tensor1D logits;
 
             if (global_tokens.empty()) {
                 // generate global tokens
@@ -2071,7 +2133,7 @@ int runtime::run_spark_tts_with_properties_streaming(int model_id, std::string t
                 input_tokens.push_back(tts_tag_token_offset + 0); // tag_0
 
                 int ret = eval_logits(model_id, input_tokens, logits);
-                if (ret || !logits) {
+                if (ret || logits.data_ptr == nullptr) {
                     LOGE("[TTS] Error evaluating logits");
                     generation_finished = true;
                     return;
@@ -2082,7 +2144,7 @@ int runtime::run_spark_tts_with_properties_streaming(int model_id, std::string t
 
                     global_tokens.push_back(idx + global_token_offset);
                     ret = eval_logits(model_id, idx + global_token_offset, logits);
-                    if (ret || !logits) {
+                    if (ret || logits.data_ptr == nullptr) {
                         LOGE("[TTS] Error evaluating logits");
                         generation_finished = true;
                         return;
@@ -2092,7 +2154,7 @@ int runtime::run_spark_tts_with_properties_streaming(int model_id, std::string t
                 _global_tokens_output = global_tokens;
 
                 ret = eval_logits(model_id, tts_tag_token_offset + 1, logits);
-                if (ret || !logits) {
+                if (ret || logits.data_ptr == nullptr) {
                     LOGE("[TTS] Error evaluating logits");
                     generation_finished = true;
                     return;
@@ -2109,14 +2171,14 @@ int runtime::run_spark_tts_with_properties_streaming(int model_id, std::string t
                 input_tokens.push_back(tts_tag_token_offset + 1); // tag_1
 
                 int ret = eval_logits(model_id, input_tokens, logits);
-                if (ret || !logits) {
+                if (ret || logits.data_ptr == nullptr) {
                     LOGE("[TTS] Error evaluating logits");
                     generation_finished = true;
                     return;
                 }
             }
 
-            logits[tts_eos_token] = -1e9;
+            tensor1d_set_f32(logits, (size_t)tts_eos_token, -1e9f);
 
             for (int i = 0; i < tts_max_length; i++) {
                 int idx = model->sampler->sample(logits, tts_tag_token_offset, tts_temperature, tts_top_k, tts_top_p);
@@ -2127,7 +2189,7 @@ int runtime::run_spark_tts_with_properties_streaming(int model_id, std::string t
 
                 output_tokens.push_back(idx);
                 int ret = eval_logits(model_id, idx, logits);
-                if (ret || !logits) {
+                if (ret || logits.data_ptr == nullptr) {
                     LOGE("[TTS] Error evaluating logits");
                     generation_finished = true;
                     return;
@@ -2211,7 +2273,7 @@ int runtime::run_spark_tts_with_global_tokens_streaming(int model_id, std::strin
             }
 
             clear_state(model_id);
-            float *logits = nullptr;
+            Tensor1D logits;
 
             std::vector<int> input_tokens = {tts_tag_token_offset + 2}; // tag_2
             for (int i = 0; i < text_tokens.size(); i++) {
@@ -2224,13 +2286,13 @@ int runtime::run_spark_tts_with_global_tokens_streaming(int model_id, std::strin
             input_tokens.push_back(tts_tag_token_offset + 1); // tag_1
 
             int ret = eval_logits(model_id, input_tokens, logits);
-            if (ret || !logits) {
+            if (ret || logits.data_ptr == nullptr) {
                 LOGE("[TTS] Error evaluating logits");
                 generation_finished = true;
                 return;
             }
 
-            logits[tts_eos_token] = -1e9;
+            tensor1d_set_f32(logits, (size_t)tts_eos_token, -1e9f);
 
             for (int i = 0; i < tts_max_length; i++) {
                 int idx = model->sampler->sample(logits, tts_tag_token_offset, tts_temperature, tts_top_k, tts_top_p);
@@ -2241,7 +2303,7 @@ int runtime::run_spark_tts_with_global_tokens_streaming(int model_id, std::strin
 
                 output_tokens.push_back(idx);
                 int ret = eval_logits(model_id, idx, logits);
-                if (ret || !logits) {
+                if (ret || logits.data_ptr == nullptr) {
                     LOGE("[TTS] Error evaluating logits");
                     generation_finished = true;
                     return;
@@ -2334,7 +2396,7 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     std::vector<int> decoded_idx_batch(batch_size);
     std::vector<std::string> decoded_text_batch(batch_size);
     std::vector<state_node*> nodes_batch(batch_size);
-    float *logits = nullptr;
+    Tensor1D logits;
 
     std::vector<std::map<int, float>> occurences_batch(batch_size);
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
@@ -2352,7 +2414,7 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
             std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
             int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
-            if (ret || !logits) {
+            if (ret || logits.data_ptr == nullptr) {
                 LOGE("gen_completion_batch: Error evaluating logits");
                 model->is_generating = false;
                 return ret;
@@ -2370,9 +2432,9 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         model->response_buffer_batch[batch_idx] = prompts[batch_idx];
         model->response_buffer_ids_batch[batch_idx] = ids;
 
-        if (logits == nullptr) {
+        if (logits.data_ptr == nullptr) {
             if (!nodes_batch[batch_idx]->logits.empty()) {
-                logits = nodes_batch[batch_idx]->logits.data();
+                logits = Tensor1D::make(nodes_batch[batch_idx]->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
             } else {
                 LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
                 return RWKV_ERROR_RUNTIME;
@@ -2392,7 +2454,8 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     for (int i = 0; i < max_length; i++) {
         if (i != 0) {
             for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
-                model->sampler->apply_penalties(logits + batch_idx * model->backend->get_num_vocab(), model->backend->get_num_vocab(), occurences_batch[batch_idx],
+                Tensor1D view = tensor1d_subview(logits, (size_t)batch_idx * (size_t)model->backend->get_num_vocab(), (size_t)model->backend->get_num_vocab());
+                model->sampler->apply_penalties(view, model->backend->get_num_vocab(), occurences_batch[batch_idx],
                     model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
                     model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
             }
@@ -2454,13 +2517,13 @@ int runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     state_node* node = model->backend->match_and_load_state(ids, tokens_to_prefill);
     _prefill_progress_start(tokens_to_prefill.size());
 
-    float *logits = nullptr;
+    Tensor1D logits;
     // save a state checkpoint every about 256 tokens
     int checkpoint_interval = 256;
     for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
         std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
         int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
-        if (ret || !logits) {
+        if (ret || logits.data_ptr == nullptr) {
             LOGE("gen_completion: Error evaluating logits");
             model->is_generating = false;
             return ret;
@@ -2478,6 +2541,15 @@ int runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     model->response_buffer = prompt;
     model->response_buffer_ids = ids;
     static int idx = 0;
+    if (logits.data_ptr == nullptr) {
+        if (!node->logits.empty()) {
+            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
+        } else {
+            LOGE("gen_completion: no logits available after prefill");
+            model->is_generating = false;
+            return RWKV_ERROR_RUNTIME;
+        }
+    }
     for (int i = 0; i < max_length; i++) {
         model->sampler->apply_penalties(logits, model->backend->get_num_vocab());
         idx = model->sampler->sample(logits, model->backend->get_num_vocab());
@@ -2541,25 +2613,43 @@ int runtime::run_evaluation(int model_id, std::string source_text, std::string t
         source_ids.insert(source_ids.begin(), 0);
     }
 
-    float *logits = nullptr;
+    Tensor1D logits;
     clear_state(model_id);
     int ret = eval_logits(model_id, source_ids, logits);
-    if (ret || !logits) {
+    if (ret || logits.data_ptr == nullptr) {
         LOGE("run_evaluation: Error evaluating logits");
         return ret;
     }
 
     correct = true;
     logits_val = 0;
+    const int vocab = model->backend->get_num_vocab();
+    std::vector<float> logits_f32_copy((size_t)vocab);
     for (int i = 0; i < target_ids.size(); i++) {
-        auto output_id = softmax_and_argmax(logits, model->backend->get_num_vocab());
-        logits_val += std::log(logits[target_ids[i]]);
+        // Evaluation uses full softmax, so we always make a fp32 copy here.
+        // NOTE: softmax_and_argmax modifies the buffer in-place.
+        if (logits.data_ptr == nullptr || logits.count < (size_t)vocab) {
+            LOGE("run_evaluation: invalid logits tensor");
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+        if (logits.dtype == TensorDType::F32) {
+            memcpy(logits_f32_copy.data(), logits.data_ptr, (size_t)vocab * sizeof(float));
+        } else if (logits.dtype == TensorDType::F16) {
+            const half_float::half* h = reinterpret_cast<const half_float::half*>(logits.data_ptr);
+            for (int j = 0; j < vocab; ++j) logits_f32_copy[j] = (float)h[j];
+        } else {
+            LOGE("run_evaluation: unsupported logits dtype");
+            return RWKV_ERROR_UNSUPPORTED;
+        }
+
+        auto output_id = softmax_and_argmax(logits_f32_copy.data(), (size_t)vocab);
+        logits_val += std::log(logits_f32_copy[target_ids[i]]);
         if (output_id != target_ids[i]) {
             correct = false;
         }
         if (i != target_ids.size() - 1) {
             ret = eval_logits(model_id, target_ids[i], logits);
-            if (ret || !logits) {
+            if (ret || logits.data_ptr == nullptr) {
                 LOGE("run_evaluation: Error evaluating logits");
                 return ret;
             }
@@ -2579,11 +2669,16 @@ double runtime::get_avg_decode_speed(int model_id) {
         return speed_from_backend;
     }
 
-    if (_decode_speed < 0) {
-        return 0.0;
-    } else {
-        return _decode_speed;
+    double speed = 0.0;
+    {
+        std::lock_guard<std::mutex> lock(model->speed_samples_mutex);
+        speed = _compute_trimmed_mean_speed_tokens_per_s(model->decode_samples_us, _speed_trim_ratio_total);
     }
+    if (speed > 0.0) {
+        _decode_speed = speed;
+        return speed;
+    }
+    return (_decode_speed < 0) ? 0.0 : _decode_speed;
 }
 
 double runtime::get_avg_prefill_speed(int model_id) {
@@ -2596,11 +2691,16 @@ double runtime::get_avg_prefill_speed(int model_id) {
         return speed_from_backend;
     }
 
-    if (_prefill_speed < 0) {
-        return 0.0;
-    } else {
-        return _prefill_speed;
+    double speed = 0.0;
+    {
+        std::lock_guard<std::mutex> lock(model->speed_samples_mutex);
+        speed = _compute_trimmed_mean_speed_tokens_per_s(model->prefill_samples_us, _speed_trim_ratio_total);
     }
+    if (speed > 0.0) {
+        _prefill_speed = speed;
+        return speed;
+    }
+    return (_prefill_speed < 0) ? 0.0 : _prefill_speed;
 }
 
 void runtime::set_sampler_params(int model_id, float temperature, int top_k, float top_p) {

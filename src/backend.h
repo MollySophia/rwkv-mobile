@@ -6,6 +6,7 @@
 #include <memory>
 #include <any>
 #include "half.hpp"
+#include "tensor.h"
 
 #include "commondef.h"
 
@@ -45,10 +46,10 @@ public:
     virtual int init(void * extra) { return 0; }
     virtual int init(std::string model_path, void * extra) { return 0; }
     virtual int load_model(std::string model_path) { return RWKV_ERROR_MODEL; }
-    virtual int eval(int id, float *& logits) { return 0; };
-    virtual int eval(std::vector<int> ids, float *& logits, bool skip_logits_copy = false) { return 0; };
-    virtual int eval_batch(std::vector<std::vector<int>> ids, float *& logits) { return RWKV_ERROR_UNSUPPORTED; };
-    virtual int eval_with_embeddings(const float *embeddings, int n_tokens, float *& logits) { return RWKV_ERROR_UNSUPPORTED; };
+    virtual int eval(int id, Tensor1D & logits) { (void)id; logits = {}; return 0; };
+    virtual int eval(std::vector<int> ids, Tensor1D & logits) { (void)ids; logits = {}; return 0; };
+    virtual int eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) { (void)ids; logits = {}; return RWKV_ERROR_UNSUPPORTED; };
+    virtual int eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) { (void)embeddings; (void)n_tokens; logits = {}; return RWKV_ERROR_UNSUPPORTED; };
     virtual int get_state(std::any &state) { return 0; }
     virtual int set_state(std::any state) { return 0; }
     virtual int free_state(std::any state) { return 0; }
@@ -89,9 +90,9 @@ public:
 
     state_node* find_deepest_matching_node(const std::vector<int> &ids, bool increment_activation_count = true);
     state_node* match_and_load_state(const std::vector<int> &ids, std::vector<int> &new_ids_to_prefill);
-    int register_state_checkpoint(state_node* &node, const std::vector<int> &ids, const float *logits);
-    int register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const float *logits, std::any &state);
-    int register_batch_state_checkpoint(std::vector<state_node*> &nodes, std::vector<std::any> &states, const std::vector<std::vector<int>> &ids, const float *logits);
+    int register_state_checkpoint(state_node* &node, const std::vector<int> &ids, const Tensor1D &logits);
+    int register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const Tensor1D &logits, std::any &state);
+    int register_batch_state_checkpoint(std::vector<state_node*> &nodes, std::vector<std::any> &states, const std::vector<std::vector<int>> &ids, const Tensor1D &logits);
 
     void cleanup_state_tree();
 };

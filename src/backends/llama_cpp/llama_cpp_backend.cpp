@@ -77,7 +77,7 @@ int llama_cpp_backend::load_model(std::string model_path) {
     return RWKV_SUCCESS;
 }
 
-int llama_cpp_backend::eval(int id, float *& logits) {
+int llama_cpp_backend::eval(int id, Tensor1D & logits) {
     llama_batch batch = llama_batch_get_one(&id, 1);
     llama_decode(ctx, batch);
 
@@ -85,24 +85,24 @@ int llama_cpp_backend::eval(int id, float *& logits) {
     if (!logits_out) {
         return RWKV_ERROR_EVAL;
     }
-    logits = logits_out;
+    logits = Tensor1D::make((void*)logits_out, TensorDType::F32, (size_t)vocab_size);
 
     return RWKV_SUCCESS;
 }
 
-int llama_cpp_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_copy) {
+int llama_cpp_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     llama_batch batch = llama_batch_get_one(ids.data(), ids.size());
     llama_decode(ctx, batch);
     float * logits_out = llama_get_logits_ith(ctx, -1);
     if (!logits_out) {
         return RWKV_ERROR_EVAL;
     }
-    logits = logits_out;
+    logits = Tensor1D::make((void*)logits_out, TensorDType::F32, (size_t)vocab_size);
 
     return RWKV_SUCCESS;
 }
 
-int llama_cpp_backend::eval_with_embeddings(const float *embeddings, int n_tokens, float *& logits) {
+int llama_cpp_backend::eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) {
     int n_embd = llama_model_n_embd(model);
 
     // llava_embd_batch llava_batch = llava_embd_batch(embd, n_eval, n_past, 0);
@@ -120,7 +120,7 @@ int llama_cpp_backend::eval_with_embeddings(const float *embeddings, int n_token
     if (!logits_out) {
         return RWKV_ERROR_EVAL;
     }
-    logits = logits_out;
+    logits = Tensor1D::make((void*)logits_out, TensorDType::F32, (size_t)vocab_size);
 
     return RWKV_SUCCESS;
 }
@@ -163,7 +163,7 @@ int llama_cpp_backend::free_state(std::any state) {
 
 int llama_cpp_backend::load_raw_states(std::vector<std::vector<half_float::half>> states) {
     zero_state();
-    float * logits;
+    Tensor1D logits;
     eval(0, logits);
     llama_memory_recurrent * mem = (llama_memory_recurrent *)llama_get_memory(ctx);
     for (int i = 0; i < n_layers; i++) {

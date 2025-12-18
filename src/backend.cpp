@@ -37,13 +37,18 @@ state_node* execution_provider::match_and_load_state(const std::vector<int> &ids
     return node;
 }
 
-int execution_provider::register_state_checkpoint(state_node* &node, const std::vector<int> &ids, const float *logits) {
+int execution_provider::register_state_checkpoint(state_node* &node, const std::vector<int> &ids, const Tensor1D &logits) {
     std::any new_state;
     get_state(new_state);
     return register_state_checkpoint_with_state(node, ids, logits, new_state);
 }
 
-int execution_provider::register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const float *logits, std::any &state) {
+int execution_provider::register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const Tensor1D &logits, std::any &state) {
+    if (logits.data_ptr == nullptr || logits.count < (size_t)vocab_size) {
+        LOGE("register_state_checkpoint_with_state: invalid logits tensor");
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
     auto new_ids = node->ids;
     new_ids.insert(new_ids.end(), ids.begin(), ids.end());
     auto tmp_node = find_deepest_matching_node(new_ids, false);
@@ -63,7 +68,15 @@ int execution_provider::register_state_checkpoint_with_state(state_node* &node, 
     new_node->ids = node->ids;
     new_node->ids.insert(new_node->ids.end(), ids.begin(), ids.end());
     new_node->logits.resize(vocab_size);
-    memcpy(new_node->logits.data(), logits, vocab_size * sizeof(float));
+    if (logits.dtype == TensorDType::F32) {
+        memcpy(new_node->logits.data(), logits.data_ptr, (size_t)vocab_size * sizeof(float));
+    } else if (logits.dtype == TensorDType::F16) {
+        const half_float::half* h = reinterpret_cast<const half_float::half*>(logits.data_ptr);
+        for (int i = 0; i < vocab_size; ++i) new_node->logits[i] = (float)h[i];
+    } else {
+        LOGE("register_state_checkpoint_with_state: unsupported logits dtype");
+        return RWKV_ERROR_UNSUPPORTED;
+    }
     new_node->state = std::move(state);
     new_node->activation_count = node->activation_count;
 
@@ -78,12 +91,17 @@ int execution_provider::register_state_checkpoint_with_state(state_node* &node, 
     return RWKV_SUCCESS;
 }
 
-int execution_provider::register_batch_state_checkpoint(std::vector<state_node*> &nodes, std::vector<std::any> &states, const std::vector<std::vector<int>> &ids, const float *logits) {
+int execution_provider::register_batch_state_checkpoint(std::vector<state_node*> &nodes, std::vector<std::any> &states, const std::vector<std::vector<int>> &ids, const Tensor1D &logits) {
     auto batch_size = states.size();
     if (ids.size() != batch_size) {
         LOGE("register_batch_state_checkpoint: ids size %d != batch size %d\n", ids.size(), batch_size);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
+    if (logits.data_ptr == nullptr || logits.count < (size_t)(vocab_size * (int)batch_size)) {
+        LOGE("register_batch_state_checkpoint: invalid logits tensor");
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
     for (size_t i = 0; i < batch_size; i++) {
         for (auto &child : nodes[i]->children) {
             if (child->ids.size() == ids[i].size() && std::equal(child->ids.begin(), child->ids.end(), ids[i].begin())) {
@@ -97,7 +115,18 @@ int execution_provider::register_batch_state_checkpoint(std::vector<state_node*>
         new_node->ids.insert(new_node->ids.end(), ids[i].begin(), ids[i].end());
         new_node->state = std::move(states[i]);
         new_node->logits.resize(vocab_size);
-        memcpy(new_node->logits.data(), logits + i * vocab_size, vocab_size * sizeof(float));
+        if (logits.dtype == TensorDType::F32) {
+            const float* base = reinterpret_cast<const float*>(logits.data_ptr);
+            memcpy(new_node->logits.data(), base + i * vocab_size, (size_t)vocab_size * sizeof(float));
+        } else if (logits.dtype == TensorDType::F16) {
+            const half_float::half* base = reinterpret_cast<const half_float::half*>(logits.data_ptr);
+            for (int j = 0; j < vocab_size; ++j) {
+                new_node->logits[j] = (float)base[i * (size_t)vocab_size + (size_t)j];
+            }
+        } else {
+            LOGE("register_batch_state_checkpoint: unsupported logits dtype");
+            return RWKV_ERROR_UNSUPPORTED;
+        }
         new_node->activation_count = nodes[i]->activation_count;
 
         nodes[i]->children.push_back(std::move(new_node));

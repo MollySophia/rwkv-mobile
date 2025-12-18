@@ -65,7 +65,7 @@ int web_rwkv_backend::load_model(std::string model_path) {
     return RWKV_SUCCESS;
 }
 
-int web_rwkv_backend::eval(int id, float *& logits) {
+int web_rwkv_backend::eval(int id, Tensor1D & logits) {
     uint32_t id_u32 = (uint32_t)id;
     auto ret = infer_raw_last(&id_u32, 1);
     if (!ret.len || !ret.logits) {
@@ -77,13 +77,13 @@ int web_rwkv_backend::eval(int id, float *& logits) {
         logits_buffer.resize(vocab_size);
     }
     memcpy(logits_buffer.data(), ret.logits, vocab_size * sizeof(float));
-    logits = logits_buffer.data();
+    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t)vocab_size);
 
     ::free_raw(ret);
     return RWKV_SUCCESS;
 }
 
-int web_rwkv_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_copy) {
+int web_rwkv_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     std::vector<uint32_t> ids_u32(ids.begin(), ids.end());
     auto ret = infer_raw_last((const uint32_t *)ids_u32.data(), ids_u32.size());
     if (!ret.len || !ret.logits) {
@@ -93,13 +93,13 @@ int web_rwkv_backend::eval(std::vector<int> ids, float *& logits, bool skip_logi
         logits_buffer.resize(vocab_size);
     }
     memcpy(logits_buffer.data(), ret.logits, vocab_size * sizeof(float));
-    logits = logits_buffer.data();
+    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t)vocab_size);
 
     ::free_raw(ret);
     return RWKV_SUCCESS;
 }
 
-int web_rwkv_backend::eval_batch(std::vector<std::vector<int>> ids_batch, float *& logits) {
+int web_rwkv_backend::eval_batch(std::vector<std::vector<int>> ids_batch, Tensor1D & logits) {
     bool supported = false;
     int batch_size = ids_batch.size();
     for (auto b : supported_batch_sizes) {
@@ -138,7 +138,7 @@ int web_rwkv_backend::eval_batch(std::vector<std::vector<int>> ids_batch, float 
     for (int i = 0; i < batch_size; i++) {
         memcpy(logits_buffer.data() + i * vocab_size, ret.logits + i * ret.len, vocab_size * sizeof(float));
     }
-    logits = logits_buffer.data();
+    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t)(vocab_size * batch_size));
 
     ::free_raw_batch(ret);
     return RWKV_SUCCESS;

@@ -46,7 +46,7 @@ int mnn_rwkv_backend::load_model(std::string model_path) {
     return RWKV_SUCCESS;
 }
 
-int mnn_rwkv_backend::eval(int id, float *& logits) {
+int mnn_rwkv_backend::eval(int id, Tensor1D & logits) {
     int token = id;
     auto inputs = interpreter->getSessionInputAll(session);
     for (int i = 0; i < n_layers * 3; i++) {
@@ -66,11 +66,11 @@ int mnn_rwkv_backend::eval(int id, float *& logits) {
     for (int i = 0; i < n_layers * 3; i++) {
         outputs["state" + std::to_string(i) + "_out"]->copyToHostTensor(state_tensors[i]);
     }
-    logits = logits_buffer.data();
+    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t)vocab_size);
     return RWKV_SUCCESS;
 }
 
-int mnn_rwkv_backend::eval(std::vector<int> ids, float *& logits, bool skip_logits_copy) {
+int mnn_rwkv_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     // TODO: sequential prefill
     int ret = RWKV_SUCCESS;
     for (int i = 0; i < ids.size(); i++) {

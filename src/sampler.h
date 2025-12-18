@@ -7,29 +7,31 @@
 #include <map>
 #include <mutex>
 
+#include "tensor.h"
+
 namespace rwkvmobile {
 
 class NucleusSampler {
 public:
     NucleusSampler();
 
-    void apply_penalties(float * logits, const size_t size, std::map<int, float> &occurences, std::vector<int> token_banned, float presence_penalty, float frequency_penalty, float penalty_decay);
+    void apply_penalties(Tensor1D & logits, const size_t size, std::map<int, float> &occurences, std::vector<int> token_banned, float presence_penalty, float frequency_penalty, float penalty_decay);
 
-    void apply_penalties(float * logits, const size_t size);
+    void apply_penalties(Tensor1D & logits, const size_t size);
 
     void clear_occurences() { _occurences.clear(); }
 
     void update_occurences(int token);
 
-    int sample(const float* logits, const size_t size);
+    int sample(const Tensor1D & logits, const size_t size);
 
-    int sample(const float* logits, const size_t size, float temperature, int top_k, float top_p);
+    int sample(const Tensor1D & logits, const size_t size, float temperature, int top_k, float top_p);
 
-    int sample(const float* logits, const size_t size, float temperature, int top_k, float top_p, std::vector<int> &index_buffer, std::vector<float> &probs_buffer);
+    int sample(const Tensor1D & logits, const size_t size, float temperature, int top_k, float top_p, std::vector<int> &index_buffer, std::vector<float> &probs_buffer);
 
-    std::vector<int> sample_batch(const float* logits, const size_t sampling_size, const size_t hstep, int batch_size);
+    std::vector<int> sample_batch(const Tensor1D & logits, const size_t sampling_size, const size_t hstep, int batch_size);
 
-    std::vector<int> sample_batch(const float* logits, const size_t sampling_size, const size_t hstep, int batch_size, std::vector<float> temperature, std::vector<int> top_k, std::vector<float> top_p);
+    std::vector<int> sample_batch(const Tensor1D & logits, const size_t sampling_size, const size_t hstep, int batch_size, std::vector<float> temperature, std::vector<int> top_k, std::vector<float> top_p);
 
     void set_seed(int32_t seed);
     int get_seed();

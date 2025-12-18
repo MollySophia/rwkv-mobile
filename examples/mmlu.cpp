@@ -80,13 +80,27 @@ int main(int argc, char ** argv) {
     runtime.set_sampler_params(model_id, 1.0, 1, 1.0);
     runtime.set_penalty_params(model_id, 0.0, 0.0, 0.0);
 
-    float *output = nullptr;
-    auto softmax = [](float *logits, size_t size) {
+    rwkvmobile::Tensor1D output;
+    auto softmax_fp32 = [](const float *logits, size_t size) {
         std::vector<float> probs(size);
         float max_val = *std::max_element(logits, logits + size);
         float sum = 0;
         for (size_t i = 0; i < size; i++) {
             probs[i] = std::exp((logits[i] - max_val));
+            sum += probs[i];
+        }
+        for (size_t i = 0; i < size; i++) {
+            probs[i] /= sum;
+        }
+        return probs;
+    };
+
+    auto softmax_fp16_to_fp32 = [](const half_float::half *logits, size_t size) {
+        std::vector<float> probs(size);
+        half_float::half max_val = *std::max_element(logits, logits + size);
+        float sum = 0;
+        for (size_t i = 0; i < size; i++) {
+            probs[i] = std::exp((float)logits[i] - max_val);
             sum += probs[i];
         }
         for (size_t i = 0; i < size; i++) {
@@ -116,8 +130,16 @@ int main(int argc, char ** argv) {
         std::string answer;
         runtime.clear_state(model_id);
         runtime.eval_logits(model_id, prompt_tokens, output);
-        auto probs = softmax(output, runtime.get_vocab_size(model_id));
-        // auto output_id = std::max_element(probs.begin(), probs.end()) - probs.begin();
+        std::vector<float> probs;
+        const float* logits_ptr = nullptr;
+        if (output.dtype == rwkvmobile::TensorDType::F32) {
+            probs = softmax_fp32(reinterpret_cast<const float*>(output.data_ptr), output.count);
+        } else if (output.dtype == rwkvmobile::TensorDType::F16) {
+            probs = softmax_fp16_to_fp32(reinterpret_cast<const half_float::half*>(output.data_ptr), output.count);
+        } else {
+            std::cerr << "Unsupported logits dtype in mmlu.cpp" << std::endl;
+            return 1;
+        }
 
         // answer = runtime.tokenizer_decode(model_id, output_id);
         auto max_prob = 0.0f;
