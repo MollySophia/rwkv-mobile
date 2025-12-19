@@ -16,6 +16,7 @@ An inference runtime with multiple backends supported.
 - [x] ncnn: Initial support for rwkv v6/v7 unquantized models (suitable for running tiny models everywhere).
 - [x] Qualcomm Hexagon NPU: Based on Qualcomm's QNN SDK.
 - [x] MLX: Running RWKV on Apple Silicon devices using Apple's MLX framework.
+- [x] MediaTek Neuropilot7: Running RWKV on MediaTek NPU. Currently only supports Dimensity 9300 devices.
 - [x] CoreML: (WIP) Running RWKV with Apple Neural Engine. Based on Apple's CoreML framework.
 - [ ] To be continued...
 
