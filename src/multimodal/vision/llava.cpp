@@ -11,17 +11,10 @@
 #include <limits>
 #include <vector>
 
-#if defined(LLAVA_LOG_OFF)
-#   define LOG_INF(...)
-#   define LOG_WRN(...)
-#   define LOG_ERR(...)
-#   define LOG_DBG(...)
-#else // defined(LLAVA_LOG_OFF)
-#   define LOG_INF(...) do { fprintf(stdout, __VA_ARGS__); } while (0)
-#   define LOG_WRN(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
-#   define LOG_ERR(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
-#   define LOG_DBG(...) do { fprintf(stdout, __VA_ARGS__); } while (0)
-#endif // defined(LLAVA_LOG_OFF)
+#define LOG_INF(...) do { fprintf(stdout, __VA_ARGS__); } while (0)
+#define LOG_WRN(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
+#define LOG_ERR(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
+#define LOG_DBG(...) do { fprintf(stdout, __VA_ARGS__); } while (0)
 
 // RGB uint8 image
 struct clip_image_u8 {
@@ -40,210 +33,6 @@ struct clip_image_f32 {
     std::vector<float> buf;
 };
 
-struct clip_image_grid_shape {
-    int first;
-    int second;
-};
-
-/**
- * Selects the best resolution from a list of possible resolutions based on the original size.
- *
- * @param original_size The original size of the image in the format (width, height).
- * @param possible_resolutions A list of possible resolutions in the format [(width1, height1), (width2, height2), ...].
- * @return The best fit resolution in the format (width, height).
- */
-static std::pair<int, int> select_best_resolution(const std::pair<int, int>& original_size, const std::vector<std::pair<int, int>>& possible_resolutions) {
-    int original_width  = original_size.first;
-    int original_height = original_size.second;
-
-    std::pair<int, int> best_fit;
-    int max_effective_resolution = 0;
-    int min_wasted_resolution = std::numeric_limits<int>::max();
-
-    for (const auto& resolution : possible_resolutions) {
-        int width = resolution.first;
-        int height = resolution.second;
-        float scale = std::min(static_cast<float>(width) / original_width, static_cast<float>(height) / original_height);
-        int downscaled_width  = static_cast<int>(original_width * scale);
-        int downscaled_height = static_cast<int>(original_height * scale);
-        int effective_resolution = std::min(downscaled_width * downscaled_height, original_width * original_height);
-        int wasted_resolution = (width * height) - effective_resolution;
-        // LOG_DBG("resolution: %d %d, scale: %f, downscaled: %d %d, effective: %d, wasted: %d\n", width, height, scale, downscaled_width, downscaled_height, effective_resolution, wasted_resolution);
-        if (effective_resolution > max_effective_resolution || (effective_resolution == max_effective_resolution && wasted_resolution < min_wasted_resolution)) {
-            max_effective_resolution = effective_resolution;
-            min_wasted_resolution = wasted_resolution;
-            best_fit = resolution;
-        }
-    }
-
-    return best_fit;
-}
-
-/**
- * @brief Get the anyres image grid shape object
- *
- * @param image_size
- * @param grid_pinpoints
- * @param image_patch_size
- * @return <int, int>
- */
-static struct clip_image_grid_shape get_anyres_image_grid_shape(const std::pair<int, int> & image_size, const std::vector<std::pair<int, int>> & grid_pinpoints, int image_patch_size) {
-    /**
-        Conversion from gguf flat array to vector:
-        std::vector<std::pair<int, int>> possible_resolutions;
-        for (int i = 0; i < 32 && params.image_grid_pinpoints[i] != 0; i+=2) {
-            possible_resolutions.push_back({params.image_grid_pinpoints[i], params.image_grid_pinpoints[i+1]});
-        }
-     */
-    auto best_resolution = select_best_resolution(image_size, grid_pinpoints);
-    return {best_resolution.first / image_patch_size, best_resolution.second / image_patch_size};
-}
-
-// Take the image segments in a grid configuration and return the embeddings and the number of embeddings into preallocated memory (image_embd_out)
-static bool clip_llava_handle_patches(clip_ctx * ctx_clip, std::vector<float *> & image_embd_v, struct clip_image_grid_shape grid_shape, float * image_embd_out, int * n_img_pos_out) {
-    struct {
-        struct ggml_context * ctx;
-    } model;
-
-    const int32_t image_size = clip_image_size(ctx_clip);
-    const int32_t patch_size = clip_patch_size(ctx_clip);
-
-    int32_t num_patches_per_side = image_size / patch_size; // 336 / 14 = 24 - used for embedding-patching boxes (24*24 = 576 patches)
-
-    int num_patches_width  = grid_shape.first;  // grid 1-4
-    int num_patches_height = grid_shape.second; // grid 1-4
-
-    const size_t num_images = num_patches_width * num_patches_height + 1;
-
-    // TODO: size calculation is not calculated - it's only tens of MB
-    size_t ctx_size = 0;
-
-    {
-        ctx_size += clip_embd_nbytes(ctx_clip) * num_images * 8; // image_features
-        ctx_size += 1024*1024 * ggml_type_size(GGML_TYPE_F32);
-    }
-
-    struct ggml_init_params params {
-        /*.mem_size   =*/ ctx_size,
-        /*.mem_buffer =*/ NULL,
-        /*.no_alloc   =*/ false, // NOTE: this should be false when using the legacy API
-    };
-
-    // Python reference code for full unpad:
-    /*
-        base_image_feature = image_feature[0]
-        image_feature = image_feature[1:]
-        image_feature = image_feature.permute(4, 0, 2, 1, 3).contiguous()
-        image_feature = image_feature.flatten(1, 2).flatten(2, 3)
-        image_feature = unpad_image(image_feature, image_sizes[image_idx])
-        image_feature = torch.cat((
-            image_feature,
-            self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1)
-        ), dim=-1)
-        image_feature = image_feature.flatten(1, 2).transpose(0, 1)
-        image_feature = torch.cat((base_image_feature, image_feature), dim=0)
-    */
-    // We now have two options: unpad or no unpad. Unpad removes tokens for faster llm eval.
-    // In terms of result quality it appears to make no difference, so we'll start with the easier approach given 5D tensors are not supported in ggml yet.
-    // Without unpad we have to split the sub-image embeddings into patches of 24 features each and permute them.
-    // Once all images are processed to prepended the base_image_features without any changes.
-
-    // Pytorch reference simplified, modified for ggml compatibility - confirmed identical output in python (for a 2x2 grid image (676x676 scaling))
-    /*
-        image_feature = image_feature.view(2, 2, 24, 24, 4096)
-        image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous()
-        image_feature = image_feature.view(2, 24, 2, 24, 4096)
-        image_feature = image_feature.flatten(0, 3)
-
-        // Reshape to 4D tensor by merging the last two dimensions
-        image_feature = image_feature.view(2, 2, 24, 24*4096)
-        image_feature = image_feature.permute(0, 2, 1, 3).contiguous()
-        image_feature = image_feature.view(-1, 4096)
-    */
-
-    model.ctx = ggml_init(params);
-
-    struct ggml_tensor * image_features = ggml_new_tensor_3d(model.ctx, GGML_TYPE_F32, clip_n_mmproj_embd(ctx_clip), clip_n_patches(ctx_clip), num_images - 1); // example: 4096 x 576 x 4
-    // ggml_tensor_printf(image_features,"image_features",__LINE__,false,false);
-    // fill it with the image embeddings, ignoring the base
-    for (size_t i = 1; i < num_images; i++) {
-        size_t offset = (i-1) * clip_embd_nbytes(ctx_clip);
-        memcpy((uint8_t *)(image_features->data) + offset, image_embd_v[i], clip_embd_nbytes(ctx_clip));
-    }
-
-    struct ggml_cgraph  * gf = ggml_new_graph(model.ctx);
-    size_t size_ele = ggml_type_size(GGML_TYPE_F32);
-
-    struct ggml_tensor *image_features_patchview = ggml_view_4d(model.ctx, image_features,
-                                                                num_patches_per_side * clip_n_mmproj_embd(ctx_clip),
-                                                                num_patches_per_side,
-                                                                num_patches_width,
-                                                                num_patches_height,
-                                                                size_ele * num_patches_per_side * clip_n_mmproj_embd(ctx_clip),
-                                                                size_ele * num_patches_per_side * clip_n_mmproj_embd(ctx_clip) * num_patches_per_side,
-                                                                size_ele * num_patches_per_side * clip_n_mmproj_embd(ctx_clip) * num_patches_per_side * num_patches_width, 0);
-    // ggml_tensor_printf(image_features_patchview,"image_features_patchview",__LINE__,false,false);
-    struct ggml_tensor *permuted_cont = ggml_cont(model.ctx, ggml_permute(model.ctx, image_features_patchview, 0, 2, 1, 3));
-    /**
-     At the end of each row we have to add the row_end embeddings, which are the same as the newline embeddings
-         image_feature = torch.cat((
-        image_feature,
-        self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device)
-    ), dim=-1)
-     *
-     */
-
-    // ggml_tensor_printf(permuted_cont,"permuted_cont",__LINE__,false,false);
-    struct ggml_tensor *flatten = ggml_view_2d(model.ctx, permuted_cont, clip_n_mmproj_embd(ctx_clip), num_patches_height * num_patches_width * num_patches_per_side * num_patches_per_side,  size_ele * clip_n_mmproj_embd(ctx_clip), 0);
-    // ggml_tensor_printf(flatten,"flatten",__LINE__,false,false);
-    ggml_build_forward_expand(gf, flatten);
-    ggml_graph_compute_with_ctx(model.ctx, gf, 1);
-    struct ggml_tensor* result = ggml_graph_node(gf, -1);
-
-    memcpy(image_embd_out, image_embd_v[0], clip_embd_nbytes(ctx_clip)); // main image as global context
-    // append without newline tokens (default behavior in llava_arch when not using unpad ):
-    memcpy(image_embd_out + clip_n_patches(ctx_clip) * clip_n_mmproj_embd(ctx_clip), (float*)result->data, clip_embd_nbytes(ctx_clip) * (num_images-1)); // grid patches
-    *n_img_pos_out = static_cast<int>(result->ne[1]+clip_n_patches(ctx_clip));
-
-    // Debug: Test single segments
-    // Current findings: sending base image, sending a segment embedding all works similar to python
-    // However, permuted embeddings do not work yet (stride issue?)
-    // memcpy(image_embd_out, image_embd_v[0], clip_embd_nbytes(ctx_clip)); // main image as context
-    // memcpy(image_embd_out, (float*)prepared_cont->data, clip_embd_nbytes(ctx_clip)); // main image as context
-    // *n_img_pos_out=576;
-
-    ggml_free(model.ctx);
-    return true;
-}
-
-static clip_image_f32 * reshape_by_patch(clip_image_f32 * image, int patch_size) {
-    int width = image->nx;
-    int height = image->ny;
-    int num_patches = (height / patch_size) * (width / patch_size);
-    clip_image_f32 * patch = clip_image_f32_init();
-    patch->nx = patch_size * num_patches;
-    patch->ny = patch_size;
-    patch->buf.resize(3 * patch->nx * patch->ny);
-
-    int patch_index = 0;
-
-    for (int i = 0; i < height; i += patch_size) {
-        for (int j = 0; j < width; j += patch_size) {
-            for (int pi = 0; pi < patch_size; ++pi) {
-                for (int pj = 0; pj < patch_size; ++pj) {
-                    int input_index = ((i + pi) * width + (j + pj)) * 3;
-                    int output_index = (pi * patch_size * num_patches + patch_index * patch_size + pj) * 3;
-                    patch->buf[output_index] = image->buf[input_index];
-                    patch->buf[output_index+1] = image->buf[input_index+1];
-                    patch->buf[output_index+2] = image->buf[input_index+2];
-                }
-            }
-            patch_index++;
-        }
-    }
-    return patch;
-}
-
 static bool encode_image_with_clip(clip_ctx * ctx_clip, int n_threads, const clip_image_u8 * img, float * image_embd, int * n_img_pos, bool force_no_postnorm) {
     // std::vector<clip_image_f32*> img_res_v; // format VectN x H x W x RGB (N x 336 x 336 x 3), so interleaved RGB - different to the python implementation which is N x 3 x 336 x 336
     clip_image_f32_batch img_res_v;
@@ -257,7 +46,7 @@ static bool encode_image_with_clip(clip_ctx * ctx_clip, int n_threads, const cli
 
     const int64_t t_img_enc_start_us = ggml_time_us();
 
-    const char * mm_patch_merge_type = clip_patch_merge_type(ctx_clip);
+    // const char * mm_patch_merge_type = clip_patch_merge_type(ctx_clip);
 
     {
         // flat / default llava-1.5 type embedding
@@ -280,17 +69,6 @@ static bool encode_image_with_clip(clip_ctx * ctx_clip, int n_threads, const cli
     return true;
 }
 
-bool llava_validate_embed_size(const llama_context * ctx_llama, const clip_ctx * ctx_clip) {
-        // make sure that the correct mmproj was used, i.e., compare apples to apples
-    int n_llama_embd = llama_model_n_embd(llama_get_model(ctx_llama));
-    auto n_image_embd = clip_n_mmproj_embd(ctx_clip);
-    if (n_image_embd != n_llama_embd) {
-        LOG_ERR("%s: embedding dim of the multimodal projector (%d) is not equal to that of LLaMA (%d). Make sure that you use the correct mmproj file.\n", __func__, n_image_embd, n_llama_embd);
-        return false;
-    }
-    return true;
-}
-
 bool llava_image_embed_make_with_clip_img(clip_ctx * ctx_clip, int n_threads, const clip_image_u8 * img, float ** image_embd_out, int * n_img_pos_out, bool force_no_postnorm) {
     int num_max_patches = 16;
     float * image_embd;
@@ -310,58 +88,6 @@ bool llava_image_embed_make_with_clip_img(clip_ctx * ctx_clip, int n_threads, co
     *image_embd_out = image_embd;
     *n_img_pos_out = n_img_pos;
 
-    return true;
-}
-
-struct llava_embd_batch {
-    std::vector<llama_pos>      pos;
-    std::vector<int32_t>        n_seq_id;
-    std::vector<llama_seq_id>   seq_id_0;
-    std::vector<llama_seq_id *> seq_ids;
-    std::vector<int8_t>         logits;
-    llama_batch batch;
-    llava_embd_batch(float * embd, int32_t n_tokens, llama_pos pos_0, llama_seq_id seq_id) {
-        pos     .resize(n_tokens);
-        n_seq_id.resize(n_tokens);
-        seq_ids .resize(n_tokens + 1);
-        logits  .resize(n_tokens);
-        seq_id_0.resize(1);
-        seq_id_0[0] = seq_id;
-        seq_ids [n_tokens] = nullptr;
-        batch = {
-            /*n_tokens       =*/ n_tokens,
-            /*tokens         =*/ nullptr,
-            /*embd           =*/ embd,
-            /*pos            =*/ pos.data(),
-            /*n_seq_id       =*/ n_seq_id.data(),
-            /*seq_id         =*/ seq_ids.data(),
-            /*logits         =*/ logits.data(),
-        };
-        for (int i = 0; i < n_tokens; i++) {
-            batch.pos     [i] = pos_0 + i;
-            batch.n_seq_id[i] = 1;
-            batch.seq_id  [i] = seq_id_0.data();
-            batch.logits  [i] = false;
-        }
-    }
-};
-
-bool llava_eval_image_embed(llama_context * ctx_llama, const struct llava_image_embed * image_embed, int n_batch, int * n_past) {
-    int n_embd  = llama_model_n_embd(llama_get_model(ctx_llama));
-
-    for (int i = 0; i < image_embed->n_image_pos; i += n_batch) {
-        int n_eval = image_embed->n_image_pos - i;
-        if (n_eval > n_batch) {
-            n_eval = n_batch;
-        }
-        float * embd = image_embed->embed+i*n_embd;
-        llava_embd_batch llava_batch = llava_embd_batch(embd, n_eval, *n_past, 0);
-        if (llama_decode(ctx_llama, llava_batch.batch)) {
-            LOG_ERR("%s : failed to eval\n", __func__);
-            return false;
-        }
-        *n_past += n_eval;
-    }
     return true;
 }
 

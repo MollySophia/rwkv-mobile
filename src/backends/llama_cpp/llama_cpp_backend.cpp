@@ -105,7 +105,6 @@ int llama_cpp_backend::eval(std::vector<int> ids, Tensor1D & logits) {
 int llama_cpp_backend::eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) {
     int n_embd = llama_model_n_embd(model);
 
-    // llava_embd_batch llava_batch = llava_embd_batch(embd, n_eval, n_past, 0);
     llama_batch batch = {
         /*n_tokens       =*/ n_tokens,
         /*tokens         =*/ nullptr,
