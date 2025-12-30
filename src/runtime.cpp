@@ -305,6 +305,9 @@ int Runtime::load_model(std::string model_path, std::string backend_name, std::s
     _models[ret_model_id]->backend_name = backend_name;
     _models[ret_model_id]->tokenizer_path = tokenizer_path;
 
+    // pre-prefill "User"
+    prefill_to_cache(ret_model_id, _models[ret_model_id]->bos_token + _models[ret_model_id]->user_role);
+
     return ret_model_id;
 }
 
@@ -1544,7 +1547,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     return RWKV_SUCCESS;
 }
 
-int Runtime::set_prompt(int model_id, std::string prompt) {
+int Runtime::prefill_to_cache(int model_id, std::string text) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1553,11 +1556,8 @@ int Runtime::set_prompt(int model_id, std::string prompt) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
 
-    LOGD("Setting and processing prompt for model %d: \"%s\"\n", model_id, prompt.c_str());
-    model->prompt = prompt;
-    std::vector<int> ids = model->tokenizer->encode(prompt);
+    std::vector<int> ids = model->tokenizer->encode(text);
     if (ids.empty()) {
-        LOGD("Got empty prompt\n");
         return RWKV_SUCCESS;
     }
     std::vector<int> new_ids_to_prefill;
@@ -1574,7 +1574,24 @@ int Runtime::set_prompt(int model_id, std::string prompt) {
         return ret;
     }
     model->backend->register_state_checkpoint(node, ids, logits);
-    return RWKV_SUCCESS;
+}
+
+int Runtime::set_prompt(int model_id, std::string prompt) {
+    if (_models.find(model_id) == _models.end()) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto &model = _models.at(model_id);
+    if (model->backend == nullptr || model->tokenizer == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    LOGD("Setting and processing prompt for model %d: \"%s\"\n", model_id, prompt.c_str());
+    model->prompt = prompt;
+    auto ret = prefill_to_cache(model_id, prompt);
+    if (ret) {
+        return ret;
+    }
+    return prefill_to_cache(model_id, prompt + model->bos_token + model->user_role);
 }
 
 std::string Runtime::get_prompt(int model_id) {
