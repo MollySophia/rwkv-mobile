@@ -1554,6 +1554,7 @@ int Runtime::set_prompt(int model_id, std::string prompt) {
     }
 
     LOGD("Setting and processing prompt for model %d: \"%s\"\n", model_id, prompt.c_str());
+    model->prompt = prompt;
     std::vector<int> ids = model->tokenizer->encode(prompt);
     if (ids.empty()) {
         LOGD("Got empty prompt\n");
@@ -1565,7 +1566,6 @@ int Runtime::set_prompt(int model_id, std::string prompt) {
         return RWKV_SUCCESS;
     }
 
-    model->prompt = prompt;
     model->backend->set_state(node->state);
 
     Tensor1D logits;
