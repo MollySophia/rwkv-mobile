@@ -130,6 +130,8 @@ public:
     int set_prompt(int model_id, std::string prompt);
     std::string get_prompt(int model_id);
 
+    int prefill_to_cache(int model_id, std::string text);
+
     int load_initial_state(int model_id, std::string state_path);
     void unload_initial_state(int model_id, std::string state_path);
 
