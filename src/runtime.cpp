@@ -1574,6 +1574,7 @@ int Runtime::prefill_to_cache(int model_id, std::string text) {
         return ret;
     }
     model->backend->register_state_checkpoint(node, ids, logits);
+    return RWKV_SUCCESS;
 }
 
 int Runtime::set_prompt(int model_id, std::string prompt) {

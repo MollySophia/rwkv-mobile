@@ -19,7 +19,10 @@ namespace rwkvmobile {
 int llama_cpp_backend::init(void * extra) {
     llama_log_set([](enum ggml_log_level level, const char * text, void * /* user_data */) {
         std::string log_msg = std::string(text);
-        while (log_msg[log_msg.size() - 1] == '\n') {
+        if (log_msg.empty()) {
+            return;
+        }
+        while (log_msg.size() > 0 && log_msg[log_msg.size() - 1] == '\n') {
             log_msg = log_msg.substr(0, log_msg.size() - 1);
         }
         switch (level) {
@@ -51,6 +54,7 @@ int llama_cpp_backend::load_model(std::string model_path) {
 #else
     model_params.n_gpu_layers = 0;
 #endif
+    model_params.progress_callback = nullptr;
 
     LOGI("n_gpu_layers: %d", model_params.n_gpu_layers);
     model = llama_model_load_from_file(model_path.c_str(), model_params);
