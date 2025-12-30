@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
     std::string backend = argv[3];
     std::string text_path = argv[4];
 
-    rwkvmobile::runtime runtime;
+    rwkvmobile::Runtime runtime;
     int model_id = runtime.load_model(model_path, backend, tokenizer_path, nullptr); 
     ENSURE_SUCCESS_OR_LOG_EXIT(model_id < 0 ? model_id : rwkvmobile::RWKV_SUCCESS, "Failed to load model");
     if (model_id < 0) return 1;

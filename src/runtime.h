@@ -31,7 +31,7 @@
 
 namespace rwkvmobile {
 
-class runtime;
+class Runtime;
 
 struct ModelInstance {
     ~ModelInstance() {
@@ -93,16 +93,16 @@ struct ModelInstance {
 #endif
 };
 
-class runtime {
+class Runtime {
 public:
-    runtime() {
+    Runtime() {
 #ifdef __ANDROID__
         setenv("KMP_DUPLICATE_LIB_OK", "1", 1);
 #endif
         _soc_detect.detect_platform();
     };
 
-    ~runtime() {
+    ~Runtime() {
         release();
     };
     int load_model(std::string model_path, std::string backend_name, std::string tokenizer_path, void * extra);

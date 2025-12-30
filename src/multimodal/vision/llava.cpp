@@ -115,60 +115,6 @@ struct llava_image_embed * llava_image_embed_make_with_bytes(struct clip_ctx * c
     return result;
 }
 
-static bool load_file_to_bytes(const char* path, unsigned char** bytesOut, long *sizeOut) {
-    auto file = fopen(path, "rb");
-    if (file == NULL) {
-        LOG_ERR("%s: can't read file %s\n", __func__, path);
-        return false;
-    }
-
-    fseek(file, 0, SEEK_END);
-    auto fileSize = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    auto buffer = (unsigned char *)malloc(fileSize); // Allocate memory to hold the file data
-    if (buffer == NULL) {
-        LOG_ERR("%s: failed to alloc %ld bytes for file %s\n", __func__, fileSize, path);
-        perror("Memory allocation error");
-        fclose(file);
-        return false;
-    }
-    errno = 0;
-    size_t ret = fread(buffer, 1, fileSize, file); // Read the file into the buffer
-    if (ferror(file)) {
-        LOG_ERR("read error: %s", strerror(errno));
-        free(buffer);
-        fclose(file);
-        return false;
-    }
-    if (ret != (size_t) fileSize) {
-        LOG_ERR("unexpectedly reached end of file");
-        free(buffer);
-        fclose(file);
-        return false;
-    }
-    fclose(file); // Close the file
-
-    *bytesOut = buffer;
-    *sizeOut = fileSize;
-    return true;
-}
-
-struct llava_image_embed * llava_image_embed_make_with_filename(struct clip_ctx * ctx_clip, int n_threads, const char * image_path, bool force_no_postnorm) {
-    unsigned char* image_bytes;
-    long image_bytes_length;
-    auto loaded = load_file_to_bytes(image_path, &image_bytes, &image_bytes_length);
-    if (!loaded) {
-        LOG_ERR("%s: failed to load %s\n", __func__, image_path);
-        return NULL;
-    }
-
-    llava_image_embed *embed = llava_image_embed_make_with_bytes(ctx_clip, n_threads, image_bytes, image_bytes_length, force_no_postnorm);
-    free(image_bytes);
-
-    return embed;
-}
-
 void llava_image_embed_free(struct llava_image_embed * embed) {
     free(embed->embed);
     free(embed);

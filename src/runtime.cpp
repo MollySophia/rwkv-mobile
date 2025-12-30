@@ -63,7 +63,7 @@
 
 namespace rwkvmobile {
 
-void runtime::_record_speed_sample(ModelInstance& model, bool is_prefill, int tokens, int64_t duration_us) {
+void Runtime::_record_speed_sample(ModelInstance& model, bool is_prefill, int tokens, int64_t duration_us) {
     if (tokens <= 0 || duration_us <= 0) {
         return;
     }
@@ -79,7 +79,7 @@ void runtime::_record_speed_sample(ModelInstance& model, bool is_prefill, int to
     }
 }
 
-double runtime::_compute_trimmed_mean_speed_tokens_per_s(
+double Runtime::_compute_trimmed_mean_speed_tokens_per_s(
     const std::deque<ModelInstance::SpeedSample>& samples,
     double trim_ratio_total
 ) {
@@ -162,7 +162,7 @@ int backend_str_to_enum(std::string backend) {
     return -1;
 }
 
-int runtime::load_model(std::string model_path, std::string backend_name, std::string tokenizer_path, void * extra) {
+int Runtime::load_model(std::string model_path, std::string backend_name, std::string tokenizer_path, void * extra) {
     int ret_model_id = -1;
     int backend_id = backend_str_to_enum(backend_name);
     if (backend_id < 0) {
@@ -308,7 +308,7 @@ int runtime::load_model(std::string model_path, std::string backend_name, std::s
     return ret_model_id;
 }
 
-int runtime::release_model(int model_id) {
+int Runtime::release_model(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -317,7 +317,7 @@ int runtime::release_model(int model_id) {
 }
 
 #ifdef ENABLE_VISION
-int runtime::load_vision_encoder(int model_id, std::string model_path, std::string adapter_path) {
+int Runtime::load_vision_encoder(int model_id, std::string model_path, std::string adapter_path) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -326,10 +326,10 @@ int runtime::load_vision_encoder(int model_id, std::string model_path, std::stri
     if (model->multimodal_encoder == nullptr) {
         return RWKV_ERROR_ALLOC;
     }
-    return model->multimodal_encoder->LoadModel(model_path, adapter_path);
+    return model->multimodal_encoder->load_model(model_path, adapter_path);
 }
 
-int runtime::release_vision_encoder(int model_id) {
+int Runtime::release_vision_encoder(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -339,13 +339,13 @@ int runtime::release_vision_encoder(int model_id) {
 }
 #endif
 
-int runtime::set_image_unique_identifier(std::string unique_identifier) {
+int Runtime::set_image_unique_identifier(std::string unique_identifier) {
     _image_unique_identifier = unique_identifier;
     return RWKV_SUCCESS;
 }
 
 #ifdef ENABLE_WHISPER
-int runtime::load_whisper_encoder(int model_id, std::string model_path) {
+int Runtime::load_whisper_encoder(int model_id, std::string model_path) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -354,10 +354,10 @@ int runtime::load_whisper_encoder(int model_id, std::string model_path) {
     if (model->multimodal_encoder == nullptr) {
         return RWKV_ERROR_ALLOC;
     }
-    return model->multimodal_encoder->LoadModel(model_path, "");
+    return model->multimodal_encoder->load_model(model_path, "");
 }
 
-int runtime::release_whisper_encoder(int model_id) {
+int Runtime::release_whisper_encoder(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -367,7 +367,7 @@ int runtime::release_whisper_encoder(int model_id) {
 }
 #endif
 
-int runtime::get_available_backend_ids(std::vector<int> &backend_ids) {
+int Runtime::get_available_backend_ids(std::vector<int> &backend_ids) {
     backend_ids = std::vector<int>();
 
 #ifdef ENABLE_WEBRWKV
@@ -411,7 +411,7 @@ int runtime::get_available_backend_ids(std::vector<int> &backend_ids) {
     return RWKV_SUCCESS;
 }
 
-std::string runtime::get_available_backends_str() {
+std::string Runtime::get_available_backends_str() {
     std::vector<int> backend_ids;
     get_available_backend_ids(backend_ids);
     std::string ret = "";
@@ -421,7 +421,7 @@ std::string runtime::get_available_backends_str() {
     return ret;
 }
 
-int runtime::load_initial_state(int model_id, std::string state_path) {
+int Runtime::load_initial_state(int model_id, std::string state_path) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -470,7 +470,7 @@ int runtime::load_initial_state(int model_id, std::string state_path) {
     return RWKV_SUCCESS;
 }
 
-void runtime::unload_initial_state(int model_id, std::string state_path) {
+void Runtime::unload_initial_state(int model_id, std::string state_path) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -485,7 +485,7 @@ void runtime::unload_initial_state(int model_id, std::string state_path) {
     }
 }
 
-int runtime::eval_logits(int model_id, int id, Tensor1D & logits) {
+int Runtime::eval_logits(int model_id, int id, Tensor1D & logits) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -501,7 +501,7 @@ int runtime::eval_logits(int model_id, int id, Tensor1D & logits) {
     return ret;
 }
 
-int runtime::eval_logits(int model_id, std::vector<int> ids, Tensor1D & logits) {
+int Runtime::eval_logits(int model_id, std::vector<int> ids, Tensor1D & logits) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -538,7 +538,7 @@ int runtime::eval_logits(int model_id, std::vector<int> ids, Tensor1D & logits) 
     return ret;
 }
 
-int runtime::eval_logits_with_embeddings(int model_id, const float *embeddings, int n_tokens, Tensor1D & logits) {
+int Runtime::eval_logits_with_embeddings(int model_id, const float *embeddings, int n_tokens, Tensor1D & logits) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -554,7 +554,7 @@ int runtime::eval_logits_with_embeddings(int model_id, const float *embeddings, 
     return ret;
 }
 
-int runtime::eval_logits_batch_decode(int model_id, std::vector<int> ids, Tensor1D & logits) {
+int Runtime::eval_logits_batch_decode(int model_id, std::vector<int> ids, Tensor1D & logits) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -576,7 +576,7 @@ int runtime::eval_logits_batch_decode(int model_id, std::vector<int> ids, Tensor
     return ret;
 }
 
-std::vector<int> runtime::get_supported_batch_sizes(int model_id) {
+std::vector<int> Runtime::get_supported_batch_sizes(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return {};
     }
@@ -584,7 +584,7 @@ std::vector<int> runtime::get_supported_batch_sizes(int model_id) {
     return model->backend->supported_batch_sizes;
 }
 
-std::string runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning) {
+std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -627,7 +627,7 @@ std::string runtime::apply_chat_template(int model_id, std::vector<std::string> 
     return text;
 }
 
-std::vector<runtime::TokenChunk> runtime::split_text_by_image_and_token_num(const std::string text, int max_tokens_per_chunk, int model_id) {
+std::vector<Runtime::TokenChunk> Runtime::split_text_by_image_and_token_num(const std::string text, int max_tokens_per_chunk, int model_id) {
     std::vector<TokenChunk> chunks;
     std::string remaining_text = text;
 
@@ -768,7 +768,7 @@ std::vector<runtime::TokenChunk> runtime::split_text_by_image_and_token_num(cons
     return final_chunks;
 }
 
-int runtime::save_state_by_history(int model_id, std::vector<std::string> history, std::string state_path) {
+int Runtime::save_state_by_history(int model_id, std::vector<std::string> history, std::string state_path) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -867,7 +867,7 @@ int runtime::save_state_by_history(int model_id, std::vector<std::string> histor
     return RWKV_SUCCESS;
 }
 
-int runtime::load_history_state_to_memory(int model_id, std::string state_path) {
+int Runtime::load_history_state_to_memory(int model_id, std::string state_path) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -944,7 +944,7 @@ int runtime::load_history_state_to_memory(int model_id, std::string state_path) 
     return RWKV_SUCCESS;
 }
 
-std::string runtime::get_state_cache_info(int model_id) {
+std::string Runtime::get_state_cache_info(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -966,7 +966,7 @@ std::string runtime::get_state_cache_info(int model_id) {
     return state_cache_info;
 }
 
-int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *), bool enable_reasoning) {
+int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *), bool enable_reasoning) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1028,7 +1028,7 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
                     auto start = std::chrono::high_resolution_clock::now();
                     std::vector<float> embeddings;
                     int n_tokens;
-                    if (!model->multimodal_encoder->Encode(chunk.image_path, embeddings, n_tokens, model->backend->embedding_input_force_no_ln0())) {
+                    if (!model->multimodal_encoder->encode(chunk.image_path, embeddings, n_tokens, model->backend->embedding_input_force_no_ln0())) {
                         model->is_generating = false;
                         LOGE("failed to encode image for image chunk\n");
                         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -1201,7 +1201,7 @@ int runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     return RWKV_SUCCESS;
 }
 
-int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **), bool enable_reasoning) {
+int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **), bool enable_reasoning) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1544,7 +1544,7 @@ int runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     return RWKV_SUCCESS;
 }
 
-int runtime::set_prompt(int model_id, std::string prompt) {
+int Runtime::set_prompt(int model_id, std::string prompt) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1577,7 +1577,7 @@ int runtime::set_prompt(int model_id, std::string prompt) {
     return RWKV_SUCCESS;
 }
 
-std::string runtime::get_prompt(int model_id) {
+std::string Runtime::get_prompt(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -1586,7 +1586,7 @@ std::string runtime::get_prompt(int model_id) {
 }
 
 #ifdef ENABLE_WHISPER
-int runtime::set_audio_prompt(int model_id, std::string path) {
+int Runtime::set_audio_prompt(int model_id, std::string path) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1609,7 +1609,7 @@ int runtime::set_audio_prompt(int model_id, std::string path) {
     auto start = std::chrono::high_resolution_clock::now();
     std::vector<float> embeddings;
     int n_tokens;
-    if (!model->multimodal_encoder->Encode(path, embeddings, n_tokens, model->backend->embedding_input_force_no_ln0())) {
+    if (!model->multimodal_encoder->encode(path, embeddings, n_tokens, model->backend->embedding_input_force_no_ln0())) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
     auto end = std::chrono::high_resolution_clock::now();
@@ -1630,7 +1630,7 @@ int runtime::set_audio_prompt(int model_id, std::string path) {
 #ifdef ENABLE_TTS
 namespace {
 int generate_tts_output(
-    runtime* rt,
+    Runtime* rt,
     int model_id,
     NucleusSampler* sampler,
     execution_provider* backend,
@@ -1662,7 +1662,7 @@ int generate_tts_output(
 
 void tts_detokenize_thread_main(
     sparktts* sparktts_instance,
-    runtime* rt,
+    Runtime* rt,
     const std::vector<int>& global_tokens,
     const std::vector<int>& output_tokens,
     const bool& generation_finished,
@@ -1704,7 +1704,7 @@ void tts_detokenize_thread_main(
 }
 } // anonymous namespace
 
-int runtime::sparktts_load_models(
+int Runtime::sparktts_load_models(
     std::string wav2vec2_path,
     std::string bicodec_tokenizer_path,
     std::string bicodec_detokenizer_path
@@ -1716,12 +1716,12 @@ int runtime::sparktts_load_models(
     return RWKV_SUCCESS;
 }
 
-int runtime::sparktts_release_models() {
+int Runtime::sparktts_release_models() {
     _sparktts = nullptr;
     return RWKV_SUCCESS;
 }
 
-int runtime::run_spark_tts_zeroshot(int model_id, std::string tts_text, std::string prompt_audio_text, std::string prompt_audio_path, std::string output_wav_path) {
+int Runtime::run_spark_tts_zeroshot(int model_id, std::string tts_text, std::string prompt_audio_text, std::string prompt_audio_path, std::string output_wav_path) {
     if (_sparktts == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1802,7 +1802,7 @@ int runtime::run_spark_tts_zeroshot(int model_id, std::string tts_text, std::str
     return RWKV_SUCCESS;
 }
 
-int runtime::run_spark_tts_with_properties(int model_id, std::string tts_text, std::string output_wav_path,
+int Runtime::run_spark_tts_with_properties(int model_id, std::string tts_text, std::string output_wav_path,
     std::string age, std::string gender, std::string emotion, std::string pitch, std::string speed) {
     if (_sparktts == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -1881,7 +1881,7 @@ int runtime::run_spark_tts_with_properties(int model_id, std::string tts_text, s
     return RWKV_SUCCESS;
 }
 
-int runtime::run_spark_tts_with_global_tokens(int model_id, std::string tts_text, std::string output_wav_path, std::vector<int> global_tokens) {
+int Runtime::run_spark_tts_with_global_tokens(int model_id, std::string tts_text, std::string output_wav_path, std::vector<int> global_tokens) {
     if (_sparktts == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1938,7 +1938,7 @@ int runtime::run_spark_tts_with_global_tokens(int model_id, std::string tts_text
     return RWKV_SUCCESS;
 }
 
-int runtime::run_spark_tts_zeroshot_streaming(int model_id, std::string tts_text, std::string prompt_audio_text, std::string prompt_audio_path, std::string output_wav_path) {
+int Runtime::run_spark_tts_zeroshot_streaming(int model_id, std::string tts_text, std::string prompt_audio_text, std::string prompt_audio_path, std::string output_wav_path) {
     if (_sparktts == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -2071,7 +2071,7 @@ int runtime::run_spark_tts_zeroshot_streaming(int model_id, std::string tts_text
     return RWKV_SUCCESS;
 }
 
-int runtime::run_spark_tts_with_properties_streaming(int model_id, std::string tts_text, std::string output_wav_path,
+int Runtime::run_spark_tts_with_properties_streaming(int model_id, std::string tts_text, std::string output_wav_path,
     std::string age, std::string gender, std::string emotion, std::string pitch, std::string speed) {
     if (_sparktts == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -2226,7 +2226,7 @@ int runtime::run_spark_tts_with_properties_streaming(int model_id, std::string t
 }
 
 
-int runtime::run_spark_tts_with_global_tokens_streaming(int model_id, std::string tts_text, std::string output_wav_path, std::vector<int> global_tokens) {
+int Runtime::run_spark_tts_with_global_tokens_streaming(int model_id, std::string tts_text, std::string output_wav_path, std::vector<int> global_tokens) {
     if (_sparktts == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -2340,7 +2340,7 @@ int runtime::run_spark_tts_with_global_tokens_streaming(int model_id, std::strin
 }
 #endif
 
-int runtime::clear_state(int model_id) {
+int Runtime::clear_state(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -2358,7 +2358,7 @@ int runtime::clear_state(int model_id) {
     return RWKV_SUCCESS;
 }
 
-int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts, int batch_size, int max_length, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **)) {
+int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts, int batch_size, int max_length, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **)) {
     if (_models.find(model_id) == _models.end()) {
         LOGE("gen_completion_batch: Model ID %d not found", model_id);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -2495,7 +2495,7 @@ int runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     return RWKV_SUCCESS;
 }
 
-int runtime::gen_completion(int model_id, std::string prompt, int max_length, int stop_code, void (*callback)(const char *, const int, const char *)) {
+int Runtime::gen_completion(int model_id, std::string prompt, int max_length, int stop_code, void (*callback)(const char *, const int, const char *)) {
     if (_models.find(model_id) == _models.end()) {
         LOGE("gen_completion: Model ID %d not found", model_id);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -2581,7 +2581,7 @@ int runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     return RWKV_SUCCESS;
 }
 
-int runtime::run_evaluation(int model_id, std::string source_text, std::string target_text, bool &correct, float &logits_val, bool insert_bos_token) {
+int Runtime::run_evaluation(int model_id, std::string source_text, std::string target_text, bool &correct, float &logits_val, bool insert_bos_token) {
     if (_models.find(model_id) == _models.end()) {
         LOGE("run_evaluation: Model ID %d not found", model_id);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -2659,7 +2659,7 @@ int runtime::run_evaluation(int model_id, std::string source_text, std::string t
     return RWKV_SUCCESS;
 }
 
-double runtime::get_avg_decode_speed(int model_id) {
+double Runtime::get_avg_decode_speed(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0;
     }
@@ -2681,7 +2681,7 @@ double runtime::get_avg_decode_speed(int model_id) {
     return (_decode_speed < 0) ? 0.0 : _decode_speed;
 }
 
-double runtime::get_avg_prefill_speed(int model_id) {
+double Runtime::get_avg_prefill_speed(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0;
     }
@@ -2703,7 +2703,7 @@ double runtime::get_avg_prefill_speed(int model_id) {
     return (_prefill_speed < 0) ? 0.0 : _prefill_speed;
 }
 
-void runtime::set_sampler_params(int model_id, float temperature, int top_k, float top_p) {
+void Runtime::set_sampler_params(int model_id, float temperature, int top_k, float top_p) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2713,7 +2713,7 @@ void runtime::set_sampler_params(int model_id, float temperature, int top_k, flo
     model->sampler->set_top_p(top_p);
 }
 
-void runtime::set_sampler_params_on_batch_slot(int model_id, int slot, float temperature, int top_k, float top_p) {
+void Runtime::set_sampler_params_on_batch_slot(int model_id, int slot, float temperature, int top_k, float top_p) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2723,7 +2723,7 @@ void runtime::set_sampler_params_on_batch_slot(int model_id, int slot, float tem
     model->sampler->set_top_p_on_batch_slot(slot, top_p);
 }
 
-void runtime::set_penalty_params_on_batch_slot(int model_id, int slot, float presence_penalty, float frequency_penalty, float penalty_decay) {
+void Runtime::set_penalty_params_on_batch_slot(int model_id, int slot, float presence_penalty, float frequency_penalty, float penalty_decay) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2733,7 +2733,7 @@ void runtime::set_penalty_params_on_batch_slot(int model_id, int slot, float pre
     model->sampler->set_penalty_decay_on_batch_slot(slot, penalty_decay);
 }
 
-void runtime::set_is_generating(int model_id, bool is_generating) {
+void Runtime::set_is_generating(int model_id, bool is_generating) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2741,7 +2741,7 @@ void runtime::set_is_generating(int model_id, bool is_generating) {
     model->is_generating = is_generating;
 }
 
-void runtime::set_stop_signal(int model_id, bool stop_signal) {
+void Runtime::set_stop_signal(int model_id, bool stop_signal) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2749,7 +2749,7 @@ void runtime::set_stop_signal(int model_id, bool stop_signal) {
     model->stop_signal = stop_signal;
 }
 
-bool runtime::get_stop_signal(int model_id) {
+bool Runtime::get_stop_signal(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return false;
     }
@@ -2757,7 +2757,7 @@ bool runtime::get_stop_signal(int model_id) {
     return model->stop_signal;
 }
 
-bool runtime::is_generating(int model_id) {
+bool Runtime::is_generating(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return false;
     }
@@ -2765,7 +2765,7 @@ bool runtime::is_generating(int model_id) {
     return model->is_generating;
 }
 
-float runtime::get_temperature(int model_id) {
+float Runtime::get_temperature(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 1.0f;
     }
@@ -2773,7 +2773,7 @@ float runtime::get_temperature(int model_id) {
     return model->sampler->get_temperature();
 }
 
-float runtime::get_temperature_on_batch_slot(int model_id, int slot) {
+float Runtime::get_temperature_on_batch_slot(int model_id, int slot) {
     if (_models.find(model_id) == _models.end()) {
         return 1.0f;
     }
@@ -2781,7 +2781,7 @@ float runtime::get_temperature_on_batch_slot(int model_id, int slot) {
     return model->sampler->get_temperature_on_batch_slot(slot);
 }
 
-int runtime::get_top_k(int model_id) {
+int Runtime::get_top_k(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 1;
     }
@@ -2789,7 +2789,7 @@ int runtime::get_top_k(int model_id) {
     return model->sampler->get_top_k();
 }
 
-int runtime::get_top_k_on_batch_slot(int model_id, int slot) {
+int Runtime::get_top_k_on_batch_slot(int model_id, int slot) {
     if (_models.find(model_id) == _models.end()) {
         return 1;
     }
@@ -2797,7 +2797,7 @@ int runtime::get_top_k_on_batch_slot(int model_id, int slot) {
     return model->sampler->get_top_k_on_batch_slot(slot);
 }
 
-float runtime::get_top_p(int model_id) {
+float Runtime::get_top_p(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 1.0f;
     }
@@ -2805,7 +2805,7 @@ float runtime::get_top_p(int model_id) {
     return model->sampler->get_top_p();
 }
 
-float runtime::get_top_p_on_batch_slot(int model_id, int slot) {
+float Runtime::get_top_p_on_batch_slot(int model_id, int slot) {
     if (_models.find(model_id) == _models.end()) {
         return 1.0f;
     }
@@ -2813,7 +2813,7 @@ float runtime::get_top_p_on_batch_slot(int model_id, int slot) {
     return model->sampler->get_top_p_on_batch_slot(slot);
 }
 
-void runtime::set_penalty_params(int model_id, float presence_penalty, float frequency_penalty, float penalty_decay) {
+void Runtime::set_penalty_params(int model_id, float presence_penalty, float frequency_penalty, float penalty_decay) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2823,7 +2823,7 @@ void runtime::set_penalty_params(int model_id, float presence_penalty, float fre
     model->sampler->set_penalty_decay(penalty_decay);
 }
 
-float runtime::get_presence_penalty(int model_id) {
+float Runtime::get_presence_penalty(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0f;
     }
@@ -2831,7 +2831,7 @@ float runtime::get_presence_penalty(int model_id) {
     return model->sampler->get_presence_penalty();
 }
 
-float runtime::get_presence_penalty_on_batch_slot(int model_id, int slot) {
+float Runtime::get_presence_penalty_on_batch_slot(int model_id, int slot) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0f;
     }
@@ -2839,7 +2839,7 @@ float runtime::get_presence_penalty_on_batch_slot(int model_id, int slot) {
     return model->sampler->get_presence_penalty_on_batch_slot(slot);
 }
 
-float runtime::get_frequency_penalty_on_batch_slot(int model_id, int slot) {
+float Runtime::get_frequency_penalty_on_batch_slot(int model_id, int slot) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0f;
     }
@@ -2847,7 +2847,7 @@ float runtime::get_frequency_penalty_on_batch_slot(int model_id, int slot) {
     return model->sampler->get_frequency_penalty_on_batch_slot(slot);
 }
 
-float runtime::get_penalty_decay_on_batch_slot(int model_id, int slot) {
+float Runtime::get_penalty_decay_on_batch_slot(int model_id, int slot) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0f;
     }
@@ -2855,7 +2855,7 @@ float runtime::get_penalty_decay_on_batch_slot(int model_id, int slot) {
     return model->sampler->get_penalty_decay_on_batch_slot(slot);
 }
 
-float runtime::get_frequency_penalty(int model_id) {
+float Runtime::get_frequency_penalty(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0f;
     }
@@ -2863,7 +2863,7 @@ float runtime::get_frequency_penalty(int model_id) {
     return model->sampler->get_frequency_penalty();
 }
 
-float runtime::get_penalty_decay(int model_id) {
+float Runtime::get_penalty_decay(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 0.0f;
     }
@@ -2871,7 +2871,7 @@ float runtime::get_penalty_decay(int model_id) {
     return model->sampler->get_penalty_decay();
 }
 
-void runtime::set_user_role(int model_id, std::string role) {
+void Runtime::set_user_role(int model_id, std::string role) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2879,7 +2879,7 @@ void runtime::set_user_role(int model_id, std::string role) {
     model->user_role = role;
 }
 
-bool runtime::get_space_after_roles(int model_id) {
+bool Runtime::get_space_after_roles(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return true;
     }
@@ -2887,7 +2887,7 @@ bool runtime::get_space_after_roles(int model_id) {
     return model->space_after_roles;
 }
 
-void runtime::set_response_role(int model_id, std::string role) {
+void Runtime::set_response_role(int model_id, std::string role) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2895,7 +2895,7 @@ void runtime::set_response_role(int model_id, std::string role) {
     model->response_role = role;
 }
 
-void runtime::set_bos_token(int model_id, std::string token) {
+void Runtime::set_bos_token(int model_id, std::string token) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2903,7 +2903,7 @@ void runtime::set_bos_token(int model_id, std::string token) {
     model->bos_token = token;
 }
 
-void runtime::set_eos_token(int model_id, std::string token) {
+void Runtime::set_eos_token(int model_id, std::string token) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2913,7 +2913,7 @@ void runtime::set_eos_token(int model_id, std::string token) {
     model->stop_codes.push_back(token);
 }
 
-std::string runtime::get_thinking_token(int model_id) {
+std::string Runtime::get_thinking_token(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -2921,7 +2921,7 @@ std::string runtime::get_thinking_token(int model_id) {
     return model->thinking_token;
 }
 
-void runtime::set_thinking_token(int model_id, std::string thinking_token) {
+void Runtime::set_thinking_token(int model_id, std::string thinking_token) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2929,7 +2929,7 @@ void runtime::set_thinking_token(int model_id, std::string thinking_token) {
     model->thinking_token = thinking_token;
 }
 
-void runtime::set_space_after_roles(int model_id, bool space_after_roles) {
+void Runtime::set_space_after_roles(int model_id, bool space_after_roles) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2937,7 +2937,7 @@ void runtime::set_space_after_roles(int model_id, bool space_after_roles) {
     model->space_after_roles = space_after_roles;
 }
 
-std::vector<int> runtime::tokenizer_encode(int model_id, std::string text) {
+std::vector<int> Runtime::tokenizer_encode(int model_id, std::string text) {
     if (_models.find(model_id) == _models.end()) {
         return {};
     }
@@ -2948,7 +2948,7 @@ std::vector<int> runtime::tokenizer_encode(int model_id, std::string text) {
     return model->tokenizer->encode(text);
 }
 
-std::string runtime::tokenizer_decode(int model_id, std::vector<int> ids) {
+std::string Runtime::tokenizer_decode(int model_id, std::vector<int> ids) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -2959,7 +2959,7 @@ std::string runtime::tokenizer_decode(int model_id, std::vector<int> ids) {
     return model->tokenizer->decode(ids);
 }
 
-std::string runtime::tokenizer_decode(int model_id, int id) {
+std::string Runtime::tokenizer_decode(int model_id, int id) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -2970,7 +2970,7 @@ std::string runtime::tokenizer_decode(int model_id, int id) {
     return model->tokenizer->decode(id);
 }
 
-void runtime::clear_response_buffer(int model_id) {
+void Runtime::clear_response_buffer(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2985,7 +2985,7 @@ void runtime::clear_response_buffer(int model_id) {
     }
 }
 
-void runtime::backend_set_extra_str(int model_id, std::string str) {
+void Runtime::backend_set_extra_str(int model_id, std::string str) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -2996,7 +2996,7 @@ void runtime::backend_set_extra_str(int model_id, std::string str) {
     model->backend->extra_str = str;
 }
 
-int runtime::release() {
+int Runtime::release() {
     _models.clear();
 #ifdef ENABLE_LLAMACPP
     if (_embedding) {
@@ -3012,7 +3012,7 @@ int runtime::release() {
     return RWKV_SUCCESS;
 }
 
-int runtime::get_vocab_size(int model_id) {
+int Runtime::get_vocab_size(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 0;
     }
@@ -3023,7 +3023,7 @@ int runtime::get_vocab_size(int model_id) {
     return model->backend->get_num_vocab();
 }
 
-std::string runtime::get_response_buffer_content(int model_id) {
+std::string Runtime::get_response_buffer_content(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -3031,7 +3031,7 @@ std::string runtime::get_response_buffer_content(int model_id) {
     return model->response_buffer;
 }
 
-const std::vector<int32_t> runtime::get_response_buffer_ids(int model_id) {
+const std::vector<int32_t> Runtime::get_response_buffer_ids(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return {};
     }
@@ -3039,7 +3039,7 @@ const std::vector<int32_t> runtime::get_response_buffer_ids(int model_id) {
     return model->response_buffer_ids;
 }
 
-bool runtime::get_response_buffer_eos_found(int model_id) {
+bool Runtime::get_response_buffer_eos_found(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return false;
     }
@@ -3047,7 +3047,7 @@ bool runtime::get_response_buffer_eos_found(int model_id) {
     return model->response_buffer_eos_found;
 }
 
-std::vector<std::string> runtime::get_response_buffer_content_batch(int model_id) {
+std::vector<std::string> Runtime::get_response_buffer_content_batch(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return {};
     }
@@ -3055,7 +3055,7 @@ std::vector<std::string> runtime::get_response_buffer_content_batch(int model_id
     return model->response_buffer_batch;
 }
 
-std::vector<std::vector<int32_t>> runtime::get_response_buffer_ids_batch(int model_id) {
+std::vector<std::vector<int32_t>> Runtime::get_response_buffer_ids_batch(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return {};
     }
@@ -3063,7 +3063,7 @@ std::vector<std::vector<int32_t>> runtime::get_response_buffer_ids_batch(int mod
     return model->response_buffer_ids_batch;
 }
 
-std::vector<bool> runtime::get_response_buffer_eos_found_batch(int model_id) {
+std::vector<bool> Runtime::get_response_buffer_eos_found_batch(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return {};
     }
@@ -3071,11 +3071,11 @@ std::vector<bool> runtime::get_response_buffer_eos_found_batch(int model_id) {
     return model->response_buffer_eos_found_batch;
 }
 
-double runtime::get_prefill_progress(int model_id) {
+double Runtime::get_prefill_progress(int model_id) {
     return _prefill_progress;
 }
 
-void runtime::set_token_banned(int model_id, std::vector<int> token_banned) {
+void Runtime::set_token_banned(int model_id, std::vector<int> token_banned) {
     if (_models.find(model_id) == _models.end()) {
         return;
     }
@@ -3086,7 +3086,7 @@ void runtime::set_token_banned(int model_id, std::vector<int> token_banned) {
     model->sampler->set_token_banned(token_banned);
 }
 
-std::vector<int> runtime::get_loaded_model_ids() {
+std::vector<int> Runtime::get_loaded_model_ids() {
     std::vector<int> model_ids;
     for (const auto& pair : _models) {
         model_ids.push_back(pair.first);
@@ -3094,7 +3094,7 @@ std::vector<int> runtime::get_loaded_model_ids() {
     return model_ids;
 }
 
-std::map<int, std::map<std::string, std::string>> runtime::get_loaded_models_info() {
+std::map<int, std::map<std::string, std::string>> Runtime::get_loaded_models_info() {
     std::map<int, std::map<std::string, std::string>> models_info;
 
     for (const auto& pair : _models) {
@@ -3119,7 +3119,7 @@ std::map<int, std::map<std::string, std::string>> runtime::get_loaded_models_inf
     return models_info;
 }
 
-std::string& runtime::get_model_path_by_id(int model_id) {
+std::string& Runtime::get_model_path_by_id(int model_id) {
     static std::string empty_string;
     if (_models.find(model_id) == _models.end()) {
         return empty_string;
@@ -3128,7 +3128,7 @@ std::string& runtime::get_model_path_by_id(int model_id) {
     return model->model_path;
 }
 
-int runtime::set_seed(int model_id, int32_t seed) {
+int Runtime::set_seed(int model_id, int32_t seed) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -3140,7 +3140,7 @@ int runtime::set_seed(int model_id, int32_t seed) {
     return RWKV_SUCCESS;
 }
 
-int runtime::get_seed(int model_id) {
+int Runtime::get_seed(int model_id) {
     if (_models.find(model_id) == _models.end()) {
         return 0;
     }

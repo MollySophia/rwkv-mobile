@@ -44,7 +44,7 @@ int main(int argc, char **argv) {
 #endif
 
 
-    rwkvmobile::runtime runtime;
+    rwkvmobile::Runtime runtime;
     int model_id = runtime.load_model(argv[2], argv[3], argv[1], extra_data);
     ENSURE_SUCCESS_OR_LOG_EXIT(model_id < 0 ? model_id : rwkvmobile::RWKV_SUCCESS, "Failed to load model");
     if (model_id < 0) return 1;

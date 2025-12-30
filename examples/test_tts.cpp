@@ -14,7 +14,7 @@ int main(int argc, char **argv) {
         std::cerr << "Usage: " << argv[0] << " <model_file> <backend> <tokenizer_file> <wav_file> <enable_cache>" << std::endl;
         return 1;
     }
-    rwkvmobile::runtime runtime;
+    rwkvmobile::Runtime runtime;
     int model_id = runtime.load_model(argv[1], argv[2], argv[3], nullptr);
     if (model_id < 0) return 1;
 

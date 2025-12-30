@@ -174,6 +174,7 @@ if (ENABLE_LLAMACPP_BACKEND)
             src/multimodal/vision/clip.cpp
             src/multimodal/vision/llava.cpp
             src/multimodal/vision/vision_encoder.cpp
+            src/multimodal/vision/preprocessor.cpp
         )
     endif()
 

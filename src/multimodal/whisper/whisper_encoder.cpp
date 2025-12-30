@@ -10,7 +10,7 @@ WhisperEncoder::WhisperEncoder() : whisper_encoder_ptr(nullptr, [](whisper_conte
 
 WhisperEncoder::~WhisperEncoder() = default;
 
-int WhisperEncoder::LoadModel(const std::string &model_path, const std::string &adapter_path) {
+int WhisperEncoder::load_model(const std::string &model_path, const std::string &adapter_path) {
     whisper_context_params cparams = whisper_context_default_params();
     whisper_encoder_ptr.reset(whisper_init_from_file_with_params(model_path.c_str(), cparams));
     if (whisper_encoder_ptr == nullptr) {
@@ -20,7 +20,7 @@ int WhisperEncoder::LoadModel(const std::string &model_path, const std::string &
     return RWKV_SUCCESS;
 }
 
-bool WhisperEncoder::Encode(const std::string &path, std::vector<float> &embeddings, int &n_tokens, bool force_no_postnorm) {
+bool WhisperEncoder::encode(const std::string &path, std::vector<float> &embeddings, int &n_tokens, bool force_no_postnorm) {
     wav_file wav;
     if (!wav.load(path)) {
         LOGE("Failed to load wav file from %s", path.c_str());

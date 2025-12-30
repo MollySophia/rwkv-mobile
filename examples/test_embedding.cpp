@@ -20,7 +20,7 @@ static float similarity(const std::vector<float> &emb1, const std::vector<float>
     return static_cast<float>(sum / (std::sqrt(sum1) * std::sqrt(sum2)));
 }
 
-static void rank(rwkvmobile::runtime &runtime, const std::string &query, const std::vector<std::string> &documents) {
+static void rank(rwkvmobile::Runtime &runtime, const std::string &query, const std::vector<std::string> &documents) {
     const auto now = std::chrono::high_resolution_clock::now();
     const auto embdQuery = runtime.get_embedding({query})[0];
     const auto embeddings = runtime.get_embedding(documents);
@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
         std::cerr << "Usage: " << argv[0] << " <model_path>" << std::endl;
         return 1;
     }
-    rwkvmobile::runtime runtime;
+    rwkvmobile::Runtime runtime;
 
     const auto model_path = std::string(argv[1]);
 
