@@ -1,12 +1,11 @@
 #include "vision_encoder.h"
-// #include "llava.h"
 #include "commondef.h"
 #include "logger.h"
 #include <vector>
 #include <cmath>
 #include <filesystem>
 #include <cstring>
-#include <iostream>
+#include "soc_detect.h"
 
 namespace rwkvmobile {
 
@@ -54,6 +53,17 @@ int VisionEncoder::load_model(const std::string &model_path, const std::string &
         }
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
+
+#if __ANDROID__
+    auto cpu_groups = get_cpu_groups();
+    vision_encoder_mnn_interpretor->setSessionHint(MNN::Interpreter::HintMode::CPU_CORE_IDS, cpu_groups[1].ids.data(), cpu_groups[1].ids.size());
+    vision_adapter_mnn_interpretor->setSessionHint(MNN::Interpreter::HintMode::CPU_CORE_IDS, cpu_groups[1].ids.data(), cpu_groups[1].ids.size());
+    std::string msg = "[Vision Encoder]: binding mnn to cpu core ids: ";
+    for (int i = 0; i < cpu_groups[1].ids.size(); i++) {
+        msg += std::to_string(cpu_groups[1].ids[i]) + " ";
+    }
+    LOGI("%s", msg.c_str());
+#endif
 
     auto pixelValTensor = vision_encoder_mnn_interpretor->getSessionInput(vision_encoder_mnn_session, "pixel_values");
     std::vector<int> input_shape = {1, 3, 384, 384};
