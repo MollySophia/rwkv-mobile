@@ -2,9 +2,12 @@
 #define VISION_ENCODER_H
 
 #include "multimodal/multimodal_encoder.h"
-#include "clip.h"
+// #include "clip.h"
 #include <memory>
 #include <functional>
+
+#include "MNN/Interpreter.hpp"
+#include <MNN/expr/Module.hpp>
 
 namespace rwkvmobile {
 
@@ -39,7 +42,13 @@ public:
     bool encode(const std::string &path, std::vector<float> &embeddings, int &n_tokens, bool force_no_postnorm = false) override;
 
 private:
-    std::unique_ptr<clip_ctx, std::function<void(clip_ctx*)>> vision_encoder_ptr;
+    // std::unique_ptr<clip_ctx, std::function<void(clip_ctx*)>> vision_encoder_ptr;
+    MNN::Interpreter *vision_encoder_mnn_interpretor = nullptr;
+    MNN::Session *vision_encoder_mnn_session = nullptr;
+    MNN::Interpreter *vision_adapter_mnn_interpretor = nullptr;
+    MNN::Session *vision_adapter_mnn_session = nullptr;
+
+    MNN::RuntimeInfo mnn_runtime;
 
     void preprocess(const image_u8 &img, std::vector<image_f32> &res_imgs);
 

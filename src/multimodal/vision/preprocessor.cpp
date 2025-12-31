@@ -1,5 +1,6 @@
 #include "vision_encoder.h"
 #include "logger.h"
+#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #include <cmath>
 #include <cstring>

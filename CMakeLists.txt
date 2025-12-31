@@ -171,8 +171,6 @@ if (ENABLE_LLAMACPP_BACKEND)
     )
     if (ENABLE_VISION)
         set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS}
-            src/multimodal/vision/clip.cpp
-            src/multimodal/vision/llava.cpp
             src/multimodal/vision/vision_encoder.cpp
             src/multimodal/vision/preprocessor.cpp
         )

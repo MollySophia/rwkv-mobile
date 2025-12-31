@@ -10,10 +10,6 @@
 #include "commondef.h"
 #include "logger.h"
 
-#if ENABLE_VISION
-#include "llava.h"
-#endif
-
 namespace rwkvmobile {
 
 int llama_cpp_backend::init(void * extra) {
