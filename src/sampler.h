@@ -33,6 +33,8 @@ public:
 
     std::vector<int> sample_batch(const Tensor1D & logits, const size_t sampling_size, const size_t hstep, int batch_size, std::vector<float> temperature, std::vector<int> top_k, std::vector<float> top_p);
 
+    std::vector<int> sample_topk_greedy(const Tensor1D & logits, const size_t size, int top_k);
+
     void set_seed(int32_t seed);
     int get_seed();
 

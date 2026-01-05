@@ -186,4 +186,38 @@ void NucleusSampler::apply_penalties(Tensor1D & logits, const size_t size) {
     }
 }
 
+std::vector<int> NucleusSampler::sample_topk_greedy(const Tensor1D & logits, const size_t size, int top_k) {
+    if (!logits.data_ptr) {
+        return std::vector<int>();
+    }
+    if (size == 0) return std::vector<int>();
+    if (top_k <= 0 || (size_t)top_k > size) top_k = (int)size;
+
+    // Keep only top-k indices using a min-heap (convert only scalars as needed).
+    struct Item { float v; int i; };
+    std::vector<Item> heap;
+    heap.reserve((size_t)top_k);
+    for (size_t i = 0; i < size; ++i) {
+        const float v = tensor1d_get_f32(logits, i);
+        if ((int)heap.size() < top_k) {
+            heap.push_back({v, (int)i});
+            if ((int)heap.size() == top_k) {
+                std::make_heap(heap.begin(), heap.end(), [](const Item& a, const Item& b){ return a.v > b.v; }); // min-heap
+            }
+        } else if (v > heap.front().v) {
+            std::pop_heap(heap.begin(), heap.end(), [](const Item& a, const Item& b){ return a.v > b.v; });
+            heap.back() = {v, (int)i};
+            std::push_heap(heap.begin(), heap.end(), [](const Item& a, const Item& b){ return a.v > b.v; });
+        }
+    }
+    std::sort(heap.begin(), heap.end(), [](const Item& a, const Item& b){ return a.v > b.v; }); // desc by logit
+
+    std::vector<int> ret;
+    ret.reserve((size_t)top_k);
+    for (int i = 0; i < top_k; i++) {
+        ret.push_back(heap[i].i);
+    }
+    return ret;
+}
+
 }

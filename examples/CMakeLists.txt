@@ -48,6 +48,9 @@ target_link_libraries(test_clear_states PUBLIC rwkv_mobile_internal)
 add_executable(test_sudoku test_sudoku.cpp ../src/c_api.cpp)
 target_link_libraries(test_sudoku PUBLIC rwkv_mobile_internal)
 
+add_executable(test_generate_topk test_generate_topk.cpp ../src/c_api.cpp)
+target_link_libraries(test_generate_topk PUBLIC rwkv_mobile_internal)
+
 if (ENABLE_LLAMACPP_BACKEND)
     add_executable(test_embedding test_embedding.cpp ../src/c_api.cpp)
     target_link_libraries(test_embedding PUBLIC rwkv_mobile_internal)

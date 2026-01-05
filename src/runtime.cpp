@@ -2605,6 +2605,68 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     return RWKV_SUCCESS;
 }
 
+int Runtime::gen_completion_singletoken_topk(int model_id, std::string prompt, int top_k, std::vector<std::string> &candidate_output_texts, void (*callback)(const char *, const int, const char *)) {
+    if (_models.find(model_id) == _models.end()) {
+        LOGE("gen_completion: Model ID %d not found", model_id);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto &model = _models.at(model_id);
+    if (model->backend == nullptr || model->tokenizer == nullptr) {
+        LOGE("gen_completion: Backend or tokenizer for model ID %d not found", model_id);
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    model->is_generating = true;
+
+    std::vector<int> ids = model->tokenizer->encode(prompt);
+    std::vector<int> tokens_to_prefill;
+    state_node* node = model->backend->match_and_load_state(ids, tokens_to_prefill);
+    _prefill_progress_start(tokens_to_prefill.size());
+
+    Tensor1D logits;
+    // the target usage requires more frequent state checkpoints
+    int checkpoint_interval = (prompt.size() / 2 + 1) * 2 / 4;
+    checkpoint_interval = checkpoint_interval > 0 ? checkpoint_interval : 1;
+    for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
+        std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
+        int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
+        if (ret || logits.data_ptr == nullptr) {
+            LOGE("gen_completion: Error evaluating logits");
+            model->is_generating = false;
+            return ret;
+        }
+        ret = model->backend->register_state_checkpoint(node, tokens_to_prefill_chunk, logits);
+        if (ret) {
+            LOGE("gen_completion: Error registering state checkpoint");
+            model->is_generating = false;
+            return ret;
+        }
+        LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
+    }
+    _prefill_progress_finish();
+
+    static int idx = 0;
+    if (logits.data_ptr == nullptr) {
+        if (!node->logits.empty()) {
+            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
+        } else {
+            LOGE("gen_completion: no logits available after prefill");
+            model->is_generating = false;
+            return RWKV_ERROR_RUNTIME;
+        }
+    }
+
+    std::vector<int> top_k_indices = model->sampler->sample_topk_greedy(logits, model->backend->get_num_vocab(), top_k);
+
+    candidate_output_texts.clear();
+    for (int i = 0; i < top_k; i++) {
+        candidate_output_texts.push_back(model->tokenizer->decode(top_k_indices[i]));
+    }
+    model->is_generating = false;
+    model->stop_signal = false;
+    return RWKV_SUCCESS;
+}
+
 int Runtime::run_evaluation(int model_id, std::string source_text, std::string target_text, bool &correct, float &logits_val, std::string &output_text, bool insert_bos_token) {
     if (_models.find(model_id) == _models.end()) {
         LOGE("run_evaluation: Model ID %d not found", model_id);

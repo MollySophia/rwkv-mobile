@@ -298,6 +298,22 @@ late final _rwkvmobile_runtime_gen_completionPtr = _lookup<
     ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Char> , ffi.Int , ffi.Int , ffi.Pointer<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Char> , ffi.Int , ffi.Pointer<ffi.Char> )>> )>>('rwkvmobile_runtime_gen_completion');
 late final _rwkvmobile_runtime_gen_completion = _rwkvmobile_runtime_gen_completionPtr.asFunction<int Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Char> , int , int , ffi.Pointer<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Char> , ffi.Int , ffi.Pointer<ffi.Char> )>> )>();
 
+ffi.Pointer<ffi.Pointer<ffi.Char>> rwkvmobile_runtime_gen_completion_singletoken_topk(rwkvmobile_runtime_t handle,
+int model_id,
+ffi.Pointer<ffi.Char> prompt,
+int top_k,
+) {
+  return _rwkvmobile_runtime_gen_completion_singletoken_topk(handle,
+model_id,
+prompt,
+top_k,
+);
+}
+
+late final _rwkvmobile_runtime_gen_completion_singletoken_topkPtr = _lookup<
+    ffi.NativeFunction<ffi.Pointer<ffi.Pointer<ffi.Char>> Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Char> , ffi.Int )>>('rwkvmobile_runtime_gen_completion_singletoken_topk');
+late final _rwkvmobile_runtime_gen_completion_singletoken_topk = _rwkvmobile_runtime_gen_completion_singletoken_topkPtr.asFunction<ffi.Pointer<ffi.Pointer<ffi.Char>> Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Char> , int )>();
+
 int rwkvmobile_runtime_clear_state(rwkvmobile_runtime_t runtime,
 int model_id,
 ) {

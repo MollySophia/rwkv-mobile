@@ -207,6 +207,33 @@ int rwkvmobile_runtime_gen_completion_async(
     return RWKV_SUCCESS;
 }
 
+const char ** rwkvmobile_runtime_gen_completion_singletoken_topk(
+    rwkvmobile_runtime_t handle,
+    int model_id,
+    const char * prompt,
+    const int top_k
+) {
+    if (handle == nullptr || prompt == nullptr || top_k <= 0) {
+        return nullptr;
+    }
+
+    auto rt = static_cast<class Runtime *>(handle);
+    static std::vector<std::string> candidate_output_texts;
+    int ret = rt->gen_completion_singletoken_topk(model_id, std::string(prompt), top_k, candidate_output_texts, nullptr);
+    if (ret != RWKV_SUCCESS) {
+        return nullptr;
+    }
+    if (candidate_output_texts.size() != top_k) {
+        LOGE("gen_completion_singletoken_topk: candidate_output_texts.size() != top_k");
+        return nullptr;
+    }
+    const char ** candidate_output_texts_c = new const char*[candidate_output_texts.size()];
+    for (int i = 0; i < candidate_output_texts.size(); i++) {
+        candidate_output_texts_c[i] = candidate_output_texts[i].c_str();
+    }
+    return candidate_output_texts_c;
+}
+
 int rwkvmobile_runtime_gen_completion_batch_async(
     rwkvmobile_runtime_t handle,
     int model_id,

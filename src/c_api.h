@@ -109,6 +109,8 @@ void rwkvmobile_runtime_free_supported_batch_sizes(struct supported_batch_sizes 
 
 int rwkvmobile_runtime_gen_completion(rwkvmobile_runtime_t runtime, int model_id, const char * prompt, const int max_tokens, const int stop_code, void (*callback)(const char *, const int, const char *));
 
+const char ** rwkvmobile_runtime_gen_completion_singletoken_topk(rwkvmobile_runtime_t handle, int model_id, const char * prompt, const int top_k);
+
 int rwkvmobile_runtime_clear_state(rwkvmobile_runtime_t runtime, int model_id);
 
 int rwkvmobile_runtime_load_initial_state(rwkvmobile_runtime_t runtime, int model_id, const char * state_path);
