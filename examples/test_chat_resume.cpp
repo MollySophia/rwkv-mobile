@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
         nullptr
     };
 
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0);
     int count = 0;
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         std::cout << "Waiting for generation to finish..." << std::endl;
@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
         custom_sleep(1);
     }
     input_list[3] = (char*)response.c_str();
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 4, 50, callback, 0);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 4, 50, callback, 0, 0);
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         std::cout << "Waiting for generation to finish..." << std::endl;
         custom_sleep(1);

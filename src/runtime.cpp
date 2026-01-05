@@ -969,7 +969,7 @@ std::string Runtime::get_state_cache_info(int model_id) {
     return state_cache_info;
 }
 
-int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *), bool enable_reasoning) {
+int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *), bool enable_reasoning, bool force_reasoning) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1110,17 +1110,16 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     bool is_pseudo_thinking = enable_reasoning && model->response_buffer.find("</think>") != std::string::npos;
     const int rewind_token_list[] = {28324, 28329, 10080, 9830}; // "…\n" "。\n" "…" "。"
     std::any state_for_rewinding;
-    bool first_token_ban_thinking_tag = !enable_reasoning || is_pseudo_thinking;
+    bool first_token_ban_thinking_tag = !enable_reasoning || is_pseudo_thinking || force_reasoning;
 
     for (int i = 0; i < max_length; i++) {
         model->sampler->apply_penalties(logits, model->backend->get_num_vocab());
 
-        if ((i == 0 || i == 1) && first_token_ban_thinking_tag) {
-            // token 61 is '<', 261 is '\n\n'
-            tensor1d_set_f32(logits, 11, -1e9f);
-            tensor1d_set_f32(logits, 61, -1e9f);
-            tensor1d_set_f32(logits, 261, -1e9f);
-            tensor1d_set_f32(logits, 0, -1e9f);
+        if ((i == 0 || i == 1 || i == 2) && first_token_ban_thinking_tag) {
+            tensor1d_set_f32(logits, 11, -1e9f); // '\n'
+            tensor1d_set_f32(logits, 61, -1e9f); // '<'
+            tensor1d_set_f32(logits, 261, -1e9f); // '\n\n'
+            tensor1d_set_f32(logits, 0, -1e9f); // <EOD>
         }
 
         decoded_idx = model->sampler->sample(logits, model->backend->get_num_vocab());
@@ -1204,7 +1203,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     return RWKV_SUCCESS;
 }
 
-int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **), bool enable_reasoning) {
+int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **), bool enable_reasoning, bool force_reasoning) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1312,8 +1311,12 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
         is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
         model->sampler->apply_penalties(logits, num_vocab);
-        tensor1d_set_f32(logits, 61, -1e9f);
-        tensor1d_set_f32(logits, 261, -1e9f);
+        if (is_pseudo_thinking_batch[batch_idx] || force_reasoning) {
+            tensor1d_set_f32(logits, 11, -1e9f); // '\n'
+            tensor1d_set_f32(logits, 61, -1e9f); // '<'
+            tensor1d_set_f32(logits, 261, -1e9f); // '\n\n'
+            tensor1d_set_f32(logits, 0, -1e9f); // <EOD>
+        }
         decoded_idx[batch_idx] = model->sampler->sample(logits, num_vocab);
 
         model->backend->get_state(state_batch[batch_idx]);
@@ -1342,8 +1345,11 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
                     model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
 
-                if (is_pseudo_thinking_batch[original_j] && i == 1) {
-                    tensor1d_set_f32(view, 61, -1e9f);
+                if ((is_pseudo_thinking_batch[original_j] || force_reasoning) && (i == 1 || i == 2)) {
+                    tensor1d_set_f32(view, 11, -1e9f); // '\n'
+                    tensor1d_set_f32(view, 61, -1e9f); // '<'
+                    tensor1d_set_f32(view, 261, -1e9f); // '\n\n'
+                    tensor1d_set_f32(view, 0, -1e9f); // <EOD>
                 }
             }
 

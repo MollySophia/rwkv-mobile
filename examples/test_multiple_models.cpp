@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Chatting with model 0..." << std::endl;
     char *input_list0[] = {msg0, nullptr, nullptr};
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id0, (const char **)input_list0, 1, 200, callback, false);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id0, (const char **)input_list0, 1, 200, callback, false, false);
     while (rwkvmobile_runtime_is_generating(runtime, model_id0)) {
         std::cout << ".";
         custom_sleep(1);
@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Chatting with model 1..." << std::endl;
     char *input_list1[] = {msg1, nullptr, nullptr};
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id1, (const char **)input_list1, 1, 200, callback, false);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id1, (const char **)input_list1, 1, 200, callback, false, false);
     while (rwkvmobile_runtime_is_generating(runtime, model_id1)) {
         std::cout << ".";
         custom_sleep(1);
@@ -134,7 +134,7 @@ int main(int argc, char **argv) {
     input_list1[2] = (char*)msg2;
 
     std::cout << "Chatting again with model 0..." << std::endl;
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id0, (const char **)input_list0, 3, 200, callback, false);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id0, (const char **)input_list0, 3, 200, callback, false, false);
     while (rwkvmobile_runtime_is_generating(runtime, model_id0)) {
         std::cout << ".";
         custom_sleep(1);
@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
     std::cout << "Response: " << response << std::endl;
 
     std::cout << "Chatting again with model 1..." << std::endl;
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id1, (const char **)input_list1, 3, 200, callback, false);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id1, (const char **)input_list1, 3, 200, callback, false, false);
     while (rwkvmobile_runtime_is_generating(runtime, model_id1)) {
         std::cout << ".";
         custom_sleep(1);
