@@ -66,6 +66,7 @@ struct evaluation_results {
     int * corrects;
     float * logits_vals;
     int count;
+    char ** output_texts;
 };
 
 #ifdef __cplusplus

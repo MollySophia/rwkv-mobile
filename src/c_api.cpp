@@ -1117,7 +1117,8 @@ struct evaluation_results rwkvmobile_runtime_run_evaluation(rwkvmobile_runtime_t
     auto rt = static_cast<class Runtime *>(runtime);
     bool correct = false;
     float logits_val = 0;
-    int ret = rt->run_evaluation(model_id, source_text, target_text, correct, logits_val, true);
+    std::string output_text;
+    int ret = rt->run_evaluation(model_id, source_text, target_text, correct, logits_val, output_text, true);
     if (ret != RWKV_SUCCESS) {
         return result;
     }
@@ -1127,6 +1128,9 @@ struct evaluation_results rwkvmobile_runtime_run_evaluation(rwkvmobile_runtime_t
     result.corrects[0] = correct;
     result.logits_vals = new float[1];
     result.logits_vals[0] = logits_val;
+    result.output_texts = new char*[1];
+    result.output_texts[0] = new char[output_text.size() + 1];
+    strcpy(result.output_texts[0], output_text.c_str());
     return result;
 }
 
@@ -1136,6 +1140,14 @@ void rwkvmobile_runtime_free_evaluation_results(struct evaluation_results result
     }
     if (results.logits_vals != nullptr) {
         delete[] results.logits_vals;
+    }
+    if (results.output_texts != nullptr) {
+        for (int i = 0; i < results.count; i++) {
+            if (results.output_texts[i] != nullptr) {
+                delete[] results.output_texts[i];
+            }
+        }
+        delete[] results.output_texts;
     }
 }
 

@@ -67,7 +67,9 @@ int main(int argc, char **argv) {
 
         bool correct = false;
         float logits_val = -1e9f;
-        runtime.run_evaluation(model_id, prompt, target, correct, logits_val, true);
+        std::string output_text;
+        runtime.run_evaluation(model_id, prompt, target, correct, logits_val, output_text, true);
+        std::cout << output_text << std::endl;
 
         xcnt++;
         if (correct) {

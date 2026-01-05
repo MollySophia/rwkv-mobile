@@ -1277,6 +1277,8 @@ final class evaluation_results extends ffi.Struct{
   @ffi.Int()
   external int count;
 
+  external ffi.Pointer<ffi.Pointer<ffi.Char>> output_texts;
+
 }
 
 typedef rwkvmobile_runtime_t = ffi.Pointer<ffi.Void>;

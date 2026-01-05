@@ -2599,7 +2599,7 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     return RWKV_SUCCESS;
 }
 
-int Runtime::run_evaluation(int model_id, std::string source_text, std::string target_text, bool &correct, float &logits_val, bool insert_bos_token) {
+int Runtime::run_evaluation(int model_id, std::string source_text, std::string target_text, bool &correct, float &logits_val, std::string &output_text, bool insert_bos_token) {
     if (_models.find(model_id) == _models.end()) {
         LOGE("run_evaluation: Model ID %d not found", model_id);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -2643,6 +2643,7 @@ int Runtime::run_evaluation(int model_id, std::string source_text, std::string t
     logits_val = 0;
     const int vocab = model->backend->get_num_vocab();
     std::vector<float> logits_f32_copy((size_t)vocab);
+    std::vector<int> output_ids;
     for (int i = 0; i < target_ids.size(); i++) {
         // Evaluation uses full softmax, so we always make a fp32 copy here.
         // NOTE: softmax_and_argmax modifies the buffer in-place.
@@ -2661,6 +2662,7 @@ int Runtime::run_evaluation(int model_id, std::string source_text, std::string t
         }
 
         auto output_id = softmax_and_argmax(logits_f32_copy.data(), (size_t)vocab);
+        output_ids.push_back(output_id);
         logits_val += std::log(logits_f32_copy[target_ids[i]]);
         if (output_id != target_ids[i]) {
             correct = false;
@@ -2673,6 +2675,8 @@ int Runtime::run_evaluation(int model_id, std::string source_text, std::string t
             }
         }
     }
+
+    output_text = model->tokenizer->decode(output_ids);
 
     return RWKV_SUCCESS;
 }
