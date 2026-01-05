@@ -2624,11 +2624,61 @@ int Runtime::gen_completion_singletoken_topk(int model_id, std::string prompt, i
     _prefill_progress_start(tokens_to_prefill.size());
 
     Tensor1D logits;
-    // the target usage requires more frequent state checkpoints
-    int checkpoint_interval = (prompt.size() / 2 + 1) * 2 / 4;
-    checkpoint_interval = checkpoint_interval > 0 ? checkpoint_interval : 1;
-    for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
-        std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
+    // The target usage requires more frequent state checkpoints.
+    //
+    // Save checkpoints at prompt-length fractions: 1/2, 3/4, 7/8, ... (i.e. 1 - 1/2^k).
+    // If `match_and_load_state()` already loaded a cached prefix, we only prefill the suffix
+    // and skip checkpoint boundaries that fall inside the cached prefix.
+    const int total_prompt_tokens = (int)ids.size();
+    const int cached_prefix_tokens = node ? (int)node->ids.size() : 0;
+    const int total_to_prefill = (int)tokens_to_prefill.size();
+
+    int j = 0;
+    if (total_to_prefill > 0) {
+        int last_end = 0;
+        for (int k = 1; k < 32; k++) {
+            int remaining = total_prompt_tokens >> k;               // floor(total / 2^k)
+            int global_end = total_prompt_tokens - remaining;       // total * (1 - 1/2^k)
+            if (global_end <= cached_prefix_tokens) {
+                continue;
+            }
+            int end = global_end - cached_prefix_tokens;
+            end = std::min(end, total_to_prefill);
+            if (end <= last_end) {
+                continue;
+            }
+
+            std::vector<int> tokens_to_prefill_chunk =
+                std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + end);
+
+            j = end;
+            last_end = end;
+
+            int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
+            if (ret || logits.data_ptr == nullptr) {
+                LOGE("gen_completion: Error evaluating logits");
+                model->is_generating = false;
+                return ret;
+            }
+            ret = model->backend->register_state_checkpoint(node, tokens_to_prefill_chunk, logits);
+            if (ret) {
+                LOGE("gen_completion: Error registering state checkpoint");
+                model->is_generating = false;
+                return ret;
+            }
+            LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
+
+            if (j >= total_to_prefill) {
+                break;
+            }
+        }
+    }
+
+    // Safety fallback: if, for any reason, we didn't reach the end, finish prefill.
+    for (; j < tokens_to_prefill.size();) {
+        std::vector<int> tokens_to_prefill_chunk =
+            std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.end());
+        j = (int)tokens_to_prefill.size();
         int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
         if (ret || logits.data_ptr == nullptr) {
             LOGE("gen_completion: Error evaluating logits");
