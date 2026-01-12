@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
     rwkvmobile_runtime_set_penalty_params(runtime, model_id, {0, 0, 0});
     rwkvmobile_runtime_set_sampler_params(runtime, model_id, {1.0, 1, 1.0});
 
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0, 1);
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         std::cout << "Waiting for generation to finish..." << std::endl;
         custom_sleep(1);
@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     rwkvmobile_runtime_set_penalty_params(runtime, model_id, {0, 0, 0});
     rwkvmobile_runtime_set_sampler_params(runtime, model_id, {1.0, 1, 1.0});
 
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0, 1);
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         std::cout << "Waiting for generation to finish..." << std::endl;
         custom_sleep(1);
@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     rwkvmobile_runtime_set_penalty_params(runtime, model_id, {0, 0, 0});
     rwkvmobile_runtime_set_sampler_params(runtime, model_id, {1.0, 1, 1.0});
 
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0, 1);
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         std::cout << "Waiting for generation to finish..." << std::endl;
         custom_sleep(1);
@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
     rwkvmobile_runtime_set_penalty_params(runtime, model_id, {0, 0, 0});
     rwkvmobile_runtime_set_sampler_params(runtime, model_id, {1.0, 1, 1.0});
 
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, (const char **)input_list, 3, 50, callback, 0, 0, 1);
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         std::cout << "Waiting for generation to finish..." << std::endl;
         custom_sleep(1);

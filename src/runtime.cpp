@@ -587,7 +587,7 @@ std::vector<int> Runtime::get_supported_batch_sizes(int model_id) {
     return model->backend->supported_batch_sizes;
 }
 
-std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning) {
+std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning, bool add_generation_prompt) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -613,7 +613,7 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
 
             text += model->bos_token + model->user_role + ":" + (space_after_roles ? " " : "") + inputs[i] + model->eos_token;
         } else {
-            if (i == inputs.size() - 1) {
+            if (i == inputs.size() - 1 && !add_generation_prompt) {
                 text += model->bos_token + model->response_role + ":" + (space_after_roles ? " " : "") + inputs[i];
             } else {
                 text += model->bos_token + model->response_role + ":" + (space_after_roles ? " " : "") + inputs[i] + model->eos_token;
@@ -621,9 +621,11 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         }
     }
 
-    if (inputs.size() % 2 != 0) {
-        text += model->bos_token + model->response_role + ":";
-        if (enable_reasoning) {
+    if (add_generation_prompt) {
+        bool history_ends_with_user_message = inputs.size() % 2 != 0;
+        auto role = history_ends_with_user_message ? model->response_role : model->user_role;
+        text += model->bos_token + role + ":";
+        if (enable_reasoning && history_ends_with_user_message) {
             text += (space_after_roles ? " " : "") + model->thinking_token;
         }
     }
@@ -969,7 +971,15 @@ std::string Runtime::get_state_cache_info(int model_id) {
     return state_cache_info;
 }
 
-int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *), bool enable_reasoning, bool force_reasoning) {
+int Runtime::chat(
+    int model_id,
+    std::vector<std::string> inputs,
+    const int max_length,
+    void (*callback)(const char *, const int, const char *),
+    bool enable_reasoning,
+    bool force_reasoning,
+    bool add_generation_prompt
+) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -990,7 +1000,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
         LOGD("_prefilling_thread finished.\n");
     }
 
-    auto input_text = apply_chat_template(model_id, inputs, enable_reasoning);
+    auto input_text = apply_chat_template(model_id, inputs, enable_reasoning, add_generation_prompt);
     LOGD("Applied chat template: \"%s\"\n", input_text.c_str());
     std::vector<int> text_ids = model->tokenizer->encode(input_text);
     std::string debug_msg = "text_ids: ";
@@ -1082,9 +1092,24 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     }
     _prefill_progress_finish();
 
-    model->response_buffer = input_text.substr(input_text.rfind(model->response_role + ":") + (model->response_role + ":").size());
+    bool history_ends_with_user_message = inputs.size() % 2 != 0;
+    std::vector<std::string> stop_codes = model->stop_codes;
+    if (add_generation_prompt) {
+        if (history_ends_with_user_message) {
+            stop_codes.push_back("\nUser");
+            stop_codes.push_back("User");
+        } else {
+            stop_codes.push_back("\nAss");
+            stop_codes.push_back("Ass");
+        }
+    }
+
     std::vector<int> response_ids_raw;
-    model->response_buffer_ids = model->tokenizer->encode(model->response_buffer);
+    if (!add_generation_prompt) { // resuming generation cases, restore response buffer from input text
+        auto role_for_parsing = !history_ends_with_user_message ? model->response_role : model->user_role;
+        model->response_buffer = input_text.substr(input_text.rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());
+        model->response_buffer_ids = model->tokenizer->encode(model->response_buffer);
+    }
     int ret;
 
     model->sampler->clear_occurences();
@@ -1130,7 +1155,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
 
         std::string decoded = model->tokenizer->decode(decoded_idx);
         std::string tmp = model->response_buffer + decoded;
-        for (auto &stop_code : model->stop_codes) {
+        for (auto &stop_code : stop_codes) {
             if (enable_reasoning && !thinking_end_tag_found && stop_code == "\n\n") {
                 continue;
             }
@@ -1203,7 +1228,16 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     return RWKV_SUCCESS;
 }
 
-int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **), bool enable_reasoning, bool force_reasoning) {
+int Runtime::chat_batch(
+    int model_id,
+    std::vector<std::vector<std::string>> inputs,
+    const int max_length,
+    const int batch_size,
+    void (*callback_batch)(const int, const char **, const int*, const char **),
+    bool enable_reasoning,
+    bool force_reasoning,
+    bool add_generation_prompt
+) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1281,15 +1315,29 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
     int ret;
     auto num_vocab = model->backend->get_num_vocab();
+    bool history_ends_with_user_message = inputs.size() % 2 != 0;
+    std::vector<std::string> stop_codes = model->stop_codes;
+    if (add_generation_prompt) {
+        if (history_ends_with_user_message) {
+            stop_codes.push_back("\nUser");
+            stop_codes.push_back("User");
+        } else {
+            stop_codes.push_back("\nAss");
+            stop_codes.push_back("Ass");
+        }
+    }
 
     // prefill for each batch
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
         auto &input = inputs[batch_idx];
-        input_texts[batch_idx] = apply_chat_template(model_id, input, enable_reasoning);
+        input_texts[batch_idx] = apply_chat_template(model_id, input, enable_reasoning, add_generation_prompt);
         LOGD("Applied chat template for batch %d: \"%s\"\n", batch_idx, input_texts[batch_idx].c_str());
         text_ids_batch[batch_idx] = model->tokenizer->encode(input_texts[batch_idx]);
 
-        model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(model->response_role + ":") + (model->response_role + ":").size());;
+        if (!add_generation_prompt) { // resuming generation cases, restore response buffer from input text
+            auto role_for_parsing = !history_ends_with_user_message ? model->response_role : model->user_role;
+            model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());;
+        }
         model->response_buffer_ids_batch[batch_idx].clear();
         model->response_buffer_eos_found_batch[batch_idx] = false;
         std::vector<int> tokens_to_prefill;
@@ -1412,13 +1460,13 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
             if (!model->response_buffer_eos_found_batch[original_j]) {
                 std::string decoded = model->tokenizer->decode(decoded_idx[j]);
                 std::string tmp = model->response_buffer_batch[original_j] + decoded;
-                for (auto &stop_code : model->stop_codes) {
+                for (auto &stop_code : stop_codes) {
                     if (enable_reasoning && !thinking_end_tag_found_batch[original_j] && stop_code == "\n\n") {
                         continue;
                     }
                     if (tmp.size() >= stop_code.size() &&
                         tmp.compare(tmp.size() - stop_code.size(), stop_code.size(), stop_code) == 0) {
-                        LOGD("stop code found for batch %d: %s\n", original_j, stop_code.c_str());
+                        LOGI("stop code found for batch %d: %s\n", original_j, stop_code.c_str());
                         model->response_buffer_eos_found_batch[original_j] = true;
                         std::any state_end;
                         model->backend->get_state_on_batch_slot(j, state_end);

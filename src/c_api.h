@@ -87,7 +87,7 @@ int rwkvmobile_runtime_release_model(rwkvmobile_runtime_t runtime, int model_id)
 
 int rwkvmobile_runtime_eval_logits(rwkvmobile_runtime_t runtime, int model_id, const int *ids, int ids_len, float * logits, int logits_len);
 
-int rwkvmobile_runtime_eval_chat_with_history_async(rwkvmobile_runtime_t handle, int model_id, const char ** inputs, const int num_inputs, const int max_tokens, void (*callback)(const char *, const int, const char *), int enable_reasoning, int force_reasoning);
+int rwkvmobile_runtime_eval_chat_with_history_async(rwkvmobile_runtime_t handle, int model_id, const char ** inputs, const int num_inputs, const int max_tokens, void (*callback)(const char *, const int, const char *), int enable_reasoning, int force_reasoning, int add_generation_prompt);
 
 int rwkvmobile_runtime_stop_generation(rwkvmobile_runtime_t runtime, int model_id);
 
@@ -101,7 +101,7 @@ int rwkvmobile_runtime_gen_completion_async(rwkvmobile_runtime_t runtime, int mo
 
 int rwkvmobile_runtime_gen_completion_batch_async(rwkvmobile_runtime_t runtime, int model_id, const char ** prompts, const int batch_size, const int max_tokens, const int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **));
 
-int rwkvmobile_runtime_eval_chat_batch_with_history_async(rwkvmobile_runtime_t handle, int model_id, const char *** inputs, const int * num_inputs, const int batch_size, const int max_tokens, void (*callback_batch)(const int, const char **, const int*, const char **), int enable_reasoning, int force_reasoning);
+int rwkvmobile_runtime_eval_chat_batch_with_history_async(rwkvmobile_runtime_t handle, int model_id, const char *** inputs, const int * num_inputs, const int batch_size, const int max_tokens, void (*callback_batch)(const int, const char **, const int*, const char **), int enable_reasoning, int force_reasoning, int add_generation_prompt);
 
 struct supported_batch_sizes rwkvmobile_runtime_get_supported_batch_sizes(rwkvmobile_runtime_t runtime, int model_id);
 
