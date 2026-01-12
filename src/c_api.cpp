@@ -83,7 +83,7 @@ int rwkvmobile_runtime_eval_chat_with_history_async(
     void (*callback)(const char *, const int, const char *),
     int enable_reasoning,
     int force_reasoning) {
-    if (handle == nullptr || inputs == nullptr || num_inputs == 0 || max_tokens <= 0) {
+    if (handle == nullptr || inputs == nullptr || num_inputs == 0) {
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
 

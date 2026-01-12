@@ -1179,7 +1179,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
         }
     }
 
-    if (response_ids_raw.size() > 0) {
+    if (response_ids_raw.size() > 0 && max_length > 0) {
         int ret;
         if (state_for_rewinding.has_value()) {
             response_ids_raw.pop_back();
