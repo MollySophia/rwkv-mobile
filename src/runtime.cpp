@@ -461,7 +461,7 @@ int Runtime::load_initial_state(int model_id, std::string state_path) {
     for (int i = 0; i < model->backend->n_layers; i++) {
         states[i].resize(state_size / sizeof(half_float::half));
         auto data = state_pack.readFileToMemory(files[i].filename);
-        memcpy(states[i].data(), data, state_size);
+        std::copy_n(reinterpret_cast<const uint8_t*>(data), state_size, reinterpret_cast<uint8_t*>(states[i].data()));
         state_pack.freeFileMemory(files[i].filename);
     }
 
@@ -1256,6 +1256,28 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     std::vector<bool> thinking_end_tag_found_batch(batch_size, false);
     const int rewind_token_list[] = {28324, 28329, 10080, 9830}; // "…\n" "。\n" "…" "。"
     std::vector<std::any> state_for_rewinding_batch(batch_size);
+    std::vector<std::vector<float>> prefill_logits_f32_batch(batch_size);
+    std::vector<std::vector<float>> logits_final_f32_batch(batch_size);
+    std::vector<bool> logits_final_set(batch_size, false);
+    std::vector<std::vector<float>> logits_for_rewinding_f32_batch(batch_size);
+    std::vector<bool> logits_for_rewinding_set(batch_size, false);
+
+    auto copy_logits_to_f32 = [&](const Tensor1D &t, std::vector<float> &out, int expected_elems) -> int {
+        if (t.data_ptr == nullptr || t.count < (size_t)expected_elems) {
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+        out.resize((size_t)expected_elems);
+        if (t.dtype == TensorDType::F32) {
+            std::copy_n(reinterpret_cast<const float*>(t.data_ptr), expected_elems, out.data());
+            return RWKV_SUCCESS;
+        }
+        if (t.dtype == TensorDType::F16) {
+            const half_float::half *h = reinterpret_cast<const half_float::half *>(t.data_ptr);
+            for (int i = 0; i < expected_elems; ++i) out[(size_t)i] = (float)h[i];
+            return RWKV_SUCCESS;
+        }
+        return RWKV_ERROR_UNSUPPORTED;
+    };
 
     int ret;
     auto num_vocab = model->backend->get_num_vocab();
@@ -1307,6 +1329,13 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
                 return RWKV_ERROR_RUNTIME;
             }
+        }
+        // save per-batch logits for the prompt/prefill state (needed if a batch ends before first batch-decode eval)
+        ret = copy_logits_to_f32(logits, prefill_logits_f32_batch[batch_idx], num_vocab);
+        if (ret) {
+            model->is_generating = false;
+            LOGE("failed to snapshot prefill logits for batch %d\n", batch_idx);
+            return ret;
         }
 
         is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
@@ -1363,6 +1392,21 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 std::any state_end;
                 model->backend->get_state_on_batch_slot(j, state_end);
                 state_batch[original_j] = std::move(state_end);
+                if (!logits_final_set[original_j]) {
+                    if (i == 0) {
+                        logits_final_f32_batch[original_j] = prefill_logits_f32_batch[original_j];
+                        logits_final_set[original_j] = true;
+                    } else {
+                        Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
+                        int r = copy_logits_to_f32(view, logits_final_f32_batch[original_j], num_vocab);
+                        if (r) {
+                            model->is_generating = false;
+                            LOGE("failed to snapshot final logits for batch %d\n", original_j);
+                            return r;
+                        }
+                        logits_final_set[original_j] = true;
+                    }
+                }
             }
 
             if (!model->response_buffer_eos_found_batch[original_j]) {
@@ -1379,6 +1423,21 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                         std::any state_end;
                         model->backend->get_state_on_batch_slot(j, state_end);
                         state_batch[original_j] = std::move(state_end);
+                        if (!logits_final_set[original_j]) {
+                            if (i == 0) {
+                                logits_final_f32_batch[original_j] = prefill_logits_f32_batch[original_j];
+                                logits_final_set[original_j] = true;
+                            } else {
+                                Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
+                                int r = copy_logits_to_f32(view, logits_final_f32_batch[original_j], num_vocab);
+                                if (r) {
+                                    model->is_generating = false;
+                                    LOGE("failed to snapshot final logits for batch %d\n", original_j);
+                                    return r;
+                                }
+                                logits_final_set[original_j] = true;
+                            }
+                        }
                         break;
                     }
                 }
@@ -1389,10 +1448,26 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     }
                 } else if (state_for_rewinding_batch[original_j].has_value()) {
                     state_for_rewinding_batch[original_j].reset();
+                    logits_for_rewinding_set[original_j] = false;
+                    logits_for_rewinding_f32_batch[original_j].clear();
                 }
 
                 if (std::any_of(rewind_token_list, rewind_token_list + sizeof(rewind_token_list) / sizeof(rewind_token_list[0]), [decoded_idx, j](int token) { return decoded_idx[j] == token; })) {
                     model->backend->get_state_on_batch_slot(j, state_for_rewinding_batch[original_j]);
+                    // also snapshot logits corresponding to this rewinding checkpoint state
+                    if (i == 0) {
+                        logits_for_rewinding_f32_batch[original_j] = prefill_logits_f32_batch[original_j];
+                        logits_for_rewinding_set[original_j] = true;
+                    } else {
+                        Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
+                        int r = copy_logits_to_f32(view, logits_for_rewinding_f32_batch[original_j], num_vocab);
+                        if (r) {
+                            model->is_generating = false;
+                            LOGE("failed to snapshot rewinding logits for batch %d\n", original_j);
+                            return r;
+                        }
+                        logits_for_rewinding_set[original_j] = true;
+                    }
                 }
             }
         }
@@ -1440,13 +1515,15 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     int original_batch_idx = new_active_batch_indices[k];
                     int current_slot_idx = original_to_active_mapping[original_batch_idx];
                     if (current_slot_idx >= 0 && current_slot_idx < current_batch_size) {
-                        memcpy(temp_logits.data() + k * num_vocab, 
-                            logits_f32 + current_slot_idx * num_vocab, 
-                            num_vocab * sizeof(float));
+                        std::copy_n(
+                            logits_f32 + current_slot_idx * num_vocab,
+                            num_vocab,
+                            temp_logits.data() + k * num_vocab
+                        );
                     }
                 }
                 // copy rearranged logits back
-                memcpy(logits_f32, temp_logits.data(), (size_t)new_active_count * (size_t)num_vocab * sizeof(float));
+                std::copy_n(temp_logits.data(), new_active_count * num_vocab, logits_f32);
 
                 // rearrange decoded_idx for new active batches
                 std::vector<int> temp_decoded_idx(new_active_count);
@@ -1530,18 +1607,58 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         }
     }
 
-    if (response_ids_raw_batch[0].size() > 0) {
+    bool any_generated = false;
+    for (int j = 0; j < batch_size; j++) {
+        if (!response_ids_raw_batch[j].empty()) {
+            any_generated = true;
+            break;
+        }
+    }
+    if (any_generated) {
         for (int j = 0; j < batch_size; j++) {
             if (state_for_rewinding_batch[j].has_value()) {
-                response_ids_raw_batch[j].pop_back();
-                state_batch[j] = std::move(state_for_rewinding_batch[j]);
+                if (!response_ids_raw_batch[j].empty()) {
+                    response_ids_raw_batch[j].pop_back();
+                    state_batch[j] = std::move(state_for_rewinding_batch[j]);
+                    if (!logits_final_set[j] && logits_for_rewinding_set[j]) {
+                        logits_final_f32_batch[j] = std::move(logits_for_rewinding_f32_batch[j]);
+                        logits_final_set[j] = true;
+                        logits_for_rewinding_set[j] = false;
+                    }
+                } else {
+                    // Nothing to rewind in ids; discard the stored checkpoint to avoid underflow.
+                    state_for_rewinding_batch[j].reset();
+                    logits_for_rewinding_set[j] = false;
+                    logits_for_rewinding_f32_batch[j].clear();
+                }
             }
         }
-        int ret = model->backend->register_batch_state_checkpoint(nodes_batch, state_batch, response_ids_raw_batch, logits);
-        if (ret) {
-            model->is_generating = false;
-            LOGE("failed to register batch state checkpoint\n");
-            return ret;
+        // Register per-batch checkpoints with correct logits for each original batch.
+        // Dynamic batch resizing reorders/overwrites the shared logits buffer, so we must not rely on it directly for finished batches.
+        for (int j = 0; j < batch_size; j++) {
+            if (response_ids_raw_batch[j].empty()) {
+                continue; // no new tokens generated => no new checkpoint needed
+            }
+
+            Tensor1D logits_view{};
+            if (logits_final_set[j]) {
+                logits_view = Tensor1D::make(logits_final_f32_batch[j].data(), TensorDType::F32, (size_t)num_vocab);
+            } else {
+                int active_slot = original_to_active_mapping[j];
+                if (active_slot >= 0) {
+                    logits_view = tensor1d_subview(logits, (size_t)active_slot * (size_t)num_vocab, (size_t)num_vocab);
+                } else {
+                    // Fallback: should be rare (e.g., ended before first batch decode but no final snapshot).
+                    logits_view = Tensor1D::make(prefill_logits_f32_batch[j].data(), TensorDType::F32, (size_t)num_vocab);
+                }
+            }
+
+            int r = model->backend->register_state_checkpoint_with_state(nodes_batch[j], response_ids_raw_batch[j], logits_view, state_batch[j]);
+            if (r) {
+                model->is_generating = false;
+                LOGE("failed to register state checkpoint for batch %d\n", j);
+                return r;
+            }
         }
     }
 
@@ -2770,7 +2887,7 @@ int Runtime::run_evaluation(int model_id, std::string source_text, std::string t
             return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
         }
         if (logits.dtype == TensorDType::F32) {
-            memcpy(logits_f32_copy.data(), logits.data_ptr, (size_t)vocab * sizeof(float));
+            std::copy_n(reinterpret_cast<const float*>(logits.data_ptr), vocab, logits_f32_copy.data());
         } else if (logits.dtype == TensorDType::F16) {
             const half_float::half* h = reinterpret_cast<const half_float::half*>(logits.data_ptr);
             for (int j = 0; j < vocab; ++j) logits_f32_copy[j] = (float)h[j];

@@ -98,7 +98,7 @@ int execution_provider::register_batch_state_checkpoint(std::vector<state_node*>
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
     if (logits.data_ptr == nullptr || logits.count < (size_t)(vocab_size * (int)batch_size)) {
-        LOGE("register_batch_state_checkpoint: invalid logits tensor");
+        LOGE("register_batch_state_checkpoint: invalid logits tensor, count: %d, expected: %d", logits.count, vocab_size * (int)batch_size);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
 
