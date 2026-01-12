@@ -476,14 +476,14 @@ int RwkvHttpServer::start() {
             }
         }
 
-        std::string prompt_text = impl_->runtime->apply_chat_template(impl_->model_id, inputs, enable_reasoning, roles);
+        std::string prompt_text = impl_->runtime->apply_chat_template(impl_->model_id, inputs, enable_reasoning, true, roles);
         int prompt_tokens = (int)impl_->runtime->tokenizer_encode(impl_->model_id, prompt_text).size();
 
         apply_sampling_params(*impl_->runtime, impl_->model_id, body);
 
         bool stream = body.value("stream", false);
         if (!stream) {
-            int ret = impl_->runtime->chat(impl_->model_id, inputs, max_tokens, nullptr, enable_reasoning, force_reasoning, force_lang, roles);
+            int ret = impl_->runtime->chat(impl_->model_id, inputs, max_tokens, nullptr, enable_reasoning, force_reasoning, true, force_lang, roles);
             if (ret != rwkvmobile::RWKV_SUCCESS) {
                 set_error_response(res, 500, "generation failed", "server_error");
                 return;
@@ -525,7 +525,7 @@ int RwkvHttpServer::start() {
 
         std::thread worker([this, ctx, state, id, created, inputs, roles, prompt_tokens, max_tokens, enable_reasoning, force_reasoning, force_lang]() {
             tls_stream_ctx = ctx.get();
-            int ret = impl_->runtime->chat(impl_->model_id, inputs, max_tokens, chat_callback, enable_reasoning, force_reasoning, force_lang, roles);
+            int ret = impl_->runtime->chat(impl_->model_id, inputs, max_tokens, chat_callback, enable_reasoning, force_reasoning, true, force_lang, roles);
             tls_stream_ctx = nullptr;
             int predicted_tokens = (int)impl_->runtime->get_response_buffer_ids(impl_->model_id).size();
             json timings = build_timings(*impl_->runtime, impl_->model_id, prompt_tokens, predicted_tokens);
@@ -716,7 +716,7 @@ int RwkvHttpServer::start() {
                 set_error_response(res, 400, "messages cannot be empty", "invalid_request_error");
                 return;
             }
-            std::string prompt_text = impl_->runtime->apply_chat_template(impl_->model_id, inputs, enable_reasoning, roles);
+            std::string prompt_text = impl_->runtime->apply_chat_template(impl_->model_id, inputs, enable_reasoning, true, roles);
             int prompt_tokens = (int)impl_->runtime->tokenizer_encode(impl_->model_id, prompt_text).size();
             inputs_batch.push_back(std::move(inputs));
             roles_batch.push_back(std::move(roles));
@@ -731,7 +731,7 @@ int RwkvHttpServer::start() {
         apply_sampling_params(*impl_->runtime, impl_->model_id, body);
 
         int batch_size = (int)inputs_batch.size();
-        int ret = impl_->runtime->chat_batch(impl_->model_id, inputs_batch, max_tokens, batch_size, nullptr, enable_reasoning, force_reasoning, force_lang, roles_batch);
+        int ret = impl_->runtime->chat_batch(impl_->model_id, inputs_batch, max_tokens, batch_size, nullptr, enable_reasoning, force_reasoning, true, force_lang, roles_batch);
         if (ret != rwkvmobile::RWKV_SUCCESS) {
             set_error_response(res, 500, "generation failed", "server_error");
             return;

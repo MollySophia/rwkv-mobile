@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> input_list = {
         argv[4],
     };
-    runtime.chat(model_id, input_list, 1024, callback, use_reasoning);
+    runtime.chat(model_id, input_list, 1024, callback, use_reasoning, false, true);
     std::cout << std::endl;
 
     std::cout << "Prefill speed: " << runtime.get_avg_prefill_speed(model_id) << " tokens/s" << std::endl;

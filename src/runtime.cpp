@@ -675,7 +675,7 @@ std::vector<int> Runtime::get_supported_batch_sizes(int model_id) {
     return model->backend->supported_batch_sizes;
 }
 
-std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning, std::vector<std::string> roles_map, bool append_input_prompt) {
+std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning, bool add_generation_prompt, std::vector<std::string> roles_map) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -730,15 +730,15 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         }
     }
 
-    if (!inputs.empty() && append_input_prompt) {
+    if (!inputs.empty() && add_generation_prompt) {
         std::string last_role = normalize_role(resolved_roles.back());
         if (last_role == model->user_role) {
             text += model->bos_token + model->response_role + ":";
             if (enable_reasoning) {
                 text += (space_after_roles ? " " : "") + model->thinking_token;
             }
-        } else {
-            // TODO
+        } else if (last_role == model->response_role) {
+            text += model->bos_token + model->user_role + ":";
         }
     }
     return text;
@@ -1085,7 +1085,7 @@ std::string Runtime::get_state_cache_info(int model_id) {
 
 int Runtime::chat(int model_id, std::vector<std::string> inputs,
     const int max_length, void (*callback)(const char *, const int, const char *),
-    bool enable_reasoning, bool force_reasoning, int force_lang, std::vector<std::string> roles_map) {
+    bool enable_reasoning, bool force_reasoning, bool add_generation_prompt, int force_lang, std::vector<std::string> roles_map) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1107,7 +1107,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
         LOGI("forcing output language to Chinese\n");
     }
 
-    auto input_text = apply_chat_template(model_id, inputs, enable_reasoning, roles_map);
+    auto input_text = apply_chat_template(model_id, inputs, enable_reasoning, add_generation_prompt, roles_map);
     LOGD("Applied chat template: \"%s\"\n", input_text.c_str());
     std::vector<int> text_ids = model->tokenizer->encode(input_text);
     std::string debug_msg = "text_ids: ";
@@ -1185,8 +1185,16 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     }
     _prefill_progress_finish(model_id);
 
-    model->response_buffer = input_text.substr(input_text.rfind(model->response_role + ":") + (model->response_role + ":").size());
     std::vector<int> response_ids_raw;
+    if (!add_generation_prompt) { // resuming generation cases, restore response buffer from input text
+        bool history_ends_with_user_message = inputs.size() % 2 != 0;
+        if (roles_map.size() == inputs.size()) {
+            history_ends_with_user_message = roles_map.back() == model->user_role;
+        }
+        auto role_for_parsing = !history_ends_with_user_message ? model->response_role : model->user_role;
+        model->response_buffer = input_text.substr(input_text.rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());
+        model->response_buffer_ids = model->tokenizer->encode(model->response_buffer);
+    }
     model->response_buffer_ids = model->tokenizer->encode(model->response_buffer);
     model->response_buffer_decoded_tokens = (int)model->response_buffer_ids.size();
     int ret;
@@ -1336,7 +1344,8 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
 int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs,
     const int max_length, const int batch_size,
     void (*callback_batch)(const int, const char **, const int*, const char **),
-    bool enable_reasoning, bool force_reasoning, int force_lang, std::vector<std::vector<std::string>> roles_map) {
+    bool enable_reasoning, bool force_reasoning, bool add_generation_prompt,
+    int force_lang, std::vector<std::vector<std::string>> roles_map) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1438,11 +1447,18 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         if (roles_map.size() == inputs.size() && roles_map[batch_idx].size() == input.size()) {
             batch_roles = roles_map[batch_idx];
         }
-        input_texts[batch_idx] = apply_chat_template(model_id, input, enable_reasoning, batch_roles);
+        input_texts[batch_idx] = apply_chat_template(model_id, input, enable_reasoning, add_generation_prompt, batch_roles);
         LOGD("Applied chat template for batch %d: \"%s\"\n", batch_idx, input_texts[batch_idx].c_str());
         text_ids_batch[batch_idx] = model->tokenizer->encode(input_texts[batch_idx]);
 
-        model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(model->response_role + ":") + (model->response_role + ":").size());;
+        if (!add_generation_prompt) { // resuming generation cases, restore response buffer from input text
+            bool history_ends_with_user_message = input.size() % 2 != 0;
+            if (batch_roles.size() == input.size()) {
+                history_ends_with_user_message = batch_roles.back() == model->user_role;
+            }
+            auto role_for_parsing = !history_ends_with_user_message ? model->response_role : model->user_role;
+            model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());;
+        }
         model->response_buffer_ids_batch[batch_idx].clear();
         model->response_buffer_eos_found_batch[batch_idx] = false;
         std::vector<int> tokens_to_prefill;
@@ -3534,7 +3550,7 @@ int Runtime::calculate_tokens_count_from_messages(int model_id, std::vector<std:
     if (model->tokenizer == nullptr || inputs.empty() || inputs[0].empty()) {
         return 0;
     }
-    std::string input_text = apply_chat_template(model_id, inputs, false, roles_map, false);
+    std::string input_text = apply_chat_template(model_id, inputs, false, false, roles_map);
     return (int)model->tokenizer->encode(input_text).size();
 }
 

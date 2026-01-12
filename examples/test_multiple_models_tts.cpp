@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Chatting with model 0..." << std::endl;
     char *input_list0[] = {msg0, nullptr, nullptr};
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id0, (const char **)input_list0, 1, 200, callback, false, false, FORCE_LANG_NONE);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id0, (const char **)input_list0, 1, 200, callback, false, false, true, FORCE_LANG_NONE);
     while (rwkvmobile_runtime_is_generating(runtime, model_id0)) {
         std::cout << ".";
         custom_sleep(1);
