@@ -158,15 +158,15 @@ class Rwkv7SelfAttention(nn.Module):
     def forward(self, x, state1, state2, v_first):
         last_x = x
         x = self.ln_1(x)
-        batch_size, seq_length, _ = x.size()
+        batch_size, seq_length, hidden_size = x.size()
         assert batch_size == 1
         if seq_length == 1:
             state1_out = x
             sx = self.sub_shifted(state1, x)
         else:
-            past = torch.cat([state1.unsqueeze(1), x[:, :-1, :]], dim=1)
+            past = torch.cat([state1, x[:, :-1, :]], dim=1)
             sx = self.sub_shifted(past, x)
-            state1_out = x[:, -1, :]
+            state1_out = x[:, -1, :] + torch.finfo(torch.float32).smallest_normal
 
         xr = x + self.x_r * sx
         xw = x + self.x_w * sx
@@ -184,11 +184,11 @@ class Rwkv7SelfAttention(nn.Module):
 
         kk = key * self.k_k
         if self.model_args is not None and self.model_args.USE_ONNX_L2NORM:
-            kk = torch.ops.customop.l2norm(kk.view(seq_length, self.num_heads, self.head_size)).view(-1)
+            kk = torch.ops.customop.l2norm(kk.view(seq_length, self.num_heads, self.head_size)).view(batch_size, seq_length, hidden_size)
         elif self.model_args is not None and self.model_args.USE_ONNX_REDUCE_L2:
-            kk = l2norm(kk.view(seq_length, self.num_heads, self.head_size)).view(-1)
+            kk = l2norm(kk.view(seq_length, self.num_heads, self.head_size)).view(batch_size, seq_length, hidden_size)
         else:
-            kk = torch.nn.functional.normalize(kk.view(seq_length, self.num_heads, self.head_size), dim=-1, p=2.0, eps=1e-6).view(-1)
+            kk = torch.nn.functional.normalize(kk.view(seq_length, self.num_heads, self.head_size), dim=-1, p=2.0, eps=1e-6).view(batch_size, seq_length, hidden_size)
         key = key * (1 + (a-1) * self.k_a)
 
         if self.layer_id == 0:
@@ -211,10 +211,29 @@ class Rwkv7SelfAttention(nn.Module):
                                                 b.view(seq_length, self.num_heads, 1, self.head_size),
                                                 state2.squeeze())
         else:
-            vk = value.view(seq_length, self.num_heads, self.head_size, 1) @ key.view(seq_length, self.num_heads, 1, self.head_size)
-            ab = (-kk).view(self.num_heads, self.head_size, 1) @ (kk * a).view(self.num_heads, 1, self.head_size)
-            state2_out = state2 * time_decay + (state2 @ ab) + vk
-            x = (state2_out @ receptance.view(seq_length, self.num_heads, self.head_size, 1)).view(seq_length, self.num_heads, 1, self.head_size)
+            b = (kk * a).view(seq_length, self.num_heads, 1, self.head_size)
+            a = (-kk).view(seq_length, self.num_heads, self.head_size, 1)
+            v = value.view(seq_length, self.num_heads, self.head_size, 1)
+            k = key.view(seq_length, self.num_heads, 1, self.head_size)
+            r = receptance.view(seq_length, self.num_heads, self.head_size, 1)
+            if seq_length == 1:
+                vk = v @ k
+                state2_out = state2 * time_decay + state2 @ a @ b + vk
+                x = (state2_out @ r).view(seq_length, self.num_heads, 1, self.head_size)
+            else:
+                x_list = []
+                state2_out = state2
+                v_list = torch.split(v, 1, dim=0)
+                k_list = torch.split(k, 1, dim=0)
+                r_list = torch.split(r, 1, dim=0)
+                a_list = torch.split(a, 1, dim=0)
+                b_list = torch.split(b, 1, dim=0)
+                time_decay_list = torch.split(time_decay, 1, dim=0)
+                for i in range(seq_length):
+                    vk = v_list[i] @ k_list[i]
+                    state2_out = state2_out * time_decay_list[i] + state2_out @ a_list[i] @ b_list[i] + vk
+                    x_list.append(state2_out @ r_list[i])
+                x = torch.cat(x_list, dim=0)
 
         # group_norm
         x = self.ln_x(x).view(batch_size, seq_length, self.hidden_size)
@@ -261,9 +280,10 @@ class Rwkv7FeedForward(nn.Module):
             state_out = x
             sx = self.sub_shifted(state, x)
         else:
-            past = torch.cat([state.unsqueeze(1), x[:, :-1, :]], dim=1)
+            past = torch.cat([state, x[:, :-1, :]], dim=1)
             sx = self.sub_shifted(past, x)
-            state_out = x[:, -1, :]
+            # mystery trick for coreml
+            state_out = x[:, -1, :] + torch.finfo(torch.float32).smallest_normal
 
         xk = self.add_x_k(x, self.mul_x_k(sx, self.x_k))
 

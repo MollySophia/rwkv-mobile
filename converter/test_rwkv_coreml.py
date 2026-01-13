@@ -10,6 +10,7 @@ parser.add_argument('model', type=Path, help='Path to RWKV mlpackage file')
 parser_args = parser.parse_args()
 
 model = ct.models.MLModel(str(parser_args.model), compute_units=ct.ComputeUnit.CPU_AND_NE)
+model_prefill = ct.models.MLModel(str(parser_args.model), compute_units=ct.ComputeUnit.CPU_AND_NE, function_name="prefill")
 
 tokenizer = AutoTokenizer.from_pretrained("RWKV/rwkv-5-world-1b5", trust_remote_code=True)
 
@@ -48,7 +49,7 @@ if not stateful:
 else:
     state = model.make_state()
 
-prompt = "The Eiffel Tower is in the city of"
+prompt = "User: Where is the Eiffel Tower?\n\nAssistant: The Eiffel Tower is in the city of"
 print(prompt, end='', flush=True)
 
 def sample_logits(out, temperature=1.0, top_p=0.8, top_k=128):
@@ -70,26 +71,62 @@ def sample_logits(out, temperature=1.0, top_p=0.8, top_k=128):
     out = np.random.choice(a=len(probs), p=probs)
     return out
 
-for id in tokenizer.encode(prompt):
-    inputs['in0'][0][0] = id
-    if not stateful:
-        outputs = model.predict(inputs)
-        if merge_states:
-            inputs['state_tokenshift_in'] = outputs['state_tokenshift_out']
-            inputs['state_wkv_in'] = outputs['state_wkv_out']
-        else:
-            for i in range(num_layers):
-                inputs[f'state_{3*i}_in'] = outputs[f'state_{3*i}_out']
-                inputs[f'state_{3*i+1}_in'] = outputs[f'state_{3*i+1}_out']
-                inputs[f'state_{3*i+2}_in'] = outputs[f'state_{3*i+2}_out']
-    else:
-        outputs = model.predict(inputs, state=state)
+prompt_chunk_length = 16
+prompt_tokens = tokenizer.encode(prompt)
+# for id in prompt_tokens:
+#     inputs['in0'][0][0] = id
+#     if not stateful:
+#         outputs = model.predict(inputs)
+#         if merge_states:
+#             inputs['state_tokenshift_in'] = outputs['state_tokenshift_out']
+#             inputs['state_wkv_in'] = outputs['state_wkv_out']
+#         else:
+#             for i in range(num_layers):
+#                 inputs[f'state_{3*i}_in'] = outputs[f'state_{3*i}_out']
+#                 inputs[f'state_{3*i+1}_in'] = outputs[f'state_{3*i+1}_out']
+#                 inputs[f'state_{3*i+2}_in'] = outputs[f'state_{3*i+2}_out']
+#     else:
+#         outputs = model.predict(inputs, state=state)
+for i in range(0, len(prompt_tokens), prompt_chunk_length):
+    length = min(prompt_chunk_length, len(prompt_tokens) - i)
+    chunk = prompt_tokens[i:i+length]
 
+    if length == prompt_chunk_length:
+        inputs['in0'] = np.array([chunk]).astype(np.float32)
+        if not stateful:
+            outputs = model_prefill.predict(inputs)
+            if merge_states:
+                inputs['state_tokenshift_in'] = outputs['state_tokenshift_out']
+                inputs['state_wkv_in'] = outputs['state_wkv_out']
+            else:
+                for i in range(num_layers):
+                    inputs[f'state_{3*i}_in'] = outputs[f'state_{3*i}_out']
+                    inputs[f'state_{3*i+1}_in'] = outputs[f'state_{3*i+1}_out']
+                    inputs[f'state_{3*i+2}_in'] = outputs[f'state_{3*i+2}_out']
+        else:
+            outputs = model_prefill.predict(inputs, state=state)
+    else:
+        for id in chunk:
+            inputs['in0'] = np.array([[id]]).astype(np.float32)
+            if not stateful:
+                outputs = model.predict(inputs)
+                if merge_states:
+                    inputs['state_tokenshift_in'] = outputs['state_tokenshift_out']
+                    inputs['state_wkv_in'] = outputs['state_wkv_out']
+                else:
+                    for i in range(num_layers):
+                        inputs[f'state_{3*i}_in'] = outputs[f'state_{3*i}_out']
+                        inputs[f'state_{3*i+1}_in'] = outputs[f'state_{3*i+1}_out']
+                        inputs[f'state_{3*i+2}_in'] = outputs[f'state_{3*i+2}_out']
+            else:
+                outputs = model.predict(inputs, state=state)
+
+outputs['logits'] = outputs['logits'][:,-1,:]
 # calculate the durations
 durations = []
 for i in range(128):
-    # token_id = np.argmax(outputs['logits'][0])
-    token_id = sample_logits(outputs['logits'][0])
+    token_id = np.argmax(outputs['logits'][0])
+    # token_id = sample_logits(outputs['logits'][0])
     inputs['in0'][0][0] = token_id
     print(tokenizer.decode([token_id]), end='', flush=True)
     if not stateful:

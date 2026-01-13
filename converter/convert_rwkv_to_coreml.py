@@ -39,6 +39,8 @@ args = model.args
 
 merge_states = False
 
+PREFILL_SEQ_LENGTH = 16
+
 # Imports for custom ops (not all may be required)
 from coremltools.converters.mil.mil.ops.defs._op_reqs import register_op
 from coremltools.converters.mil.mil import (
@@ -197,37 +199,14 @@ def wkv7(context, node):
     context.add(state_out, state_output_name)
 
 if parser_args.stateful:
-    inputs = [torch.tensor([[0]*1 for _ in range(1)], dtype=torch.int32).to(model.device)]
+    inputs_decode = [torch.tensor([[0]*1 for _ in range(1)], dtype=torch.int32).to(model.device)]
+    inputs_prefill = [torch.tensor([[0]*PREFILL_SEQ_LENGTH for _ in range(1)], dtype=torch.int32).to(model.device)]
 else:
-    inputs = get_dummy_input_for_rwkv_causal_llm(1, 1, model.device, model.args, merged_states=merge_states)
+    inputs_decode = get_dummy_input_for_rwkv_causal_llm(1, 1, model.device, model.args, merged_states=merge_states)
+    inputs_prefill = get_dummy_input_for_rwkv_causal_llm(1, PREFILL_SEQ_LENGTH, model.device, model.args, merged_states=merge_states)
 
 tokenizer = AutoTokenizer.from_pretrained("RWKV/rwkv-5-world-1b5", trust_remote_code=True)
 prompt = "The Eiffel Tower is in the city of"
-
-# print(prompt, end='', flush=True)
-# for token in tokenizer.encode(prompt):
-#     inputs[0][0] = token
-#     # logits, state = model(*inputs)
-#     logits = model(inputs[0])
-#     # inputs[1], inputs[2] = state
-#     # for i in range(args.n_layer):
-#     #     inputs[3*i+1] = state[3*i]
-#     #     inputs[3*i+2] = state[3*i+1]
-#     #     inputs[3*i+3] = state[3*i+2]
-
-# for i in range(128):
-#     token = np.argmax(logits[0])
-#     print(tokenizer.decode([token]), end='', flush=True)
-#     inputs[0][0] = token
-#     logits = model(inputs[0])
-#     # logits, state = model(*inputs)
-#     # # inputs[1], inputs[2] = state
-#     # for i in range(args.n_layer):
-#     #     inputs[3*i+1] = state[3*i]
-#     #     inputs[3*i+2] = state[3*i+1]
-#     #     inputs[3*i+3] = state[3*i+2]
-
-# quit()
 
 if parser_args.int4:
     config = PostTrainingQuantizerConfig.from_dict(
@@ -265,103 +244,117 @@ elif parser_args.lut8:
     model = palettizer.compress()
 elif parser_args.lut4:
     palettization_config_dict = {
-        "global_config": {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 64},
+        "global_config": {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 32},
     }
     palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
     palettizer = PostTrainingPalettizer(model, palettization_config)
     model = palettizer.compress()
 
-model = torch.jit.trace(model, example_inputs=inputs)
+def _build_output_name(mode_tag: str) -> str:
+    output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
+    output_name += f'_{mode_tag}'
+    if parser_args.stateful:
+        output_name += '_stateful'
+    if merge_states:
+        output_name += '_mergestates'
+    if parser_args.int4:
+        output_name += '_int4'
+    elif parser_args.int8:
+        output_name += '_int8'
+    elif parser_args.lut8:
+        output_name += '_lut8'
+    elif parser_args.lut4:
+        output_name += '_lut4'
+    if model_args.USE_CUSTOM_WKV:
+        output_name += '_customop'
+    return output_name
 
-ct_inputs = [ct.TensorType('in0', inputs[0].shape, dtype=np.int32)]
-dtype = np.float16
-if not parser_args.stateful:
-    if not merge_states:
-        ct_inputs += [ct.TensorType(f'state_{i}_in', inputs[i+1].shape, dtype=dtype) for i in range(len(inputs) - 1)]
-    else:
-        ct_inputs += [ct.TensorType(f'state_tokenshift_in', inputs[1].shape, dtype=dtype)]
-        ct_inputs += [ct.TensorType(f'state_wkv_in', inputs[2].shape, dtype=dtype)]
-ct_outputs = [ct.TensorType(name='logits', dtype=dtype)]
-if not parser_args.stateful:
-    if not merge_states:
-        ct_outputs += [ct.TensorType(f'state_{i}_out', dtype=dtype) for i in range(len(inputs) - 1)]
-    else:
-        ct_outputs += [ct.TensorType(f'state_tokenshift_out', dtype=dtype)]
-        ct_outputs += [ct.TensorType(f'state_wkv_out', dtype=dtype)]
+def _build_coreml_io(inputs):
+    # Token ids input is always int32.
+    ct_inputs = [ct.TensorType('in0', inputs[0].shape, dtype=np.int32)]
+    dtype = np.float16
+    if not parser_args.stateful:
+        if not merge_states:
+            ct_inputs += [
+                ct.TensorType(f'state_{i}_in', inputs[i + 1].shape, dtype=dtype)
+                for i in range(len(inputs) - 1)
+            ]
+        else:
+            ct_inputs += [ct.TensorType('state_tokenshift_in', inputs[1].shape, dtype=dtype)]
+            ct_inputs += [ct.TensorType('state_wkv_in', inputs[2].shape, dtype=dtype)]
+    ct_outputs = [ct.TensorType(name='logits', dtype=dtype)]
+    if not parser_args.stateful:
+        if not merge_states:
+            ct_outputs += [ct.TensorType(f'state_{i}_out', dtype=dtype) for i in range(len(inputs) - 1)]
+        else:
+            ct_outputs += [ct.TensorType('state_tokenshift_out', dtype=dtype)]
+            ct_outputs += [ct.TensorType('state_wkv_out', dtype=dtype)]
 
-output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
-if parser_args.stateful:
-    output_name += '_stateful'
-if merge_states:
-    output_name += '_mergestates'
-if parser_args.int4:
-    output_name += '_int4'
-elif parser_args.int8:
-    output_name += '_int8'
-elif parser_args.lut8:
-    output_name += '_lut8'
-elif parser_args.lut4:
-    output_name += '_lut4'
 
-if model_args.USE_CUSTOM_WKV:
-    output_name += '_customop'
+    return ct_inputs, ct_outputs
 
-mlmodel = None
-if parser_args.stateful:
-    states = [
-        ct.StateType(
-            wrapped_type=ct.TensorType(
-                shape=(2, args.n_layer, args.n_embd),
+
+def convert_and_save_coreml(jit_model, inputs, mode_tag: str):
+    ct_inputs, ct_outputs = _build_coreml_io(inputs)
+    output_name = _build_output_name(mode_tag)
+
+    if parser_args.stateful:
+        states = [
+            ct.StateType(
+                wrapped_type=ct.TensorType(
+                    shape=(2, args.n_layer, args.n_embd),
+                ),
+                name="state_tokenshift",
             ),
-            name=f"state_tokenshift",
-        ),
-        ct.StateType(
-            wrapped_type=ct.TensorType(
-                shape=(args.n_layer, args.n_head, args.head_size, args.head_size),
+            ct.StateType(
+                wrapped_type=ct.TensorType(
+                    shape=(args.n_layer, args.n_head, args.head_size, args.head_size),
+                ),
+                name="state_wkv",
             ),
-            name=f"state_wkv",
-        ),
-    ]
-    # states = []
-    # for i in range(args.n_layer):
-    #     states.append(ct.StateType(
-    #         wrapped_type=ct.TensorType(
-    #             shape=(1, 1, args.n_embd),
-    #         ),
-    #         name=f"state_att_tokenshift_{i}",
-    #     ))
-    #     states.append(ct.StateType(
-    #         wrapped_type=ct.TensorType(
-    #             shape=(1, args.n_head, args.head_size, args.head_size),
-    #         ),
-    #         name=f"state_wkv_{i}",
-    #     ))
-    #     states.append(ct.StateType(
-    #         wrapped_type=ct.TensorType(
-    #             shape=(1, 1, args.n_embd),
-    #         ),
-    #         name=f"state_ffn_tokenshift_{i}",
-    #     ))
-    mlmodel = ct.convert(
-        model,
-        inputs=ct_inputs,
-        outputs=ct_outputs,
-        states=states,
-        minimum_deployment_target=ct.target.iOS18,
-        compute_units=ct.ComputeUnit.CPU_AND_NE
-    )
-    # test
-    # state = mlmodel.make_state()
+        ]
+        mlmodel = ct.convert(
+            jit_model,
+            inputs=ct_inputs,
+            outputs=ct_outputs,
+            states=states,
+            minimum_deployment_target=ct.target.iOS18,
+            compute_units=ct.ComputeUnit.CPU_AND_NE,
+        )
+    else:
+        mlmodel = ct.convert(
+            jit_model,
+            inputs=ct_inputs,
+            outputs=ct_outputs,
+            minimum_deployment_target=ct.target.iOS18,
+            compute_units=ct.ComputeUnit.CPU_AND_NE,
+        )
 
     mlmodel.save(f'{output_name}.mlpackage')
-else:
-    mlmodel = ct.convert(
-        model,
-        inputs=ct_inputs,
-        outputs=ct_outputs,
-        minimum_deployment_target=ct.target.iOS18,
-        compute_units=ct.ComputeUnit.CPU_AND_NE
-    )
+    return output_name
 
-    mlmodel.save(f'{output_name}.mlpackage')
 
+# Export decode & prefill models separately (different sequence length traces).
+jit_decode = torch.jit.trace(model, example_inputs=inputs_decode)
+convert_and_save_coreml(jit_decode, inputs_decode, mode_tag='decode')
+del jit_decode
+
+jit_prefill = torch.jit.trace(model, example_inputs=inputs_prefill)
+convert_and_save_coreml(jit_prefill, inputs_prefill, mode_tag='prefill')
+del jit_prefill
+
+desc = ct.utils.MultiFunctionDescriptor()
+
+desc.add_function(
+    _build_output_name('decode') + '.mlpackage',
+    src_function_name="main",
+    target_function_name="decode"
+)
+desc.add_function(
+    _build_output_name('prefill') + '.mlpackage',
+    src_function_name="main",
+    target_function_name="prefill"
+)
+
+desc.default_function_name = "decode"
+ct.utils.save_multifunction(desc, _build_output_name('combined') + '.mlpackage')
