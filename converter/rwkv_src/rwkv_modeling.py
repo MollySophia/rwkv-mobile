@@ -175,30 +175,30 @@ class RWKV_RNN(torch.nn.Module):
 class RWKV_RNN_Stateful(RWKV_RNN):
     def __init__(self, args, chunks=1, chunk_idx=0):
         super().__init__(args, chunks, chunk_idx)
-        # self.register_buffer('state_tokenshift', torch.zeros(2, self.args.n_layer, self.args.n_embd))
-        # self.register_buffer('state_wkv', torch.zeros(self.args.n_layer, self.args.n_head, self.args.head_size, self.args.head_size))
-        for i in range(self.args.n_layer):
-            self.register_buffer(f'state_att_tokenshift_{i}', torch.zeros(1, 1, self.args.n_embd))
-            self.register_buffer(f'state_wkv_{i}', torch.zeros(1, self.args.n_head, self.args.head_size, self.args.head_size))
-            self.register_buffer(f'state_ffn_tokenshift_{i}', torch.zeros(1, 1, self.args.n_embd))
+        self.register_buffer('state_tokenshift', torch.zeros(2, self.args.n_layer, self.args.n_embd))
+        self.register_buffer('state_wkv', torch.zeros(self.args.n_layer, self.args.n_head, self.args.head_size, self.args.head_size))
+        # for i in range(self.args.n_layer):
+        #     self.register_buffer(f'state_att_tokenshift_{i}', torch.zeros(1, 1, self.args.n_embd))
+        #     self.register_buffer(f'state_wkv_{i}', torch.zeros(1, self.args.n_head, self.args.head_size, self.args.head_size))
+        #     self.register_buffer(f'state_ffn_tokenshift_{i}', torch.zeros(1, 1, self.args.n_embd))
 
     def forward(self, in0):
         states = []
         for i in range(self.args.n_layer):
-            # states.append(self.state_tokenshift[0:1, i:i+1, :])
-            # states.append(self.state_wkv[i:i+1, :, :, :])
-            # states.append(self.state_tokenshift[1:2, i:i+1, :])
-            states.append(self._buffers[f'state_att_tokenshift_{i}'])
-            states.append(self._buffers[f'state_wkv_{i}'])
-            states.append(self._buffers[f'state_ffn_tokenshift_{i}'])
+            states.append(self.state_tokenshift[0:1, i:i+1, :])
+            states.append(self.state_wkv[i:i+1, :, :, :])
+            states.append(self.state_tokenshift[1:2, i:i+1, :])
+            # states.append(self._buffers[f'state_att_tokenshift_{i}'])
+            # states.append(self._buffers[f'state_wkv_{i}'])
+            # states.append(self._buffers[f'state_ffn_tokenshift_{i}'])
         x, states = super().forward(in0, states)
         for i in range(self.args.n_layer):
-            # self.state_tokenshift[0:1, i:i+1, :] = states[3*i]
-            # self.state_wkv[i:i+1, :, :, :] = states[3*i+1]
-            # self.state_tokenshift[1:2, i:i+1, :] = states[3*i+2]
-            self._buffers[f'state_att_tokenshift_{i}'] = states[3*i]
-            self._buffers[f'state_wkv_{i}'] = states[3*i+1]
-            self._buffers[f'state_ffn_tokenshift_{i}'] = states[3*i+2]
+            self.state_tokenshift[0:1, i:i+1, :] = states[3*i]
+            self.state_wkv[i:i+1, :, :, :] = states[3*i+1]
+            self.state_tokenshift[1:2, i:i+1, :] = states[3*i+2]
+            # self._buffers[f'state_att_tokenshift_{i}'] = states[3*i]
+            # self._buffers[f'state_wkv_{i}'] = states[3*i+1]
+            # self._buffers[f'state_ffn_tokenshift_{i}'] = states[3*i+2]
         return x
 
 def make_chunks(chunks, args):

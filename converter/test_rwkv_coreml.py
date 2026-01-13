@@ -7,7 +7,6 @@ import time
 
 parser = argparse.ArgumentParser(description='Test coreml model')
 parser.add_argument('model', type=Path, help='Path to RWKV mlpackage file')
-parser.add_argument('--stateful', action='store_true', help='Use stateful model')
 parser_args = parser.parse_args()
 
 model = ct.models.MLModel(str(parser_args.model), compute_units=ct.ComputeUnit.CPU_AND_NE)
@@ -19,27 +18,33 @@ spec = model.get_spec()
 inputs = {'in0': np.array([[0.0]])}
 state = None
 
-if not parser_args.stateful:
-    # num_layers = spec.description.input[2].type.multiArrayType.shape[0]
-    # num_heads = spec.description.input[2].type.multiArrayType.shape[1]
-    # head_size = spec.description.input[2].type.multiArrayType.shape[2]
-    # hidden_size = spec.description.input[1].type.multiArrayType.shape[2]
+merge_states = True if "mergestates" in str(parser_args.model) else False
+stateful = True if "stateful" in str(parser_args.model) else False
 
-    num_layers = len(spec.description.input) // 3
-    num_heads = spec.description.input[2].type.multiArrayType.shape[1]
-    head_size = spec.description.input[2].type.multiArrayType.shape[2]
-    hidden_size = spec.description.input[1].type.multiArrayType.shape[2]
+if not stateful:
+    if merge_states:
+        num_layers = spec.description.input[2].type.multiArrayType.shape[0]
+        num_heads = spec.description.input[2].type.multiArrayType.shape[1]
+        head_size = spec.description.input[2].type.multiArrayType.shape[2]
+        hidden_size = spec.description.input[1].type.multiArrayType.shape[2]
+    else:
+        num_layers = len(spec.description.input) // 3
+        num_heads = spec.description.input[2].type.multiArrayType.shape[1]
+        head_size = spec.description.input[2].type.multiArrayType.shape[2]
+        hidden_size = spec.description.input[1].type.multiArrayType.shape[2]
 
     assert head_size == hidden_size // num_heads
 
     print(f'num_layers: {num_layers}, hidden_size: {hidden_size}, num_heads: {num_heads}')
 
-    # inputs = {'in0': np.array([[0.0]]), 'state_tokenshift_in': np.zeros(spec.description.input[1].type.multiArrayType.shape), 'state_wkv_in': np.zeros(spec.description.input[2].type.multiArrayType.shape)}
-    inputs = {'in0': np.array([[0.0]])}
-    for i in range(num_layers):
-        inputs[f'state_{3*i}_in'] = np.zeros(spec.description.input[3*i+1].type.multiArrayType.shape)
-        inputs[f'state_{3*i+1}_in'] = np.zeros(spec.description.input[3*i+2].type.multiArrayType.shape)
-        inputs[f'state_{3*i+2}_in'] = np.zeros(spec.description.input[3*i+3].type.multiArrayType.shape)
+    if merge_states:
+        inputs = {'in0': np.array([[0.0]]), 'state_tokenshift_in': np.zeros(spec.description.input[1].type.multiArrayType.shape), 'state_wkv_in': np.zeros(spec.description.input[2].type.multiArrayType.shape)}
+    else:
+        inputs = {'in0': np.array([[0.0]])}
+        for i in range(num_layers):
+            inputs[f'state_{3*i}_in'] = np.zeros(spec.description.input[3*i+1].type.multiArrayType.shape)
+            inputs[f'state_{3*i+1}_in'] = np.zeros(spec.description.input[3*i+2].type.multiArrayType.shape)
+            inputs[f'state_{3*i+2}_in'] = np.zeros(spec.description.input[3*i+3].type.multiArrayType.shape)
 else:
     state = model.make_state()
 
@@ -67,14 +72,16 @@ def sample_logits(out, temperature=1.0, top_p=0.8, top_k=128):
 
 for id in tokenizer.encode(prompt):
     inputs['in0'][0][0] = id
-    if not parser_args.stateful:
+    if not stateful:
         outputs = model.predict(inputs)
-        # inputs['state_tokenshift_in'] = outputs['state_tokenshift_out']
-        # inputs['state_wkv_in'] = outputs['state_wkv_out']
-        for i in range(num_layers):
-            inputs[f'state_{3*i}_in'] = outputs[f'state_{3*i}_out']
-            inputs[f'state_{3*i+1}_in'] = outputs[f'state_{3*i+1}_out']
-            inputs[f'state_{3*i+2}_in'] = outputs[f'state_{3*i+2}_out']
+        if merge_states:
+            inputs['state_tokenshift_in'] = outputs['state_tokenshift_out']
+            inputs['state_wkv_in'] = outputs['state_wkv_out']
+        else:
+            for i in range(num_layers):
+                inputs[f'state_{3*i}_in'] = outputs[f'state_{3*i}_out']
+                inputs[f'state_{3*i+1}_in'] = outputs[f'state_{3*i+1}_out']
+                inputs[f'state_{3*i+2}_in'] = outputs[f'state_{3*i+2}_out']
     else:
         outputs = model.predict(inputs, state=state)
 
@@ -85,16 +92,18 @@ for i in range(128):
     token_id = sample_logits(outputs['logits'][0])
     inputs['in0'][0][0] = token_id
     print(tokenizer.decode([token_id]), end='', flush=True)
-    if not parser_args.stateful:
-        # inputs['state_tokenshift_in'] = outputs['state_tokenshift_out']
-        # inputs['state_wkv_in'] = outputs['state_wkv_out']
-        for i in range(num_layers):
-            inputs[f'state_{3*i}_in'] = outputs[f'state_{3*i}_out']
-            inputs[f'state_{3*i+1}_in'] = outputs[f'state_{3*i+1}_out']
-            inputs[f'state_{3*i+2}_in'] = outputs[f'state_{3*i+2}_out']
+    if not stateful:
+        if merge_states:
+            inputs['state_tokenshift_in'] = outputs['state_tokenshift_out']
+            inputs['state_wkv_in'] = outputs['state_wkv_out']
+        else:
+            for i in range(num_layers):
+                inputs[f'state_{3*i}_in'] = outputs[f'state_{3*i}_out']
+                inputs[f'state_{3*i+1}_in'] = outputs[f'state_{3*i+1}_out']
+                inputs[f'state_{3*i+2}_in'] = outputs[f'state_{3*i+2}_out']
 
     start_time = time.time()
-    if not parser_args.stateful:
+    if not stateful:
         outputs = model.predict(inputs)
     else:
         outputs = model.predict(inputs, state=state)

@@ -308,40 +308,40 @@ if model_args.USE_CUSTOM_WKV:
 
 mlmodel = None
 if parser_args.stateful:
-    # states = [
-    #     ct.StateType(
+    states = [
+        ct.StateType(
+            wrapped_type=ct.TensorType(
+                shape=(2, args.n_layer, args.n_embd),
+            ),
+            name=f"state_tokenshift",
+        ),
+        ct.StateType(
+            wrapped_type=ct.TensorType(
+                shape=(args.n_layer, args.n_head, args.head_size, args.head_size),
+            ),
+            name=f"state_wkv",
+        ),
+    ]
+    # states = []
+    # for i in range(args.n_layer):
+    #     states.append(ct.StateType(
     #         wrapped_type=ct.TensorType(
-    #             shape=(2, args.n_layer, args.n_embd),
+    #             shape=(1, 1, args.n_embd),
     #         ),
-    #         name=f"state_tokenshift",
-    #     ),
-    #     ct.StateType(
+    #         name=f"state_att_tokenshift_{i}",
+    #     ))
+    #     states.append(ct.StateType(
     #         wrapped_type=ct.TensorType(
-    #             shape=(args.n_layer, args.n_head, args.head_size, args.head_size),
+    #             shape=(1, args.n_head, args.head_size, args.head_size),
     #         ),
-    #         name=f"state_wkv",
-    #     ),
-    # ]
-    states = []
-    for i in range(args.n_layer):
-        states.append(ct.StateType(
-            wrapped_type=ct.TensorType(
-                shape=(1, 1, args.n_embd),
-            ),
-            name=f"state_att_tokenshift_{i}",
-        ))
-        states.append(ct.StateType(
-            wrapped_type=ct.TensorType(
-                shape=(1, args.n_head, args.head_size, args.head_size),
-            ),
-            name=f"state_wkv_{i}",
-        ))
-        states.append(ct.StateType(
-            wrapped_type=ct.TensorType(
-                shape=(1, 1, args.n_embd),
-            ),
-            name=f"state_ffn_tokenshift_{i}",
-        ))
+    #         name=f"state_wkv_{i}",
+    #     ))
+    #     states.append(ct.StateType(
+    #         wrapped_type=ct.TensorType(
+    #             shape=(1, 1, args.n_embd),
+    #         ),
+    #         name=f"state_ffn_tokenshift_{i}",
+    #     ))
     mlmodel = ct.convert(
         model,
         inputs=ct_inputs,
