@@ -1,6 +1,3 @@
-#include <fstream>
-#include <filesystem>
-
 #include "backend.h"
 #include "coreml_rwkv_backend.h"
 #include "commondef.h"
@@ -69,6 +66,33 @@ int coreml_rwkv_backend::free_state(std::any state) {
         state_vec[i].clear();
     }
     state_vec.clear();
+    return RWKV_SUCCESS;
+}
+
+int coreml_rwkv_backend::load_raw_states(std::vector<std::vector<half_float::half>> states) {
+    rwkv_coreml_zero_state(ctx);
+    std::vector<half_float::half> wkv_state(states.size() * states[0].size());
+    for (int i = 0; i < states.size(); i++) {
+        memcpy(wkv_state.data() + i * states[i].size(), states[i].data(), states[i].size() * sizeof(half_float::half));
+    }
+    rwkv_coreml_set_wkv_state(ctx, wkv_state);
+    return RWKV_SUCCESS;
+}
+
+int coreml_rwkv_backend::serialize_runtime_state(std::any state, std::vector<uint8_t> &data) {
+    if (!state.has_value()) return RWKV_ERROR_IO;
+    auto new_state = std::any_cast<std::vector<std::vector<uint8_t>>>(state);
+    data = new_state[0];
+    data.insert(data.end(), new_state[1].begin(), new_state[1].end());
+    return RWKV_SUCCESS;
+}
+
+int coreml_rwkv_backend::deserialize_runtime_state(std::vector<uint8_t> &data, std::any &state) {
+    std::vector<std::vector<uint8_t>> new_state(2);
+    auto state_wkv_bytes = rwkv_coreml_get_state_wkv_bytes(ctx);
+    new_state[0] = std::vector<uint8_t>(data.begin(), data.begin() + state_wkv_bytes);
+    new_state[1] = std::vector<uint8_t>(data.begin() + state_wkv_bytes, data.end());
+    state = std::any(new_state);
     return RWKV_SUCCESS;
 }
 

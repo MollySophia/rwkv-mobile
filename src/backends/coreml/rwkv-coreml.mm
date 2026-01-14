@@ -10,6 +10,7 @@
 
 #include <stdlib.h>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 #include "half.hpp"
 
@@ -26,6 +27,10 @@ struct rwkv_coreml_context {
     rwkv_coreml_stateful_implState * state = nullptr;
     rwkv_coreml_stateful_implOutput * out_prefill = nullptr;
     rwkv_coreml_stateful_implOutput * out_decode = nullptr;
+
+    // Exact byte sizes of CoreML state buffers (including any padding due to strides/alignment).
+    size_t state_wkv_bytes = 0;
+    size_t state_tokenshift_bytes = 0;
 };
 
 NSArray<NSNumber *> * get_shape_by_name(NSDictionary *model_inputs, NSString *name) {
@@ -78,7 +83,7 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
     rwkv_coreml_stateful_impl * model_prefill = [[rwkv_coreml_stateful_impl alloc] initWithMLModel:mlmodel_prefill];
     ctx->model_prefill = CFBridgingRetain(model_prefill);
 
-    ctx->state = [model_decode newState];
+    ctx->state = [(__bridge rwkv_coreml_stateful_impl *) ctx->model_decode newState];
     __block MLMultiArray *state_wkv;
     [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
         state_wkv = buffer;
@@ -104,6 +109,20 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
         return NULL;
     }
 
+    // Cache exact byte sizes for state buffers (do NOT assume shapes).
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
+        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
+            (void)bytes;
+            ctx->state_wkv_bytes = (size_t)size;
+        }];
+    }];
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_tokenshift handler:^(MLMultiArray *buffer) {
+        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
+            (void)bytes;
+            ctx->state_tokenshift_bytes = (size_t)size;
+        }];
+    }];
+
     NSArray<NSNumber *> *logits_out_shape = get_shape_by_name(model_outputs, @"logits");
     if (logits_out_shape == nil) {
         NSLog(@"Error getting logits shape");
@@ -111,7 +130,8 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
     }
     ctx->vocab_size = [logits_out_shape[2] intValue];
 
-    NSLog(@"num_heads: %d, head_dim: %d, vocab_size: %d, n_layers: %d, prefill_seq_length: %d\n", ctx->num_heads, ctx->head_dim, ctx->vocab_size, ctx->n_layers, ctx->prefill_seq_length);
+    NSLog(@"num_heads: %d, head_dim: %d, vocab_size: %d, n_layers: %d, prefill_seq_length: %d, state_wkv_bytes: %zu, state_tokenshift_bytes: %zu\n",
+          ctx->num_heads, ctx->head_dim, ctx->vocab_size, ctx->n_layers, ctx->prefill_seq_length, ctx->state_wkv_bytes, ctx->state_tokenshift_bytes);
 
     return ctx;
 }
@@ -129,7 +149,6 @@ void rwkv_coreml_free(struct rwkv_coreml_context * ctx) {
 }
 
 void* rwkv_coreml_decode(struct rwkv_coreml_context * ctx, int token) {
-    float token_float = (float)token;
     MLMultiArray * inMultiArray = [
         [MLMultiArray alloc] initWithDataPointer: &token
                                            shape: @[@1, @(1)]
@@ -138,10 +157,6 @@ void* rwkv_coreml_decode(struct rwkv_coreml_context * ctx, int token) {
                                      deallocator: nil
                                            error: nil
     ];
-
-    if (!ctx->state) {
-        ctx->state = [(__bridge rwkv_coreml_stateful_impl *) ctx->model_decode newState];
-    }
 
     ctx->out_decode = [(__bridge id) ctx->model_decode predictionFromIn0: inMultiArray usingState: ctx->state error: nil];
     return ctx->out_decode.logits.dataPointer;
@@ -160,10 +175,6 @@ void* rwkv_coreml_prefill(struct rwkv_coreml_context * ctx, std::vector<int> tok
                                      deallocator: nil
                                            error: nil
     ];
-
-    if (!ctx->state) {
-        ctx->state = [(__bridge rwkv_coreml_stateful_impl *) ctx->model_decode newState];
-    }
 
     ctx->out_prefill = [(__bridge id) ctx->model_prefill predictionFromIn0: inMultiArray usingState: ctx->state error: nil];
     return ctx->out_prefill.logits.dataPointer;
@@ -193,50 +204,127 @@ int rwkv_coreml_get_prefill_seq_length(struct rwkv_coreml_context * ctx) {
     return ctx->prefill_seq_length;
 }
 
+int rwkv_coreml_get_state_wkv_bytes(struct rwkv_coreml_context * ctx) {
+    return ctx->state_wkv_bytes;
+}
+
+int rwkv_coreml_get_state_tokenshift_bytes(struct rwkv_coreml_context * ctx) {
+    return ctx->state_tokenshift_bytes;
+}
+
 std::vector<std::vector<uint8_t>> rwkv_coreml_get_state(struct rwkv_coreml_context * ctx) {
     std::vector<std::vector<uint8_t>> state_ret(2); // wkv and tokenshift
-    state_ret[0].resize(ctx->n_layers * ctx->embd_dim * ctx->head_dim * sizeof(uint16_t));
-    state_ret[1].resize(2 * ctx->embd_dim * ctx->n_layers * sizeof(uint16_t));
+    if (!ctx || !ctx->state) {
+        NSLog(@"rwkv_coreml_get_state: invalid ctx/state");
+        return state_ret;
+    }
+    if (ctx->state_wkv_bytes > 0) state_ret[0].resize(ctx->state_wkv_bytes);
+    if (ctx->state_tokenshift_bytes > 0) state_ret[1].resize(ctx->state_tokenshift_bytes);
+    uint8_t * wkv_dst = state_ret[0].empty() ? nullptr : state_ret[0].data();
+    const size_t wkv_dst_size = state_ret[0].size();
+    uint8_t * tokenshift_dst = state_ret[1].empty() ? nullptr : state_ret[1].data();
+    const size_t tokenshift_dst_size = state_ret[1].size();
 
     [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
         [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
-            uint8_t *bytes_uint8 = (uint8_t *)bytes;
-            memcpy((void*)state_ret[0].data(), bytes_uint8, size);
+            if (bytes == nullptr || size <= 0) return;
+            const size_t src_size = (size_t)size;
+            const size_t dst_size = wkv_dst_size;
+            if (dst_size == 0 || wkv_dst == nullptr) {
+                NSLog(@"rwkv_coreml_get_state: state_wkv dst buffer is empty (init-time size not captured?) src=%zu", src_size);
+                return;
+            }
+            if (dst_size != src_size) {
+                NSLog(@"rwkv_coreml_get_state: state_wkv size mismatch: src=%zu dst=%zu", src_size, dst_size);
+            }
+            const size_t n = dst_size < src_size ? dst_size : src_size;
+            if (n > 0) std::memcpy(wkv_dst, bytes, n);
         }];
     }];
     [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_tokenshift handler:^(MLMultiArray *buffer) {
         [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
-            uint8_t *bytes_uint8 = (uint8_t *)bytes;
-            memcpy((void*)state_ret[1].data(), bytes_uint8, size);
+            if (bytes == nullptr || size <= 0) return;
+            const size_t src_size = (size_t)size;
+            const size_t dst_size = tokenshift_dst_size;
+            if (dst_size == 0 || tokenshift_dst == nullptr) {
+                NSLog(@"rwkv_coreml_get_state: state_tokenshift dst buffer is empty (init-time size not captured?) src=%zu", src_size);
+                return;
+            }
+            if (dst_size != src_size) {
+                NSLog(@"rwkv_coreml_get_state: state_tokenshift size mismatch: src=%zu dst=%zu", src_size, dst_size);
+            }
+            const size_t n = dst_size < src_size ? dst_size : src_size;
+            if (n > 0) std::memcpy(tokenshift_dst, bytes, n);
         }];
     }];
     return state_ret;
 }
 
 void rwkv_coreml_set_state(struct rwkv_coreml_context * ctx, std::vector<std::vector<uint8_t>> state) {
+    if (!ctx || !ctx->state) {
+        NSLog(@"rwkv_coreml_set_state: invalid ctx/state");
+        return;
+    }
+    if (state.size() < 2) {
+        NSLog(@"rwkv_coreml_set_state: invalid state vector size: %zu", state.size());
+        return;
+    }
     [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
-        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
-            uint8_t *bytes_uint8 = (uint8_t *)bytes;
-            memcpy(bytes_uint8, state[0].data(), size);
+        [buffer getMutableBytesWithHandler:^(void *mutableBytes, NSInteger size, NSArray<NSNumber *> *strides) {
+            (void)strides;
+            if (mutableBytes == nullptr || size <= 0) return;
+            const size_t dst_size = (size_t)size;
+            const size_t src_size = state[0].size();
+            if (src_size != dst_size) {
+                NSLog(@"rwkv_coreml_set_state: state_wkv size mismatch: src=%zu dst=%zu", src_size, dst_size);
+            }
+            const size_t n = src_size < dst_size ? src_size : dst_size;
+            if (n > 0) std::memcpy(mutableBytes, state[0].data(), n);
+            if (dst_size > n) std::memset((uint8_t*)mutableBytes + n, 0, dst_size - n);
         }];
     }];
     [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_tokenshift handler:^(MLMultiArray *buffer) {
-        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
-            uint8_t *bytes_uint8 = (uint8_t *)bytes;
-            memcpy(bytes_uint8, state[1].data(), size);
+        [buffer getMutableBytesWithHandler:^(void *mutableBytes, NSInteger size, NSArray<NSNumber *> *strides) {
+            (void)strides;
+            if (mutableBytes == nullptr || size <= 0) return;
+            const size_t dst_size = (size_t)size;
+            const size_t src_size = state[1].size();
+            if (src_size != dst_size) {
+                NSLog(@"rwkv_coreml_set_state: state_tokenshift size mismatch: src=%zu dst=%zu", src_size, dst_size);
+            }
+            const size_t n = src_size < dst_size ? src_size : dst_size;
+            if (n > 0) std::memcpy(mutableBytes, state[1].data(), n);
+            if (dst_size > n) std::memset((uint8_t*)mutableBytes + n, 0, dst_size - n);
+        }];
+    }];
+}
+
+void rwkv_coreml_set_wkv_state(struct rwkv_coreml_context * ctx, std::vector<half_float::half> state) {
+    if (!ctx || !ctx->state) {
+        NSLog(@"rwkv_coreml_set_wkv_state: invalid ctx/state");
+        return;
+    }
+    if (state.size() != ctx->state_wkv_bytes / sizeof(half_float::half)) {
+        NSLog(@"rwkv_coreml_set_wkv_state: invalid state vector size: %zu", state.size() * sizeof(half_float::half));
+        return;
+    }
+    uint8_t *src = (uint8_t *)state.data();
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
+        [buffer getMutableBytesWithHandler:^(void *mutableBytes, NSInteger size, NSArray<NSNumber *> *strides) {
+            std::memcpy(mutableBytes, src, size);
         }];
     }];
 }
 
 void rwkv_coreml_zero_state(struct rwkv_coreml_context * ctx) {
     [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
-        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
-            memset((void*)bytes, 0, size);
+        [buffer getMutableBytesWithHandler:^(void *mutableBytes, NSInteger size, NSArray<NSNumber *> *strides) {
+            std::memset((void*)mutableBytes, 0, (size_t)size);
         }];
     }];
     [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_tokenshift handler:^(MLMultiArray *buffer) {
-        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
-            memset((void*)bytes, 0, size);
+        [buffer getMutableBytesWithHandler:^(void *mutableBytes, NSInteger size, NSArray<NSNumber *> *strides) {
+            std::memset((void*)mutableBytes, 0, (size_t)size);
         }];
-    }];    
+    }];
 }

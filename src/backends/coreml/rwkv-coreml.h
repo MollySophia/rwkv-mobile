@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <vector>
+#include "half.hpp"
 
 struct rwkv_coreml_context;
 
@@ -26,8 +27,14 @@ int rwkv_coreml_get_hidden_dim(struct rwkv_coreml_context * ctx);
 
 int rwkv_coreml_get_prefill_seq_length(struct rwkv_coreml_context * ctx);
 
+int rwkv_coreml_get_state_wkv_bytes(struct rwkv_coreml_context * ctx);
+
+int rwkv_coreml_get_state_tokenshift_bytes(struct rwkv_coreml_context * ctx);
+
 std::vector<std::vector<uint8_t>> rwkv_coreml_get_state(struct rwkv_coreml_context * ctx);
 
 void rwkv_coreml_set_state(struct rwkv_coreml_context * ctx, std::vector<std::vector<uint8_t>> state);
+
+void rwkv_coreml_set_wkv_state(struct rwkv_coreml_context * ctx, std::vector<half_float::half> state);
 
 void rwkv_coreml_zero_state(struct rwkv_coreml_context * ctx);
