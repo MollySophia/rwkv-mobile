@@ -1,3 +1,4 @@
+#include <cstdint>
 #if !__has_feature(objc_arc)
 #error This file must be compiled with automatic reference counting enabled (-fobjc-arc)
 #endif
@@ -193,16 +194,49 @@ int rwkv_coreml_get_prefill_seq_length(struct rwkv_coreml_context * ctx) {
 }
 
 std::vector<std::vector<uint8_t>> rwkv_coreml_get_state(struct rwkv_coreml_context * ctx) {
-    std::vector<std::vector<uint8_t>> state;
+    std::vector<std::vector<uint8_t>> state_ret(2); // wkv and tokenshift
+    state_ret[0].resize(ctx->n_layers * ctx->embd_dim * ctx->head_dim * sizeof(uint16_t));
+    state_ret[1].resize(2 * ctx->embd_dim * ctx->n_layers * sizeof(uint16_t));
 
-    // TODO: read stateful model's state
-    return state;
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
+        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
+            uint8_t *bytes_uint8 = (uint8_t *)bytes;
+            memcpy((void*)state_ret[0].data(), bytes_uint8, size);
+        }];
+    }];
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_tokenshift handler:^(MLMultiArray *buffer) {
+        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
+            uint8_t *bytes_uint8 = (uint8_t *)bytes;
+            memcpy((void*)state_ret[1].data(), bytes_uint8, size);
+        }];
+    }];
+    return state_ret;
 }
 
 void rwkv_coreml_set_state(struct rwkv_coreml_context * ctx, std::vector<std::vector<uint8_t>> state) {
-    // TODO: set stateful model's state
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
+        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
+            uint8_t *bytes_uint8 = (uint8_t *)bytes;
+            memcpy(bytes_uint8, state[0].data(), size);
+        }];
+    }];
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_tokenshift handler:^(MLMultiArray *buffer) {
+        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
+            uint8_t *bytes_uint8 = (uint8_t *)bytes;
+            memcpy(bytes_uint8, state[1].data(), size);
+        }];
+    }];
 }
 
 void rwkv_coreml_zero_state(struct rwkv_coreml_context * ctx) {
-    ctx->state = [(__bridge rwkv_coreml_stateful_impl *) ctx->model_decode newState];
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_wkv handler:^(MLMultiArray *buffer) {
+        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
+            memset((void*)bytes, 0, size);
+        }];
+    }];
+    [ctx->state getMultiArrayForState:rwkv_coreml_stateful_implStateNameState_tokenshift handler:^(MLMultiArray *buffer) {
+        [buffer getBytesWithHandler:^(const void *bytes, NSInteger size) {
+            memset((void*)bytes, 0, size);
+        }];
+    }];    
 }
