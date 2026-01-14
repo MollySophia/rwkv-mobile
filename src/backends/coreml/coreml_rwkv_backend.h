@@ -26,6 +26,7 @@ public:
 
 private:
     rwkv_coreml_context * ctx;
+    int prefill_seq_length;
 };
 
 }

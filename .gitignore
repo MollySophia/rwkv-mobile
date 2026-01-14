@@ -10,3 +10,4 @@ pubspec.lock
 *.pth
 .DS_Store
 *.mlpackage
+*.mlmodelc

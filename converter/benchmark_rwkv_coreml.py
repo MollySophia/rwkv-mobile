@@ -16,7 +16,7 @@ tokenizer = AutoTokenizer.from_pretrained("RWKV/rwkv-5-world-1b5", trust_remote_
 
 spec = model.get_spec()
 
-prefill_seq_length = 16
+prefill_seq_length = 32
 n_prompt_tokens = 512
 n_decode_tokens = 128
 trials = 3

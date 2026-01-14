@@ -383,8 +383,6 @@ if (ENABLE_COREML_BACKEND)
     add_library(rwkv_coreml STATIC
         src/backends/coreml/rwkv-coreml.h
         src/backends/coreml/rwkv-coreml.mm
-        src/backends/coreml/rwkv-coreml-impl.h
-        src/backends/coreml/rwkv-coreml-impl.m
         src/backends/coreml/rwkv-coreml-stateful-impl.h
         src/backends/coreml/rwkv-coreml-stateful-impl.m
     )

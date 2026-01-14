@@ -23,19 +23,25 @@ int coreml_rwkv_backend::load_model(std::string model_path) {
     n_layers = rwkv_coreml_get_n_layers(ctx);
     num_heads = rwkv_coreml_get_num_heads(ctx);
     hidden_size = rwkv_coreml_get_hidden_dim(ctx);
+    prefill_seq_length = rwkv_coreml_get_prefill_seq_length(ctx);
 
     return RWKV_SUCCESS;
 }
 
 int coreml_rwkv_backend::eval(int id, Tensor1D & logits) {
-    rwkv_coreml_decode(ctx, id);
-    logits = Tensor1D::make((void*)rwkv_coreml_get_logits(ctx), TensorDType::F32, (size_t)vocab_size);
+    void* logits_ptr = rwkv_coreml_decode(ctx, id);
+    logits = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
     return RWKV_SUCCESS;
 }
 
 int coreml_rwkv_backend::eval(std::vector<int> ids, Tensor1D & logits) {
-    // TODO: sequential prefill
-    for (int i = 0; i < ids.size(); i++) {
+    int i = 0;
+    for (; i + prefill_seq_length <= ids.size(); i += prefill_seq_length) {
+        std::vector<int> tokens_to_prefill = std::vector<int>(ids.begin() + i, ids.begin() + i + prefill_seq_length);
+        void* logits_ptr = rwkv_coreml_prefill(ctx, tokens_to_prefill);
+        logits = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
+    }
+    for (; i < ids.size(); i++) {
         int ret = eval(ids[i], logits);
         if (ret != RWKV_SUCCESS) {
             return ret;
