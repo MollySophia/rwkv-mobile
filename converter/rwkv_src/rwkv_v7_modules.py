@@ -247,11 +247,12 @@ class Rwkv7SelfAttention(nn.Module):
         return self.add_attention(last_x, x), state1_out, state2_out, v_first
 
 class Rwkv7FeedForward(nn.Module):
-    def __init__(self, state_dict, hidden_size, intermediate_size, layer_id=0):
+    def __init__(self, state_dict, hidden_size, intermediate_size, layer_id=0, num_layers=0):
         super().__init__()
         prefix = f'blocks.{layer_id}.ffn.'
         self.layer_id = layer_id
         self.hidden_size = hidden_size
+        self.num_layers = num_layers
 
         self.x_k = nn.Parameter(state_dict[prefix + 'x_k'])
 
@@ -284,6 +285,10 @@ class Rwkv7FeedForward(nn.Module):
             sx = self.sub_shifted(past, x)
             # mystery trick for coreml
             state_out = x[:, -1, :] + torch.finfo(torch.float32).smallest_normal
+            if self.layer_id == self.num_layers - 1:
+                sx = sx[:, -1, :]
+                x = x[:, -1, :]
+                last_x = last_x[:, -1, :]
 
         xk = self.add_x_k(x, self.mul_x_k(sx, self.x_k))
 

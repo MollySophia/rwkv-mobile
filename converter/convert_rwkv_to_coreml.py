@@ -20,6 +20,7 @@ parser.add_argument('--customop', action='store_true', help='Use composite custo
 parser.add_argument('--int8', action='store_true', help='Use int8 quantization')
 parser.add_argument('--int4', action='store_true', help='Use int4 quantization')
 parser.add_argument('--lut8', action='store_true', help='Use lut8 palettization')
+parser.add_argument('--lut6', action='store_true', help='Use lut6 palettization')
 parser.add_argument('--lut4', action='store_true', help='Use lut4 palettization')
 parser_args = parser.parse_args()
 
@@ -39,164 +40,7 @@ args = model.args
 
 merge_states = False
 
-PREFILL_SEQ_LENGTH = 16
-
-# Imports for custom ops (not all may be required)
-from coremltools.converters.mil.mil.ops.defs._op_reqs import register_op
-from coremltools.converters.mil.mil import (
-    Builder as mb,
-    Operation,
-    types
-)
-from coremltools.converters.mil.mil.input_type import (
-    InputSpec,
-    TensorInputType,
-)
-
-from coremltools.converters.mil.frontend.torch.torch_op_registry import _TORCH_OPS_REGISTRY, register_torch_op
-from coremltools.converters.mil.frontend.torch.ops import _get_inputs
-
-# @register_op(is_custom_op=True)
-# class custom_wkv7(Operation):
-#     input_spec = InputSpec(
-#         r = TensorInputType(type_domain="T"),
-#         w = TensorInputType(type_domain="T"),
-#         k = TensorInputType(type_domain="T"),
-#         v = TensorInputType(type_domain="T"),
-#         a = TensorInputType(type_domain="T"),
-#         b = TensorInputType(type_domain="T"),
-#         state = TensorInputType(type_domain="T"),
-#     )
-
-#     type_domains = {
-#         "T": (types.fp16, types.fp32),
-#     }
-
-#     bindings = { 'class_name'  : 'CustomWKV7',
-#                  'input_order' : ['r', 'w', 'k', 'v', 'a', 'b', 'state'],
-#                  'parameters'  : [],
-#                  'description' : "WKV7 Custom layer"
-#                 }
-
-#     def __init__(self, **kwargs):
-#         super(custom_wkv7, self).__init__(**kwargs)
-
-#     def type_inference(self):
-#         state_shape = self.state.shape
-#         r_shape = self.r.shape
-#         r_shape_list = list(r_shape)
-#         seq_length = r_shape_list[0]
-
-#         ret_shape = list(state_shape)
-#         if ret_shape[0] == 1:
-#             ret_shape = ret_shape[1:]
-#         num_heads, head_size, _ = ret_shape
-#         return types.tensor(self.state.dtype, (seq_length, num_heads, 1, head_size)), types.tensor(self.state.dtype, (1, num_heads, head_size, head_size))
-
-# @register_torch_op(torch_alias=["rwkv::wkv7"])
-# def wkv7(context, node):
-#     r, w, k, v, a, b, state = _get_inputs(context, node, expected=7)
-#     x_output_name = node.outputs[0]
-#     state_output_name = node.outputs[1]
-#     x, state_out = mb.custom_wkv7(r=r, w=w, k=k, v=v, a=a, b=b, state=state, name=node.name)
-#     x = mb.identity(x=x, name=x_output_name)
-#     state_out = mb.identity(x=state_out, name=state_output_name)
-#     context.add(x, x_output_name)
-#     context.add(state_out, state_output_name)
-
-def _add_wkv7_layer(r, w, k, v, a, b, state, seq_output_name, state_output_name):
-    """
-    Add a single GRU layer.
-    Please note that the Core ML GRU has different definition from Torch,
-    so we cannot use mb.gru, and need to implement it with while loop.
-    To be more specific, in Core ML:
-
-    o_t = activation(W_{io} x_t + r_t * W_{ho} h_(t−1) + b_{o})
-
-    while torch has
-    o_t = activation(W_{io} x_t + b_{io} + r_t * (W_{ho} h_(t−1) + b_{ho}))
-
-    Inputs:
-        _input : (seq_len, batch_size, input_dim)
-        h0 : (1, batch_size, hidden_dim)
-        wi : (3*hidden_dim, input_dim) for the first layer, else (3*hidden_dim, hidden_dim)
-        wh : (3*hidden_dim, hidden_dim)
-        bi : (3*hidden_dim)
-        bh : (3*hidden_dim)
-
-    Return:
-        h_list : the list contains all hidden states for each time step
-                 with shape (seq_len, batch_size, hidden_dim)
-        h : the last hidden state, with shape (1, batch_size, hidden_dim
-    """
-
-    r_shape = mb.shape(x=r)
-    state_shape = mb.shape(x=state)
-    seq_len = mb.slice_by_index(x=r_shape, begin=[0], end=[1])
-    num_heads = mb.slice_by_index(x=r_shape, begin=[1], end=[2])
-    head_size = mb.slice_by_index(x=r_shape, begin=[2], end=[3])
-    w_shape = mb.shape(x=w)
-
-    # (seq_len, num_heads, 1, head_size)
-    x_list = mb.fill(shape=w_shape)
-    state_out = state
-
-    def cond(i, x_list, state_out):
-        return mb.less(x=i, y=seq_len)
-
-    def body(i, x_list, state_out):
-        rt = mb.gather(x=r, indices=i, axis=0)
-        wt = mb.gather(x=w, indices=i, axis=0)
-        kt = mb.gather(x=k, indices=i, axis=0)
-        vt = mb.gather(x=v, indices=i, axis=0)
-        at = mb.gather(x=a, indices=i, axis=0)
-        bt = mb.gather(x=b, indices=i, axis=0)
-
-        wt_shape = mb.shape(x=wt)
-        state_shape = mb.shape(x=state_out)
-
-        sa = mb.matmul(x=state_out, y=at)
-        sab = mb.matmul(x=sa, y=bt)
-        kv = mb.matmul(x=vt, y=kt)
-        state_next = mb.mul(x=state_out, y=wt)
-        state_next = mb.add(x=state_next, y=kv)
-        state_out = mb.add(x=state_next, y=sab)
-        xt = mb.matmul(x=state_out, y=rt)
-        xt = mb.reshape(x=xt, shape=wt_shape)
-
-        # update counter
-        counter = mb.add(x=i, y=1)
-
-        state_out = mb.reshape(x=state_out, shape=state_shape)
-        x_list = mb.scatter(data=x_list, indices=counter, updates=xt)
-
-        return (
-            counter,
-            x_list,
-            state_out,
-        )
-
-    _, x_list, state_out = mb.while_loop(
-        _cond=cond, _body=body, loop_vars=([0], x_list, state_out),
-    )
-
-    return x_list, state_out
-
-
-@register_torch_op(torch_alias=["rwkv::wkv7"])
-def wkv7(context, node):
-    r, w, k, v, a, b, state = _get_inputs(context, node, expected=7)
-
-    seq_output_name = node.outputs[0]  # output sequence name
-    state_output_name = node.outputs[1]  # output state name
-
-    x, state_out = _add_wkv7_layer(r, w, k, v, a, b, state, seq_output_name, state_output_name)
-
-    # rnn output
-    context.add(x, seq_output_name)
-
-    # state output
-    context.add(state_out, state_output_name)
+PREFILL_SEQ_LENGTH = 32
 
 if parser_args.stateful:
     inputs_decode = [torch.tensor([[0]*1 for _ in range(1)], dtype=torch.int32).to(model.device)]
@@ -242,6 +86,13 @@ elif parser_args.lut8:
     palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
     palettizer = PostTrainingPalettizer(model, palettization_config)
     model = palettizer.compress()
+elif parser_args.lut6:
+    palettization_config_dict = {
+        "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 16},
+    }
+    palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+    palettizer = PostTrainingPalettizer(model, palettization_config)
+    model = palettizer.compress()
 elif parser_args.lut4:
     palettization_config_dict = {
         "global_config": {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 32},
@@ -263,6 +114,8 @@ def _build_output_name(mode_tag: str) -> str:
         output_name += '_int8'
     elif parser_args.lut8:
         output_name += '_lut8'
+    elif parser_args.lut6:
+        output_name += '_lut6'
     elif parser_args.lut4:
         output_name += '_lut4'
     if model_args.USE_CUSTOM_WKV:
@@ -358,3 +211,6 @@ desc.add_function(
 
 desc.default_function_name = "decode"
 ct.utils.save_multifunction(desc, _build_output_name('combined') + '.mlpackage')
+
+# os.remove(_build_output_name('decode') + '.mlpackage')
+# os.remove(_build_output_name('prefill') + '.mlpackage')
