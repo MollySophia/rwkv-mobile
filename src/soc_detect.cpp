@@ -27,6 +27,7 @@ const char * platform_name[] = {
 snapdragon_soc_info snapdragon_soc_ids[] = {
     {475, "SM7325", "778", "v68"},
     {439, "SM8350", "888", "v68"},
+    {449, "SC8280X", "8cx Gen3", "v68"},
     {457, "SM8450", "8 Gen 1", "v69"},
     {480, "SM8450_2", "8 Gen 1", "v69"},
     {482, "SM8450_3", "8 Gen 1", "v69"},
