@@ -73,8 +73,8 @@ template <auto, int> struct ModifiedDerivedType;
 // multiple times
 #define MDT(W, LINE)                                                                                                   \
     namespace fold {                                                                                                   \
-    template <> struct ModifiedDerivedType<W, LINE> : public ModifiedDerivedTypeParent {                               \
-        using Modified = typename DerivedType<W>::type;                                                                \
+    template <> struct ModifiedDerivedType<&W, LINE> : public ModifiedDerivedTypeParent {                              \
+        using Modified = typename DerivedType<&W>::type;                                                               \
     };                                                                                                                 \
     } //namespace fold
 
@@ -86,11 +86,12 @@ template <auto, int> struct ModifiedDerivedType;
 #ifndef OP_REG_COMPILE
 #define DEF_NATIVE_OP(F, OP, LINE) DEF_NATIVE_OP_NMVRT(F, F, OP, "", LINE)
 
-#define DEF_NATIVE_OP_NO_TCM_FOLDING(F, OP) DEF_NATIVE_OP_NMVRT_NO_TCM_FOLDING(F, F, OP, "")
+#define DEF_NATIVE_OP_NO_TCM_FOLDING(F, OP) DEF_NATIVE_OP_NMVRT_NO_TCM_FOLDING(&F, &F, OP, "")
 
 #define DEF_NATIVE_OP_NMVRT(F, W, OP, NMVRT, LINE)                                                                     \
     MDT(F, LINE)                                                                                                       \
-    APPEND_REG_OP_ELEM(W, THIS_PKG_NAME_STR "::" OP, TYPE_SUFFIX(OP, NMVRT, hnnx::ArgsTuples2<F>::inputTypeNames), LINE)
+    APPEND_REG_OP_ELEM(&W, THIS_PKG_NAME_STR "::" OP, TYPE_SUFFIX(OP, NMVRT, hnnx::ArgsTuples2<&F>::inputTypeNames),   \
+                       LINE)
 
 #define DEF_NATIVE_OP_NMVRT_NO_TCM_FOLDING(F, W, OP, NMVRT)                                                            \
     APPEND_REG_OP_ELEM_NO_TCM_FOLDING(W, THIS_PKG_NAME_STR "::" OP,                                                    \
@@ -112,9 +113,9 @@ template <auto, int> struct ModifiedDerivedType;
 
 // see register-op-tcm-folding.md
 #define REGISTER_OP_NO_TCM_FOLDING(F, STR)    DEF_NATIVE_OP_NO_TCM_FOLDING(F, STR)
-#define REGISTER_OP_WRAPPER(F, W, STR, NMVRT) DEF_NATIVE_OP_NMVRT_NO_TCM_FOLDING(F, W, STR, NMVRT)
+#define REGISTER_OP_WRAPPER(F, W, STR, NMVRT) DEF_NATIVE_OP_NMVRT_NO_TCM_FOLDING(&F, W, STR, NMVRT)
 
-#define REGISTER_OP_EXT(F, STR, NMVRT) REGISTER_OP_WRAPPER(F, F, STR, NMVRT)
+#define REGISTER_OP_EXT(F, STR, NMVRT) REGISTER_OP_WRAPPER(F, &F, STR, NMVRT)
 
 #define REGISTER_OP_HVX_EXT(F, STR, NMVRT)                                                                             \
     FLAGS_FOR_DT_NO_TCM_FOLDING(F, Flags::RESOURCE_HVX)                                                                \

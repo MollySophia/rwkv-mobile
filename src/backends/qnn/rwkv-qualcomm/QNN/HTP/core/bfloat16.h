@@ -78,6 +78,7 @@ struct API_EXPORT BFloat16 {
     friend API_FUNC_EXPORT BFloat16 operator+(BFloat16 a, BFloat16 b);
     friend API_FUNC_EXPORT BFloat16 operator-(BFloat16 a, BFloat16 b);
     friend API_FUNC_EXPORT BFloat16 operator*(BFloat16 a, BFloat16 b);
+    friend API_FUNC_EXPORT BFloat16 operator/(BFloat16 a, BFloat16 b);
 };
 
 POP_VISIBILITY()

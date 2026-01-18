@@ -283,14 +283,14 @@ class Crate {
             if constexpr (!std::is_trivially_destructible<T>::value) {
                 // Obtain a callable '~T()' function.
                 // this typically generates a jump, or a small inline; lambda can
-                // be cast to a function pointer since it has no state.
+                // be implicitly converted to a function pointer since it has no state.
                 auto dtor_func = [](Graph *graph_in, void *obj) {
                     if constexpr (has_clear<T>) {
                         static_cast<T *>(obj)->clear(graph_in);
                     }
                     static_cast<T *>(obj)->~T();
                 };
-                install_dtor(pos, (dtor_funcp)dtor_func);
+                install_dtor(pos, dtor_func);
             } else {
                 ++m_records; // note, install_dtor does this too.
             }

@@ -1,7 +1,7 @@
 //==============================================================================
 //
 // Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
-// All Rights Reserved.
+// All rights reserved.
 // Confidential and Proprietary - Qualcomm Technologies, Inc.
 //
 //==============================================================================
@@ -125,6 +125,12 @@ typedef uint32_t QnnHtpPerfInfrastructure_RpcPollingTime_t;
 typedef uint32_t QnnHtpPerfInfrastructure_AdaptivePollingTime_t;
 
 /**
+ * @brief Allows client to enable (non-zero value) or disable (zero value)
+ * DDR performance mode
+ */
+typedef uint32_t QnnHtpPerfInfrastructure_DdrPerfMode_t;
+
+/**
  * @brief Allows client to set up the HMX timeout interval in microseconds
  */
 typedef uint32_t QnnHtpPerfInfrastructure_HmxTimeoutIntervalUs_t;
@@ -199,6 +205,12 @@ typedef enum {
   /// Maps to HAP_DCVS_VCORNER_TURBO_L3.
   /// Set voltage corner to TURBO_L3 value for the platform
   DCVS_VOLTAGE_VCORNER_TURBO_L3 = 0x93,
+  /// Maps to HAP_DCVS_VCORNER_TURBO_L4.
+  /// Set voltage corner to TURBO_L4 value for the platform
+  DCVS_VOLTAGE_VCORNER_TURBO_L4 = 0x94,
+  /// Maps to HAP_DCVS_VCORNER_TURBO_L5.
+  /// Set voltage corner to TURBO_L5 value for the platform
+  DCVS_VOLTAGE_VCORNER_TURBO_L5 = 0x95,
   /// Maps to HAP_DCVS_VCORNER_MAX.
   /// Set voltage corner to maximum value supported on the platform
   DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER = 0xA0,
@@ -228,18 +240,30 @@ typedef enum {
   /// Maps to HAP_DCVS_EXP_VCORNER_LOW_SVS.
   /// Set voltage corner to LOWSVS value for the platform
   DCVS_EXP_VCORNER_LOW_SVS = 0x140,
+  /// Maps to HAP_DCVS_EXP_VCORNER_LOW_SVS_L0.
+  /// Set voltage corner to LOWSVS_L0 value for the platform
+  DCVS_EXP_VCORNER_LOW_SVS_L0 = 0x14C,
   /// Maps to HAP_DCVS_EXP_VCORNER_SVS.
   /// Set voltage corner to SVS value for the platform
   DCVS_EXP_VCORNER_SVS = 0x180,
+  /// Maps to HAP_DCVS_EXP_VCORNER_SVS_L0.
+  /// Set voltage corner to SVS_L0 value for the platform
+  DCVS_EXP_VCORNER_SVS_L0 = 0x190,
   /// Maps to HAP_DCVS_EXP_VCORNER_SVS_L1.
   /// Set voltage corner to SVS_L1 value for the platform
   DCVS_EXP_VCORNER_SVS_L1 = 0x1C0,
+  /// Maps to HAP_DCVS_EXP_VCORNER_SVS_L2.
+  /// Set voltage corner to SVS_L2 value for the platform
+  DCVS_EXP_VCORNER_SVS_L2 = 0x1E0,
   /// Maps to HAP_DCVS_EXP_VCORNER_NOM.
   /// Set voltage corner to NOM value for the platform
   DCVS_EXP_VCORNER_NOM = 0x200,
   /// Maps to HAP_DCVS_EXP_VCORNER_NOM_L1.
   /// Set voltage corner to NOM_L1 value for the platform
   DCVS_EXP_VCORNER_NOM_L1 = 0x240,
+  /// Maps to HAP_DCVS_EXP_VCORNER_NOM_L2.
+  /// Set voltage corner to NOM_L2 value for the platform
+  DCVS_EXP_VCORNER_NOM_L2 = 0x250,
   /// Maps to HAP_DCVS_EXP_VCORNER_TUR.
   /// Set voltage corner to TURBO value for the platform
   DCVS_EXP_VCORNER_TUR = 0x280,
@@ -356,6 +380,13 @@ typedef enum {
   /// this config can only be enabled in the RPC polling mode
   /// if enabled, this config is applied to the entire process
   QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_ADAPTIVE_POLLING_TIME = 6,
+  /// config enum implies the usage of DDR performance mode
+  /// this config can only be enabled under the following conditions:
+  /// 1. The SoC must support DDR performance mode (e.g. V81)
+  /// 2. The RPC polling mode is turned on
+  /// 3. Currently, it can only be used by LLM on Android V81
+  /// 4. Currently, it can only be used when bus voltage corner is voted to maximum level
+  QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DDR_PERF_MODE = 7,
   /// UNKNOWN config option which must not be used
   QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_UNKNOWN = 0x7fffffff
 } QnnHtpPerfInfrastructure_PowerConfigOption_t;
@@ -373,6 +404,7 @@ typedef struct {
     QnnHtpPerfInfrastructure_HmxTimeoutIntervalUs_t hmxTimeoutIntervalUsConfig;
     QnnHtpPerfInfrastructure_HmxV2_t hmxV2Config;
     QnnHtpPerfInfrastructure_AdaptivePollingTime_t adaptivePollingTimeConfig;
+    QnnHtpPerfInfrastructure_DdrPerfMode_t ddrPerfModeConfig;
   };
 } QnnHtpPerfInfrastructure_PowerConfig_t;
 

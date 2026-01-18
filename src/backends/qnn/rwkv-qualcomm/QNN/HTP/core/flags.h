@@ -153,20 +153,20 @@ template <typename T> [[maybe_unused]] static constexpr const char *docs_for()
     };
 
 #define FLAGS_FOR(F, ...)                   FLAGS_FOR_IMPL(F, __COUNTER__, __VA_ARGS__)
-#define FLAGS_FOR_DT_NO_TCM_FOLDING(F, ...) FLAGS_FOR_IMPL(DerivedType<F>::type, __COUNTER__, __VA_ARGS__)
+#define FLAGS_FOR_DT_NO_TCM_FOLDING(F, ...) FLAGS_FOR_IMPL(DerivedType<&F>::type, __COUNTER__, __VA_ARGS__)
 
 #if defined(PREPARE_DISABLED) && !defined(TCM_FOLDING_DISABLED)
 // See register-op-tcm-folding.md
-#define MOD_DER_TYPE(F, LINE) fold::ModifiedDerivedType<F, LINE>::Modified
+#define MOD_DER_TYPE(F, LINE) fold::ModifiedDerivedType<&F, LINE>::Modified
 #define FLAGS_FOR_DT_IMPL(F, UNIQUE_VAL, ...)                                                                          \
     MDT(F, UNIQUE_VAL)                                                                                                 \
     FLAGS_FOR_IMPL(MOD_DER_TYPE(F, UNIQUE_VAL), __COUNTER__, __VA_ARGS__)
 #define FLAGS_FOR_DT(F, ...) FLAGS_FOR_DT_IMPL(F, __COUNTER__, __VA_ARGS__)
 #else
-#define FLAGS_FOR_DT(F, ...) FLAGS_FOR_IMPL(DerivedType<F>::type, __COUNTER__, __VA_ARGS__)
+#define FLAGS_FOR_DT(F, ...) FLAGS_FOR_IMPL(DerivedType<&F>::type, __COUNTER__, __VA_ARGS__)
 #endif
 
-#define DOCS_FOR_DT(F, DOCSTRING) DOCS_FOR(DerivedType<F>::type, DOCSTRING)
+#define DOCS_FOR_DT(F, DOCSTRING) DOCS_FOR(DerivedType<&F>::type, DOCSTRING)
 
 #ifndef PREPARE_DISABLED
 #define DOCS_FOR(F, DOCSTRING)                                                                                         \

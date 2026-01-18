@@ -190,6 +190,9 @@ typedef enum {
   QNN_HTP_GRAPH_CONFIG_OPTION_WEIGHTS_PACKING                    = 12,
   QNN_HTP_GRAPH_CONFIG_OPTION_ASSUME_SAME_QUANT                  = 13,
   QNN_HTP_GRAPH_CONFIG_OPTION_SHARE_IO_BUFFER                    = 14,
+  QNN_HTP_GRAPH_CONFIG_OPTION_ADVANCED_ACTIVATION_FUSION         = 15,
+  QNN_HTP_GRAPH_CONFIG_OPTION_HIGH_PRECISION_SIGMOID             = 16,
+  QNN_HTP_GRAPH_CONFIG_OPTION_MONOLITHIC_LSTM                    = 17,
   QNN_HTP_GRAPH_CONFIG_OPTION_RESERVED                           = 0x7fff0000,
   QNN_HTP_GRAPH_CONFIG_OPTION_UNKNOWN                            = 0x7fffffff
 } QnnHtpGraph_ConfigOption_t;
@@ -255,6 +258,11 @@ typedef struct {
  *               +----+-------------------------------------------------------------------------------------+------------------------------------------------+
  *               | 14 | QNN_HTP_GRAPH_CONFIG_OPTION_SHARE_IO_BUFFER | bool |
  *               +----+-------------------------------------------------------------------------------------+------------------------------------------------+
+ *               | 15 | QNN_HTP_GRAPH_CONFIG_OPTION_ADVANCED_ACTIVATION_FUSION | bool |
+ *               +----+-------------------------------------------------------------------------------------+------------------------------------------------+
+ *               | 16 | QNN_HTP_GRAPH_CONFIG_OPTION_HIGH_PRECISION_SIGMOID | bool |
+ *               +----+-------------------------------------------------------------------------------------+------------------------------------------------+
+ *               | 17 | QNN_HTP_GRAPH_CONFIG_OPTION_MONOLITHIC_LSTM | bool |
  *               +-------------------------+----------------------------------------------------------------+------------------------------------------------+
  *               | 0x7fff0000 - 0x7ffffffe | QNN_HTP_GRAPH_CONFIG_OPTION_RESERVED | These are
  * reserved for internal purposes       |
@@ -283,6 +291,9 @@ typedef struct {
     bool weightsPacking;
     bool assumeSameQuant;
     bool shareIOBuffer;
+    bool advancedActivationFusion;
+    bool highPrecisionSigmoid;
+    bool monolithicLstm;
   };
 } QnnHtpGraph_CustomConfig_t;
 

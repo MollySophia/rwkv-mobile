@@ -56,6 +56,16 @@ constexpr inline unsigned htp_header_get_MAGIC(void const *const p)
     return *(unsigned const *)p;
 }
 
+inline bool htp_is_barrel(void const *const p)
+{
+    return htp_header_get_MAGIC(p) == Hdr_MAGIC_MULTI;
+}
+
+inline bool htp_is_pickle(void const *const p)
+{
+    return htp_header_get_MAGIC(p) == Hdr_MAGIC;
+}
+
 //
 // Given a pointer to an in-memory header, locate the payload field corresponding to 'tag'.
 // If found, returns the length of the payload (which is >=0), after setting *payload_ptr.

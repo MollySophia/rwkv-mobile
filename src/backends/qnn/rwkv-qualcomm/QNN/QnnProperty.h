@@ -206,6 +206,13 @@ extern "C" {
  */
 #define QNN_PROPERTY_CONTEXT_SUPPORT_GRAPH_RETENTION_ORDER (QNN_PROPERTY_GROUP_CONTEXT + 20)
 
+/**
+ * @brief Property key for determining whether a backend supports updating previously generated
+ * binary sections. This determines support for QnnContext_getBinarySectionUpdate() and
+ * QnnContext_freeBinarySectionUpdate().
+ */
+#define QNN_PROPERTY_CONTEXT_SUPPORT_BINARY_SECTION_UPDATES (QNN_PROPERTY_GROUP_CONTEXT + 21)
+
 ///
 /// Definition of QNN_PROPERTY_GROUP_GRAPH property group. This group is Core (non-optional) API.
 ///
@@ -345,6 +352,14 @@ extern "C" {
  *        graphs.
  */
 #define QNN_PROPERTY_GRAPH_SUPPORT_ONLINE_PREPARE (QNN_PROPERTY_GROUP_GRAPH + 21)
+
+/**
+ * @brief Property key for determining whether a backend supports creation of a binary section which
+ *        can be updated at a later time. This determines support for the QnnGraph config
+ *        QNN_GRAPH_CONFIG_OPTION_ENABLE_BINARY_SECTION_UPDATES.
+ */
+#define QNN_PROPERTY_GRAPH_SUPPORT_UPDATABLE_WEIGHTS_BINARY_SECTION_CREATION \
+  (QNN_PROPERTY_GROUP_GRAPH + 22)
 
 ///
 /// Definition of QNN_PROPERTY_GROUP_OP_PACKAGE property group. This group is Optional portion of
@@ -521,6 +536,54 @@ extern "C" {
  *        QNN_TENSOR_DATA_FORMAT_UBWC_NV12_UV data format.
  */
 #define QNN_PROPERTY_TENSOR_SUPPORT_UBWC_NV12_UV (QNN_PROPERTY_GROUP_TENSOR + 23)
+
+/**
+ * @brief Property key for determining whether a backend supports QNN_TENSOR_DATA_FORMAT_UBWC_NV124R
+ *        data format.
+ */
+#define QNN_PROPERTY_TENSOR_SUPPORT_UBWC_NV124R (QNN_PROPERTY_GROUP_TENSOR + 24)
+
+/**
+ * @brief Property key for determining whether a backend supports QNN_TENSOR_DATA_FORMAT_UBWC_NV124R_Y
+ *        data format.
+ */
+#define QNN_PROPERTY_TENSOR_SUPPORT_UBWC_NV124R_Y (QNN_PROPERTY_GROUP_TENSOR + 25)
+
+/**
+ * @brief Property key for determining whether a backend supports
+ *        QNN_TENSOR_DATA_FORMAT_UBWC_NV124R_UV data format.
+ */
+#define QNN_PROPERTY_TENSOR_SUPPORT_UBWC_NV124R_UV (QNN_PROPERTY_GROUP_TENSOR + 26)
+
+/**
+ * @brief Property key to determine whether a backend supports float block quantization encodings. See
+ *        QNN_QUANTIZATION_ENCODING_FLOAT_BLOCK.
+ */
+#define QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_FLOAT_BLOCK (QNN_PROPERTY_GROUP_TENSOR + 27)
+
+/**
+ * @brief Property key to determine whether a backend supports bit-width axis scale-offset
+ *        mapped quantization encodings. See QNN_QUANTIZATION_ENCODING_BW_AXIS_SCALE_OFFSET_MAPPED.
+ */
+#define QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_AXIS_SCALE_OFFSET_MAPPED (QNN_PROPERTY_GROUP_TENSOR + 28)
+
+/**
+ * @brief Property key to determine whether a backend supports bit-width block scale-offset
+ *        mapped quantization encodings. See QNN_QUANTIZATION_ENCODING_BW_BLOCK_MAPPED.
+ */
+#define QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_BLOCK_SCALE_OFFSET_MAPPED (QNN_PROPERTY_GROUP_TENSOR + 29)
+
+/**
+ * @brief Property key to determine whether a backend supports bit-width block scale-offset
+ *        mapped quantization encodings. See QNN_QUANTIZATION_ENCODING_BW_BLOCKWISE_EXPANSION_MAPPED.
+ */
+#define QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_BLOCKWISE_EXPANSION_MAPPED (QNN_PROPERTY_GROUP_TENSOR + 30)
+
+/**
+ * @brief Property key to determine whether a backend supports bit-width float block quantization encodings. See
+ *        QNN_QUANTIZATION_ENCODING_BW_FLOAT_BLOCK.
+ */
+#define QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_FLOAT_BLOCK (QNN_PROPERTY_GROUP_TENSOR + 31)
 
 ///
 /// Definition of QNN_PROPERTY_GROUP_ERROR property group. This group is Optional portion of API.

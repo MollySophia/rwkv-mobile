@@ -1,8 +1,8 @@
 //=============================================================================
 //
-//  Copyright (c) 2019-2023 Qualcomm Technologies, Inc.
-//  All Rights Reserved.
-//  Confidential and Proprietary - Qualcomm Technologies, Inc.
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// All Rights Reserved.
+// Confidential and Proprietary - Qualcomm Technologies, Inc.
 //
 //=============================================================================
 
@@ -552,7 +552,7 @@ typedef struct {
  *         - QNN_OP_PACKAGE_ERROR_INVALID_ARGUMENT: _interface_ argument was NULL.
  *         - QNN_OP_PACKAGE_ERROR_GENERAL: Other error occurred.
  */
-typedef Qnn_ErrorHandle_t (*QnnOpPackage_InterfaceProvider_t)(QnnOpPackage_Interface_t* interface);
+typedef Qnn_ErrorHandle_t (*QnnOpPackage_InterfaceProvider_t)(QnnOpPackage_Interface_t* intface_);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -26,7 +26,7 @@
 
 // HTP API Version values
 #define QNN_HTP_API_VERSION_MAJOR 5
-#define QNN_HTP_API_VERSION_MINOR 39
+#define QNN_HTP_API_VERSION_MINOR 41
 #define QNN_HTP_API_VERSION_PATCH 0
 
 // clang-format off
@@ -51,7 +51,7 @@
 // DSP Context blob Version values
 #define QNN_HTP_CONTEXT_BLOB_VERSION_MAJOR 3
 #define QNN_HTP_CONTEXT_BLOB_VERSION_MINOR 3
-#define QNN_HTP_CONTEXT_BLOB_VERSION_PATCH 3
+#define QNN_HTP_CONTEXT_BLOB_VERSION_PATCH 4
 
 /* ==== CDSP Security Library Versioning ==== */
 /* ==== This information is only intended for OEMs ==== */

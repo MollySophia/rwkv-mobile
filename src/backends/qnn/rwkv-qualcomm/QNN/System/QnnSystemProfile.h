@@ -131,8 +131,16 @@ typedef enum {
   QNN_SYSTEM_PROFILE_METHOD_TYPE_APP_BACKEND_LIB_LOAD = 10,
   /// Backend apply binary method.
   QNN_SYSTEM_PROFILE_METHOD_TYPE_BACKEND_APPLY_BINARY_SECTION = 11,
-  /// Backend apply binary method.
-  QNN_SYSTEM_PROFILE_METHOD_TYPE_CONTEXT_FINALIZE = 12
+  /// Context finalize method.
+  QNN_SYSTEM_PROFILE_METHOD_TYPE_CONTEXT_FINALIZE = 12,
+  /// Context get binary size method.
+  QNN_SYSTEM_PROFILE_METHOD_TYPE_CONTEXT_GET_BINARY_SIZE = 13,
+  /// Context get binary method.
+  QNN_SYSTEM_PROFILE_METHOD_TYPE_CONTEXT_GET_BINARY = 14,
+  /// Context get binary section size method.
+  QNN_SYSTEM_PROFILE_METHOD_TYPE_CONTEXT_GET_BINARY_SECTION_SIZE = 15,
+  // Backend finalize method performed after tensor updates.
+  QNN_SYSTEM_PROFILE_METHOD_TYPE_BACKEND_FINALIZE_TENSOR_UPDATES = 16
 } QnnSystemProfile_MethodType_t;
 
 typedef struct {
@@ -155,7 +163,7 @@ typedef struct {
     0,                                    /* stopMem */     \
     QNN_SYSTEM_PROFILE_METHOD_TYPE_NONE,  /* methodType */  \
     QNN_SYSTEM_PROFILE_VISIBILITY_PUBLIC, /* visibility */  \
-    NULL,                                 /* stopMem */     \
+    NULL,                                 /* graphName */     \
   }
 // clang-format on
 

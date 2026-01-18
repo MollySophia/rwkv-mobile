@@ -298,8 +298,8 @@ struct QuickShape {
         }
     }
 
-    // set an output def based on QuickShape. Only useful in implementing modifiers.
-    API_EXPORT void to_outdef(OutputDef &odef) noexcept;
+    // set an op_def's output def based on QuickShape. Only useful in implementing modifiers.
+    API_EXPORT void to_outdef(OpDef &op_def) noexcept;
     explicit inline constexpr QuickShape(empty_rank const &erank) : rank(std::min((unsigned)erank.r, maxdims)), dims()
     {
     }
@@ -1476,6 +1476,21 @@ class Replacement : public Constraint {
     // what are comments
     OpRef add_TRACKED_OP(Replacement &rpx, const OpDef &old, const ReplFunc_or_Operand &&op);
 
+    /// \ingroup OptReplacement
+    /// @brief It's used for CSE when quant_is_updateable is enabled.
+    /// The nested_level represents the layers from inside to outside of the target op in replacement.
+    /// If the target op changes multiple times in a phase, TRACK_SOURCE_ID needs to be used for recording each id change.
+    /// It must be used together with cse_after_if in the same DEF_OPT.
+    API_HIDDEN inline static ReplFunc TRACK_SOURCE_ID(ReplFunc_or_Operand &&ref, int nested_level, ReplFunc_general &&f)
+    {
+        return ReplFunc::create([=](Replacement &rpx, const OpDef &old) -> OpRef {
+            OpDef const new_def = rpx.add_MAPPED_OPID(ref(rpx, old), nested_level, old);
+            return f(rpx, new_def);
+        });
+    }
+
+    OpDef add_MAPPED_OPID(OpRef const &ref, int nested_level, OpDef const &old);
+
     API_HIDDEN inline static ReplFunc WrapOp(char const *opname, ReplFunc_or_Operand &&f)
     {
         return WrapOp_internal(opname, pkg_flag.c_str(), std::move(f), true);
@@ -1935,23 +1950,27 @@ class Replacement : public Constraint {
     OpDef const &curr_op() const { return *m_curr_op; }
 
     API_EXPORT static OpRef gen_node(const hnnx::opname_tag_t str, size_t n_in, OpRef const *inputs, const OpDef &old,
-                                     char const *package_name = THIS_PKG_NAME_STR, const OpDef *model = nullptr);
+                                     const OutputDef *new_odef = nullptr, char const *package_name = THIS_PKG_NAME_STR,
+                                     const OpDef *model = nullptr);
     static inline OpRef gen_node(const hnnx::opname_tag_t str, std::vector<OpRef> const &inputs, const OpDef &old,
-                                 char const *package_name = THIS_PKG_NAME_STR, const OpDef *model = nullptr)
+                                 const OutputDef *new_odef = nullptr, char const *package_name = THIS_PKG_NAME_STR,
+                                 const OpDef *model = nullptr)
     {
-        return gen_node(str, inputs.size(), inputs.data(), old, package_name, model);
+        return gen_node(str, inputs.size(), inputs.data(), old, new_odef, package_name, model);
     }
     // allow {opref1, opref2} for 'inputs' (without becoming std::vector)
     static inline OpRef gen_node(const hnnx::opname_tag_t str, std::initializer_list<OpRef> inputs, const OpDef &old,
-                                 char const *package_name = THIS_PKG_NAME_STR, const OpDef *model = nullptr)
+                                 const OutputDef *new_odef = nullptr, char const *package_name = THIS_PKG_NAME_STR,
+                                 const OpDef *model = nullptr)
     {
-        return gen_node(str, inputs.size(), inputs.begin(), old, package_name, model);
+        return gen_node(str, inputs.size(), inputs.begin(), old, new_odef, package_name, model);
     }
     template <size_t N>
     static inline OpRef gen_node(const hnnx::opname_tag_t str, std::array<OpRef, N> const &inputs, const OpDef &old,
-                                 char const *package_name = THIS_PKG_NAME_STR, const OpDef *model = nullptr)
+                                 const OutputDef *new_odef = nullptr, char const *package_name = THIS_PKG_NAME_STR,
+                                 const OpDef *model = nullptr)
     {
-        return gen_node(str, N, inputs.data(), old, package_name, model);
+        return gen_node(str, N, inputs.data(), old, new_odef, package_name, model);
     }
 
     API_EXPORT OpRef gen_Shape_in_graph(const OpDef &old, int rank, size_t const *sizes);
@@ -2566,15 +2585,15 @@ struct Recompilable_param {
 };
 
 #define COMPILER_FOR_UPDATEABLE_QUANT_WITH_CHECKS(XXF, FUNC, PARA, PRE, POST)                                          \
-    template <> constexpr bool has_compile_method<XXF> = true;                                                         \
-    template <> struct OpaqueT_FOR<XXF> {                                                                              \
+    template <> constexpr bool has_compile_method<&XXF> = true;                                                        \
+    template <> struct OpaqueT_FOR<&XXF> {                                                                             \
         using type = PARA;                                                                                             \
     };                                                                                                                 \
-    template <> bool hnnx::TypicalOpWithCompiler<XXF, PARA>::check_constraint_for_recompile(Graph &graph_in) const     \
+    template <> bool hnnx::TypicalOpWithCompiler<&XXF, PARA>::check_constraint_for_recompile(Graph &graph_in) const    \
     {                                                                                                                  \
         return POST(graph_in, this);                                                                                   \
     }                                                                                                                  \
-    template <> hnnx::Executable::ItemType hnnx::TypicalOpWithCompiler<XXF, PARA>::compile(Graph &graph_in) const      \
+    template <> hnnx::Executable::ItemType hnnx::TypicalOpWithCompiler<&XXF, PARA>::compile(Graph &graph_in) const     \
     {                                                                                                                  \
         static_assert(check_szal());                                                                                   \
         auto [f, v] = FUNC(graph_in, this);                                                                            \

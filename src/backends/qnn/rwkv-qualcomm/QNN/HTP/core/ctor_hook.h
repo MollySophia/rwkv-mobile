@@ -32,7 +32,8 @@ template <typename T> inline void ctor_ophook(OpIoPtrs const &op_io_ptrs)
 #define CTOR_HOOK(FUNC, VAR, CODE)
 #else
 #define CTOR_HOOK(FUNC, VAR, CODE)                                                                                     \
-    template <> [[maybe_unused]] inline void hnnx::ctor_hook(Graph &graph_in, typename DerivedType<(FUNC)>::type &VAR) \
+    template <>                                                                                                        \
+    [[maybe_unused]] inline void hnnx::ctor_hook(Graph &graph_in, typename DerivedType<(&FUNC)>::type &VAR)            \
     {                                                                                                                  \
         CODE                                                                                                           \
     }
@@ -41,7 +42,7 @@ template <typename T> inline void ctor_ophook(OpIoPtrs const &op_io_ptrs)
 // maybe we could add more than one ophook... just define this with different #'s of parms.
 // 'HOOKCLASS' must be a subclass of OpHookBase, which defines the hook.
 #define CTOR_OPHOOK(FUNC, HOOKCLASS)                                                                                   \
-    template <> inline void hnnx::ctor_ophook<typename DerivedType<(FUNC)>::type>(OpIoPtrs const &op_io_ptrs)          \
+    template <> inline void hnnx::ctor_ophook<typename DerivedType<(&FUNC)>::type>(OpIoPtrs const &op_io_ptrs)         \
     {                                                                                                                  \
         static constexpr HOOKCLASS hook;                                                                               \
         const_cast<OpIoPtrs &>(op_io_ptrs).add_ophook(&hook);                                                          \

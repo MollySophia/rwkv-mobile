@@ -324,6 +324,13 @@ inline void ALWAYSINLINE l2pref(const void *p, uint32_t height, uint32_t width, 
     asm volatile(" l2fetch(%0,%1) " : : "r"(p), "r"(control));
 }
 
+inline void ALWAYSINLINE unpause()
+{
+#if (__HEXAGON_ARCH__ >= 73)
+    asm volatile("unpause");
+#endif
+}
+
 inline void ALWAYSINLINE pause_just_enough()
 {
 #if (__HEXAGON_ARCH__ >= 73)
@@ -341,6 +348,17 @@ inline void ALWAYSINLINE pause_just_enough()
 // LCOV_EXCL_STOP
 #endif
 }
+
+// LCOV_EXCL_START [SAFTYSWCCB-1735] Hawi
+inline void ALWAYSINLINE copymem(void *dest, const void *src, unsigned n)
+{
+#if HEX_ARCH >= 91
+    asm volatile("memcpy(%0,%1,%2);" : : "r"(dest), "r"(src), "r"(n - 1) : "memory");
+#else
+    abort();
+#endif
+}
+// LCOV_EXCL_STOP
 
 #else
 
@@ -395,6 +413,18 @@ inline void pause_just_enough()
     std::this_thread::yield();
 #endif
 }
+
+inline void unpause() {}
+
+// LCOV_EXCL_START [SAFTYSWCCB-1544]
+inline void ALWAYSINLINE copymem(void *dest, const void *src, unsigned n)
+{
+    // Needs to be a power of 2 and have a max size of 256K.
+    assert(((n > 0) && ((n & (n - 1)) == 0)) && (n <= 256 * 1024));
+
+    memcpy(dest, src, n);
+}
+// LCOV_EXCL_STOP
 
 #endif
 
@@ -550,6 +580,9 @@ inline HVX_Vector uint64_to_qfloat(HVX_Vector ll_hi, HVX_Vector ll_lo)
     mant0 = Q6_V_vand_VV(mant0, qmask);
     exp0 = Q6_Vw_vsub_VwVw(qexpmin, exp0); //merge mant and exponent
     qf32_out = Q6_V_vor_VV(mant0, exp0); //qfloat
+    // handling float conversion for 0 manually
+    HVX_Vector maskZero = Q6_V_vand_QV(Q6_Q_vcmp_eq_VwVw(ll_lo, vzero), Q6_Q_vcmp_eq_VwVw(ll_hi, vzero));
+    qf32_out = Q6_V_vmux_QVV(maskZero, vzero, qf32_out);
     return (qf32_out);
 }
 

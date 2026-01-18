@@ -131,9 +131,10 @@ typedef enum {
   QNN_DATATYPE_UINT_64 = 0x0164,
 
   // Float: 0x02XX
-  QNN_DATATYPE_FLOAT_16 = 0x0216,
-  QNN_DATATYPE_FLOAT_32 = 0x0232,
-  QNN_DATATYPE_FLOAT_64 = 0x0264,
+  QNN_DATATYPE_FLOAT_16  = 0x0216,
+  QNN_DATATYPE_BFLOAT_16 = 0x0226,
+  QNN_DATATYPE_FLOAT_32  = 0x0232,
+  QNN_DATATYPE_FLOAT_64  = 0x0264,
 
   // Signed Fixed Point: 0x03XX
   QNN_DATATYPE_SFIXED_POINT_4  = 0x0304,
@@ -361,6 +362,7 @@ typedef struct {
     uint8_t uint8Value;
     int8_t int8Value;
     uint8_t bool8Value;
+    int16_t bfloat16Value;
     const char* stringValue;
   };
 } Qnn_Scalar_t;
@@ -392,18 +394,57 @@ typedef enum {
   /// Indicates bit-width per-axis scale-offset encoding type. See Qnn_BwAxisScaleOffset_t. Support
   /// can be checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_AXIS_SCALE_OFFSET.
   QNN_QUANTIZATION_ENCODING_BW_AXIS_SCALE_OFFSET = 3,
-  /// Indicates per-block scale-offset encoding type. See Qnn_BlockScaleOffset_t. Support can be
-  /// checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BLOCK_SCALE_OFFSET.
+  /// Indicates per-block scale-offset encoding type. See Qnn_BlockEncoding_t. Support can be
+  /// checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BLOCK.
   QNN_QUANTIZATION_ENCODING_BLOCK = 4,
-  /// Indicates per-block scale-offset encoding type. See Qnn_BlockScaleOffset_t. Support can be
+  /// Indicates per-block scale-offset encoding type. See Qnn_BlockwiseExpansion_t. Support can be
   /// checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BLOCKWISE_EXPANSION.
   QNN_QUANTIZATION_ENCODING_BLOCKWISE_EXPANSION = 5,
   /// Indicates VQ compression encoding type. See Qnn_VectorQuantCompression_t. Support can be
   /// checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_VQ_COMPRESSION.
   QNN_QUANTIZATION_ENCODING_VECTOR = 6,
+  /// Indicates per-block float scale-offset encoding type. See Qnn_FloatBlockEncoding_t. Support
+  /// can be checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_FLOAT_BLOCK.
+  QNN_QUANTIZATION_ENCODING_FLOAT_BLOCK = 7,
+  /// Indicates bit-width per-axis scale-offset mapped encoding type. See Qnn_BwAxisScaleOffsetMapped_t. Support
+  /// can be checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_AXIS_SCALE_OFFSET_MAPPED.
+  QNN_QUANTIZATION_ENCODING_BW_AXIS_SCALE_OFFSET_MAPPED = 8,
+  /// Indicates per-block scale-offset, bw, mapped encoding type. See Qnn_BwBlockMapped_t. Support can be
+  /// checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_BLOCK_SCALE_OFFSET_MAPPED.
+  QNN_QUANTIZATION_ENCODING_BW_BLOCK_MAPPED = 9,
+  /// Indicates per-block scale-offset encoding type. See Qnn_BwBlockwiseExpansionMapped_t. Support can be
+  /// checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_BLOCKWISE_EXPANSION_MAPPED.
+  QNN_QUANTIZATION_ENCODING_BW_BLOCKWISE_EXPANSION_MAPPED = 10,
+  /// Indicates bit-width per-block float scale-offset encoding type. See Qnn_BwFloatBlockEncoding_t. Support
+  /// can be checked via QNN_PROPERTY_TENSOR_SUPPORT_QUANTIZATION_ENCODING_BW_FLOAT_BLOCK.
+  QNN_QUANTIZATION_ENCODING_BW_FLOAT_BLOCK = 11,
   // Unused, present to ensure 32 bits.
   QNN_QUANTIZATION_ENCODING_UNDEFINED = 0x7FFFFFFF
 } Qnn_QuantizationEncoding_t;
+
+/**
+ * @brief An enum to specify quantized value mapping scheme
+ *
+ */
+typedef enum {
+  /// Indicates standard symmetric 2's compliment mapping
+  /// For 2-bit quantization, signed values {-2, -1, 0, 1} map directly to {-2, -1, 0, 1}
+  QNN_QUANTIZATION_ENCODING_MAPPING_STANDARD_SYMMETRIC = 0,
+  /// Indicates 2's compliment mapping with a positive shift of one
+  /// For 2-bit quantization, signed values {-2, -1, 0, 1} map to {-1, 0, 1, 2}
+  /// with dequantized values recoverable with scale * {-1, 0, 1, 2}
+  QNN_QUANTIZATION_ENCODING_MAPPING_ASYMMETRIC_PLUS_ONE = 1,
+  /// Indicates linear mapping symmetric about zero, but excluding zero from the range
+  /// For tensors with signed dataType dequantized values are recovered with:
+  /// w = scale * (w_q + 0.5)
+  /// For tensors with unsigned dataType dequantized values are recovered with:
+  /// w = scale * (w_q - 2^(bitwidth - 1) + 0.5)
+  /// For 2-bit quantization, signed values {-2, -1, 0, 1} map to {-1.5, -0.5, 0.5, 1.5}
+  /// with dequantized values recoverable with scale * {-1.5, -0.5, 0.5, 1.5}
+  QNN_QUANTIZATION_ENCODING_MAPPING_LINEAR_SYMMETRIC_EXCLUDE_ZERO = 2,
+  // Unused, present to ensure 32 bits.
+  QNN_QUANTIZATION_ENCODING_MAPPING_UNDEFINED = 0x7FFFFFFF
+} Qnn_QuantizationEncodingMapping_t;
 
 /**
  * @brief A struct to express scale-offset quantization encoding.
@@ -542,6 +583,63 @@ typedef struct {
 // clang-format on
 
 /**
+ * @brief A struct to express per-axis quantization parameters as collection of scales, offsets,
+ * bitwidth, and mapping.
+ *
+ * bitwidth must be > 0 and applies commonly to all axes. It is used to express the true number of
+ * bits used to quantize the value, which may be different from the bitwidth of the tensor indicated
+ * by its data type. For example: the quantization encoding for a tensor of type
+ * QNN_DATATYPE_UFIXED_POINT_8 that is quantized to 4-bit precision may be expressed by setting
+ * bitwidth = 4. In such circumstances, data quantized to a lower precision will still occupy the
+ * full extent of bits allotted to the tensor as per its data type in unpacked form.
+ *
+ * Tensor elements are expected to occupy the least significant bits of the total size alloted to
+ * the datatype, and all bits above the specified bitwidth will be ignored. For example: an 8-bit
+ * datatype tensor quantized to 4-bit precision will be interpreted as a 4-bit value contained in
+ * the lower 4 bits of each element, and the upper 4 bits will be ignored. For signed datatypes, the
+ * value will be interpreted as a two's complement integer where the signed bit is the most
+ * significant bit permitted by the specified bitwidth. For example: -3 would be represented as
+ * 0b11111101 as a signed 8-bit integer, but can also be represented as 0b00001101 as a signed 4-bit
+ * integer stored in an 8-bit container. Either of these representations are valid to express -3 as
+ * a 4-bit signed integer in an 8-bit container, and will be treated identically because the upper 4
+ * bits will be ignored.
+ */
+typedef struct {
+  /// bitwidth must be <= number of bits specified by data type of tensor
+  uint32_t bitwidth;
+  int32_t axis;
+  /// Specifies mapping from low bitwidth values to quantized values
+  /// e.g. for custom symmetric encodings
+  /// bitwidth=2 mapping=QNN_QUANTIZATION_ENCODING_MAPPING_LINEAR_SYMMETRIC_EXCLUDE_ZERO
+  /// signed values {-2, -1, 0, 1} map to quantized values of {-1.5, -0.5, 0.5, 1.5}
+  /// such that dequantized_values = scale * {-1.5, -0.5, 0.5, 1.5}
+  /// Backends are free to manage integer representation at execution time.
+  /// For the above example, if 4-bit values are used at execution time, the backend may
+  /// use the mapping {-2, -1, 0, 1} -> {-3, -1, 1, 3} adjusting the scale to scale/2
+  Qnn_QuantizationEncodingMapping_t mapping;
+  /// numElements applies to both scales and offsets and they are supposed to be a one-to-one match
+  uint32_t numElements;
+  /// scales must be strictly positive
+  float* scales;
+  /// offsets must match scales in their dimension except when it can be NULL to indicate that the
+  /// value is symmetrically quantized and hence, offset = 0
+  int32_t* offsets;
+} Qnn_BwAxisScaleOffsetMapped_t;
+
+// clang-format off
+/// Qnn_BwAxisScaleOffsetMapped_t initializer macro
+#define QNN_BW_AXIS_SCALE_OFFSET_MAPPED_INIT                               \
+  {                                                                        \
+    0u,                                                   /*bitwidth*/     \
+    0,                                                    /*axis*/         \
+    QNN_QUANTIZATION_ENCODING_MAPPING_STANDARD_SYMMETRIC, /*mapping*/      \
+    0u,                                                   /*numElements*/  \
+    NULL,                                                 /*scales*/       \
+    NULL                                                  /*offsets*/      \
+  }
+// clang-format on
+
+/**
  * @brief A struct to express block quantization parameters. A tensor is divided into blocks of
  * size blockSize, where blockSize is an array of length rank.
  *
@@ -569,6 +667,48 @@ typedef struct {
 // clang-format on
 
 /**
+ * @brief A struct to express block quantization parameters. A tensor is divided into blocks of
+ * size blockSize, where blockSize is an array of length rank.
+ *
+ * @note num of scaleOffsets (i.e. num of blocks) must be ==
+ * ceil(dimensions[0]/blockSize[0])*ceil(dimensions[1]/blockSize[1]) ...
+ * .... *ceil(dimensions[rank-1] / blockSize[rank-1]). *
+ */
+typedef struct {
+  /// bitwidth must be <= number of bits specified by data type of tensor
+  uint32_t bitwidth;
+
+  /// Specifies mapping from low bitwidth values to quantized values
+  /// e.g. for custom symmetric encodings
+  /// bitwidth=2 mapping=QNN_QUANTIZATION_ENCODING_MAPPING_LINEAR_SYMMETRIC_EXCLUDE_ZERO
+  /// signed values {-2, -1, 0, 1} map to quantized values of {-1.5, -0.5, 0.5, 1.5}
+  /// such that dequantized_values = scale * {-1.5, -0.5, 0.5, 1.5}
+  /// Backends are free to manage integer representation at execution time.
+  /// For the above example, if 4-bit values are used at execution time, the backend may
+  /// use the mapping {-2, -1, 0, 1} -> {-3, -1, 1, 3} adjusting the scale to scale/2
+  Qnn_QuantizationEncodingMapping_t mapping;
+
+  /// Dimensions of the block in number of tensor elements.
+  /// Pointer to an array of size RANK(Weight). Each element specifies the size along the
+  /// corresponding dimension
+  uint32_t* blockSize;
+
+  /// Array of size numBlocks of scale offset pairs.
+  Qnn_ScaleOffset_t* scaleOffset;
+} Qnn_BwBlockMapped_t;
+
+// clang-format off
+/// Qnn_BwBlockMapped_t initializer macro
+#define QNN_BW_BLOCK_MAPPED_ENCODING_INIT                                  \
+  {                                                                        \
+    0u,                                                   /*bitwidth*/     \
+    QNN_QUANTIZATION_ENCODING_MAPPING_STANDARD_SYMMETRIC, /*mapping*/      \
+    NULL,                                                 /*blockSize*/    \
+    NULL                                                  /*scaleOffset*/  \
+  }                                                                        \
+// clang-format on
+
+/**
  * @brief An enum to specify blockwise expansion block scale storage widths
  *
  */
@@ -592,7 +732,7 @@ typedef struct {
     Qnn_ScaleOffset_t* scaleOffsets;
     /// Number of blocks within the axis.
     uint32_t numBlocksPerAxis;
-    /// Block bitwidth (e.g. 12 bits for 4 to 16 expansion)
+    /// Per block scale factor bitwidth (e.g. 12 bits for 4 to 16 expansion)
     uint32_t blockScaleBitwidth;
     /// Size of the block scaling storage, must be able to store at least blockScaleBitwidth sized values.
     Qnn_BlockwiseExpansionBlockScaleStorageType_t blockScaleStorageType;
@@ -607,7 +747,7 @@ typedef struct {
 } Qnn_BlockwiseExpansion_t;
 
 // clang-format off
-/// Qnn_BlockScaleOffset_t initializer macro
+/// Qnn_BlockwiseExpansion_t initializer macro
 #define QNN_BLOCKWISE_EXPANSION_INIT                                              \
   {                                                                               \
     0,                                                  /*axis*/                  \
@@ -619,6 +759,61 @@ typedef struct {
       NULL,                                             /*blocksScale8*/          \
     }                                                                             \
   }                                                                               \
+// clang-format on
+
+/**
+ * @brief A struct to express bw block-wise  mapped expansion quantization parameters.
+ *
+ * @note This quantization encoding must not be used with dynamically shaped tensors.
+ *
+ */
+typedef struct {
+  /// Weight bitwidth must be <= number of bits specified by data type of tensor
+  uint32_t bitwidth;
+  /// Specifies mapping from low bitwidth values to quantized values
+  /// e.g. for custom symmetric encodings
+  /// bitwidth=2 mapping=QNN_QUANTIZATION_ENCODING_MAPPING_LINEAR_SYMMETRIC_EXCLUDE_ZERO
+  /// signed values {-2, -1, 0, 1} map to quantized values of {-1.5, -0.5, 0.5, 1.5}
+  /// such that dequantized_values = scale * {-1.5, -0.5, 0.5, 1.5}
+  /// Backends are free to manage integer representation at execution time.
+  /// For the above example, if 4-bit values are used at execution time, the backend may
+  /// use the mapping {-2, -1, 0, 1} -> {-3, -1, 1, 3} adjusting the scale to scale/2
+  Qnn_QuantizationEncodingMapping_t mapping;
+  /// The dimension (typically the channel dimension)
+  int32_t axis;
+  /// Array of size axisSize of scale offset pairs.
+  Qnn_ScaleOffset_t* scaleOffsets;
+  /// Number of blocks within the axis.
+  uint32_t numBlocksPerAxis;
+  /// Per block scale factor bitwidth (e.g. 12 bits for 4 to 16 expansion)
+  uint32_t blockScaleBitwidth;
+  /// Size of the block scaling storage, must be able to store at least blockScaleBitwidth sized values.
+  Qnn_BlockwiseExpansionBlockScaleStorageType_t blockScaleStorageType;
+  union UNNAMED {
+    /// A contiguous array of block scalings of size axisSize*numBlocksPerAxis. The array is laid out such that an element can be accessed via blocksScale8[axisIter*numBlocksPerAxis+blockIter].
+    /// Used when blockStorageSize is QNN_BLOCKWISE_EXPANSION_BITWIDTH_SCALE_STORAGE_8.
+    uint8_t* blocksScale8;
+    /// A contiguous array of block scalings of size axisSize*numBlocksPerAxis. The array is laid out such that an element can be accessed via blocksScale16[axisIter*numBlocksPerAxis+blockIter].
+    /// Used when blockStorageSize is QNN_BLOCKWISE_EXPANSION_BITWIDTH_SCALE_STORAGE_16.
+    uint16_t* blocksScale16;
+  };
+} Qnn_BwBlockwiseExpansionMapped_t;
+
+// clang-format off
+/// Qnn_BwBlockwiseExpansionMapped_t initializer macro
+#define QNN_BW_BLOCKWISE_EXPANSION_MAPPED_INIT                                                     \
+  {                                                                                                \
+    0u,                                                                  /*bitwidth*/              \
+    QNN_QUANTIZATION_ENCODING_MAPPING_STANDARD_SYMMETRIC,                /*mapping*/               \
+    0,                                                                   /*axis*/                  \
+    NULL,                                                                /*scaleOffsets*/          \
+    0u,                                                                  /*numBlocksPerAxis*/      \
+    0u,                                                                  /*blockScaleBitwidth*/    \
+    QNN_BLOCKWISE_EXPANSION_BITWIDTH_SCALE_STORAGE_UNDEFINED,            /*blockScaleStorageType*/ \
+    {                                                                                              \
+      NULL,                                                              /*blocksScale8*/          \
+    }                                                                                              \
+  }                                                                                                \
 // clang-format on
 
 /**
@@ -663,6 +858,81 @@ typedef struct {
 // clang-format on
 
 /**
+* @brief A struct to express float scale-offset quantization encoding.
+*
+* float_value = (quantized_value + offset/scale) * scale
+*/
+typedef struct {
+    /// scale must be strictly positive
+    float scale;
+    float offset;
+} Qnn_FloatScaleOffset_t;
+
+// clang-format off
+/// Qnn_FloatScaleOffset_t initializer macro
+#define QNN_FLOAT_SCALE_OFFSET_INIT \
+  {                                 \
+    0.0f, /*scale*/                 \
+    0.0f  /*offset*/                \
+  }
+// clang-format on
+
+/**
+ * @brief A struct to express float block quantization parameters. A tensor is divided into blocks of
+ * size blockSize, where blockSize is an array of length rank.
+ *
+ * * @note num of floatScaleOffsets (i.e. num of blocks) must be ==
+ * ceil(dimensions[0]/blockSize[0])*ceil(dimensions[1]/blockSize[1]) ...
+ * .... *ceil(dimensions[rank-1] / blockSize[rank-1]).
+**/
+typedef struct {
+    /// Dimensions of the block in number of tensor elements.
+    /// Pointer to an array of size RANK(Weight). Each element specifies the size along the
+    /// corresponding dimension
+    uint32_t* blockSize;
+    /// Array of size numBlocks of scale offset pairs.
+    Qnn_FloatScaleOffset_t* floatScaleOffset;
+} Qnn_FloatBlockEncoding_t;
+
+// clang-format off
+/// Qnn_FloatBlockEncoding_t initializer macro
+#define QNN_FLOAT_BLOCK_ENCODING_INIT \
+  {                                   \
+    0u,      /*blockSize*/            \
+    NULL     /*floatScaleOffset*/     \
+  }                                   \
+// clang-format on
+
+/**
+ * @brief A struct to express bit-width float block quantization parameters. A tensor is divided into blocks of
+ * size blockSize, where blockSize is an array of length rank.
+ *
+ * * @note num of floatScaleOffsets (i.e. num of blocks) must be ==
+ * ceil(dimensions[0]/blockSize[0])*ceil(dimensions[1]/blockSize[1]) ...
+ * .... *ceil(dimensions[rank-1] / blockSize[rank-1]).
+**/
+typedef struct {
+    /// bitwidth must be <= number of bits specified by data type of tensor
+    uint32_t bitwidth;
+    /// Dimensions of the block in number of tensor elements.
+    /// Pointer to an array of size RANK(Weight). Each element specifies the size along the
+    /// corresponding dimension
+    uint32_t* blockSize;
+    /// Array of size numBlocks of scale offset pairs.
+    Qnn_FloatScaleOffset_t* floatScaleOffset;
+} Qnn_BwFloatBlockEncoding_t;
+
+// clang-format off
+/// Qnn_BwFloatBlockEncoding_t initializer macro
+#define QNN_BW_FLOAT_BLOCK_ENCODING_INIT \
+  {                                      \
+    0u,      /*bitwidth*/                \
+    0u,      /*blockSize*/               \
+    NULL     /*floatScaleOffset*/        \
+  }                                      \
+// clang-format on
+
+/**
  * @brief A struct which defines the quantization parameters, and union of supported quantization
  * encoding structs.
  */
@@ -685,6 +955,16 @@ typedef struct {
     Qnn_BlockwiseExpansion_t* blockwiseExpansion;
     /// Used when quantizationEncoding is QNN_QUANTIZATION_ENCODING_VECTOR. Note that this field is a pointer.
     Qnn_VectorEncoding_t* vectorEncoding;
+    /// Used when quantizationEncoding is QNN_QUANTIZATION_ENCODING_FLOAT_BLOCK. Note that this field is a value.
+    Qnn_FloatBlockEncoding_t floatBlockEncoding;
+    /// Used when quantizationEncoding is QNN_QUANTIZATION_ENCODING_BW_AXIS_SCALE_OFFSET_MAPPED. Note that this field is a pointer.
+    Qnn_BwAxisScaleOffsetMapped_t* bwAxisScaleOffsetMappedEncoding;
+    /// Used when quantizationEncoding is QNN_QUANTIZATION_ENCODING_BW_BLOCK_MAPPED. Note that this field is a pointer.
+    Qnn_BwBlockMapped_t* bwBlockMappedEncoding;
+    /// Used when quantizationEncoding is QNN_QUANTIZATION_ENCODING_BW_BLOCKWISE_EXPANSION_MAPPED. Note that this field is a pointer.
+    Qnn_BwBlockwiseExpansionMapped_t* bwBlockwiseExpansionMappedEncoding;
+    /// Used when quantizationEncoding is QNN_QUANTIZATION_ENCODING_BW_FLOAT_BLOCK. Note that this field is a value.
+    Qnn_BwFloatBlockEncoding_t bwFloatBlockEncoding;
   };
 } Qnn_QuantizeParams_t;
 
@@ -727,29 +1007,29 @@ typedef struct {
 #define QNN_TENSOR_DATA_FORMAT_MX 3
 
 /**
-* @brief An tensor compressed in memory in UBWC_RGBA8888 format, using the universal
+ * @brief An tensor compressed in memory in UBWC_RGBA8888 format, using the universal
  *       bandwidth compression (UBWC) scheme.
-*/
+ */
 #define QNN_TENSOR_DATA_FORMAT_UBWC_RGBA8888 4
 
 /**
-* @brief An tensor compressed in memory in UBWC_NV12 format, using the universal
+ * @brief An tensor compressed in memory in UBWC_NV12 format, using the universal
  *       bandwidth compression (UBWC) scheme.
-*/
+ */
 #define QNN_TENSOR_DATA_FORMAT_UBWC_NV12 5
 
 /**
-* @brief An tensor compressed in memory in UBWC_NV12 format, using the universal
+ * @brief An tensor compressed in memory in UBWC_NV12 format, using the universal
  *       bandwidth compression (UBWC) scheme. This data format particularly represents
  *       the Y plane of the NV12 format
-*/
+ */
 #define QNN_TENSOR_DATA_FORMAT_UBWC_NV12_Y 6
 
 /**
-* @brief An tensor compressed in memory in UBWC_NV12 format, using the universal
+ * @brief An tensor compressed in memory in UBWC_NV12 format, using the universal
  *       bandwidth compression (UBWC) scheme. This data format particularly represents
  *       the UV plane of the NV12 format
-*/
+ */
 #define QNN_TENSOR_DATA_FORMAT_UBWC_NV12_UV 7
 
 /**
@@ -757,8 +1037,28 @@ typedef struct {
  *        specifically for HMX weights.
  *        This format only supports the following datatype for now:
  *        UFIXED_UINT_8 with offset=128.
-*/
+ */
 #define QNN_TENSOR_DATA_FORMAT_HMX_WEIGHT_LAYOUT 8
+
+/**
+ * @brief An tensor compressed in memory in UBWC_NV124R format, using the universal
+ *       bandwidth compression (UBWC) scheme.
+ */
+#define QNN_TENSOR_DATA_FORMAT_UBWC_NV124R 9
+
+/**
+ * @brief An tensor compressed in memory in UBWC_NV124R format, using the universal
+ *       bandwidth compression (UBWC) scheme. This data format particularly represents
+ *       the Y plane of the NV124R format
+ */
+#define QNN_TENSOR_DATA_FORMAT_UBWC_NV124R_Y 10
+
+/**
+ * @brief An tensor compressed in memory in UBWC_NV124R format, using the universal
+ *       bandwidth compression (UBWC) scheme. This data format particularly represents
+ *       the UV plane of the NV124R format
+ */
+#define QNN_TENSOR_DATA_FORMAT_UBWC_NV124R_UV 11
 
 /**
  * @brief Tensor data format identifier. The default format
@@ -1273,47 +1573,47 @@ typedef struct {
 typedef enum {
   QNN_SOC_MODEL_UNKNOWN = 0,
 
-  QNN_SOC_MODEL_SDM845  = 1,
-  QNN_SOC_MODEL_SDM835  = 2,
-  QNN_SOC_MODEL_SDM821  = 3,
-  QNN_SOC_MODEL_SDM820  = 4,
-  QNN_SOC_MODEL_SDM801  = 5,
-  QNN_SOC_MODEL_SDM670  = 6,
-  QNN_SOC_MODEL_SDM660  = 7,
-  QNN_SOC_MODEL_SDM652  = 8,
-  QNN_SOC_MODEL_SDM636  = 9,
-  QNN_SOC_MODEL_SDM630  = 10,
-  QNN_SOC_MODEL_SDM625  = 11,
-  QNN_SOC_MODEL_SDM855  = 12,
-  QNN_SOC_MODEL_SDM710  = 13,
-  QNN_SOC_MODEL_SDM632  = 15,
-  QNN_SOC_MODEL_SM6150  = 16,
-  QNN_SOC_MODEL_SM7150  = 17,
-  QNN_SOC_MODEL_QCS405  = 18,
-  QNN_SOC_MODEL_SM6125  = 19,
-  QNN_SOC_MODEL_QCS403  = 20,
-  QNN_SOC_MODEL_SDM865  = 21,
-  QNN_SOC_MODEL_IPQ6018 = 23,
-  QNN_SOC_MODEL_IPQ6028 = 24,
-  QNN_SOC_MODEL_SM7250  = 25,
-  QNN_SOC_MODEL_SA8195  = 26,
-  QNN_SOC_MODEL_SM6250  = 27,
-  QNN_SOC_MODEL_SM4250  = 28,
-  QNN_SOC_MODEL_SM6350  = 29,
-  QNN_SOC_MODEL_SM8350  = 30,
-  QNN_SOC_MODEL_SM4350  = 31,
-  QNN_SOC_MODEL_SM7350  = 32,
-  QNN_SOC_MODEL_QCS410  = 33,
-  QNN_SOC_MODEL_SM8325  = 34,
-  QNN_SOC_MODEL_SM7325  = 35,
-  QNN_SOC_MODEL_SM8450  = 36,
-  QNN_SOC_MODEL_SC8280X = 37,
-  QNN_SOC_MODEL_SM7315  = 38,
-  QNN_SOC_MODEL_SA8295  = 39,
-  QNN_SOC_MODEL_SM6225  = 40,
-  QNN_SOC_MODEL_SM7450  = 41,
-  QNN_SOC_MODEL_SM8475  = 42,
-  QNN_SOC_MODEL_SM8550  = 43,
+  QNN_SOC_MODEL_SDM845   = 1,
+  QNN_SOC_MODEL_SDM835   = 2,
+  QNN_SOC_MODEL_SDM821   = 3,
+  QNN_SOC_MODEL_SDM820   = 4,
+  QNN_SOC_MODEL_SDM801   = 5,
+  QNN_SOC_MODEL_SDM670   = 6,
+  QNN_SOC_MODEL_SDM660   = 7,
+  QNN_SOC_MODEL_SDM652   = 8,
+  QNN_SOC_MODEL_SDM636   = 9,
+  QNN_SOC_MODEL_SDM630   = 10,
+  QNN_SOC_MODEL_SDM625   = 11,
+  QNN_SOC_MODEL_SDM855   = 12,
+  QNN_SOC_MODEL_SDM710   = 13,
+  QNN_SOC_MODEL_SDM632   = 15,
+  QNN_SOC_MODEL_SM6150   = 16,
+  QNN_SOC_MODEL_SM7150   = 17,
+  QNN_SOC_MODEL_QCS405   = 18,
+  QNN_SOC_MODEL_SM6125   = 19,
+  QNN_SOC_MODEL_QCS403   = 20,
+  QNN_SOC_MODEL_SDM865   = 21,
+  QNN_SOC_MODEL_IPQ6018  = 23,
+  QNN_SOC_MODEL_IPQ6028  = 24,
+  QNN_SOC_MODEL_SM7250   = 25,
+  QNN_SOC_MODEL_SA8195   = 26,
+  QNN_SOC_MODEL_SM6250   = 27,
+  QNN_SOC_MODEL_SM4250   = 28,
+  QNN_SOC_MODEL_SM6350   = 29,
+  QNN_SOC_MODEL_SM8350   = 30,
+  QNN_SOC_MODEL_SM4350   = 31,
+  QNN_SOC_MODEL_SM7350   = 32,
+  QNN_SOC_MODEL_QCS410   = 33,
+  QNN_SOC_MODEL_SM8325   = 34,
+  QNN_SOC_MODEL_SM7325   = 35,
+  QNN_SOC_MODEL_SM8450   = 36,
+  QNN_SOC_MODEL_SC8280X  = 37,
+  QNN_SOC_MODEL_SM7315   = 38,
+  QNN_SOC_MODEL_SA8295   = 39,
+  QNN_SOC_MODEL_SM6225   = 40,
+  QNN_SOC_MODEL_SM7450   = 41,
+  QNN_SOC_MODEL_SM8475   = 42,
+  QNN_SOC_MODEL_SM8550   = 43,
   QNN_SOC_MODEL_SXR1230P = 45,
   QNN_SOC_MODEL_SSG2115P = 46,
   QNN_SOC_MODEL_STP6225P = 47,

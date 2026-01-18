@@ -228,7 +228,7 @@ TENSORDEF_MC(PlainFloat16_TCM, Flat_16, DType::Float16, MemoryClass::TCM, "Fe")
 TENSORDEF_MC(PlainFloat16_5D_TCM, Flat5D_16, DType::Float16, MemoryClass::TCM, "F5e")
 TENSORDEF_MC(BFloat16Crouton_TCM, Crouton_16, DType::BFloat16, MemoryClass::TCM, "Cg")
 TENSORDEF_MC(PlainBFloat16_TCM, Flat_16, DType::BFloat16, MemoryClass::TCM, "Fg")
-TENSORDEF_MC(PlainBFloat16_5D_TCM, Flat_16, DType::BFloat16, MemoryClass::TCM, "F5g")
+TENSORDEF_MC(PlainBFloat16_5D_TCM, Flat5D_16, DType::BFloat16, MemoryClass::TCM, "F5g")
 
 // 32-bit
 TENSORDEF(Int32, Flat_32, DType::Int32, "fi")
@@ -416,7 +416,7 @@ struct ModifiedDerivedTypeParent {
     using PlainFloatTensor_TCM = PlainFloatTensor;
     using PlainFloatTensor5D_TCM = PlainFloatTensor5D;
     using PlainFloat16Tensor_TCM = PlainFloat16Tensor;
-    // using PlainBFloat16Tensor5D_TCM = PlainBFloat16Tensor5D;
+    using PlainBFloat16Tensor5D_TCM = PlainBFloat16Tensor5D;
     using PlainBFloat16Tensor_TCM = PlainBFloat16Tensor;
     using PlainFloat16Tensor5D_TCM = PlainFloat16Tensor5D;
     using QFloatTensor_TCM = QFloatTensor;
@@ -518,11 +518,10 @@ using TypicalTensors =
         std::tuple<PlainFloatTensor, PlainFloatTensor5D, PlainFloat16Tensor, QuantUint8Tensor, QuantUint8Tensor5D,
                    QuantInt8Tensor, QuantInt8Tensor5D, QuantUint16Tensor, QuantUint16Tensor5D, QuantInt16Tensor,
                    QuantInt32Tensor, Int32Tensor, Int32Tensor5D, Int32Tensor6D, QUint8CroutonTensor, QInt8CroutonTensor,
-                   QUint8Crouton4x1Tensor, QUint8Crouton2x2Tensor, QUint16CroutonTensor, QInt16CroutonTensor, //
-                   QUint16CroutonTensor_AR4, QUint16CroutonTensor_AR8, //
-                   QInt32CroutonTensor, QFloatTensor, QFloatCroutonTensor, Int32CroutonTensor, PlainFloat16Tensor_TCM,
-                   PlainFloat16Tensor5D, Int64Tensor, QuantInt16Tensor5D, PlainBFloat16Tensor, PlainBFloat16Tensor5D,
-                   BFloat16CroutonTensor>;
+                   QUint8Crouton4x1Tensor, QUint8Crouton2x2Tensor, QUint16CroutonTensor, QInt16CroutonTensor,
+                   QUint16CroutonTensor_AR4, QUint16CroutonTensor_AR8, QInt32CroutonTensor, QFloatTensor,
+                   QFloatCroutonTensor, Int32CroutonTensor, PlainFloat16Tensor_TCM, PlainFloat16Tensor5D, Int64Tensor,
+                   QuantInt16Tensor5D, PlainBFloat16Tensor, PlainBFloat16Tensor5D, BFloat16CroutonTensor>;
 
 namespace hnnx {
 // these tensor types are 'pre-registered' for deserialize

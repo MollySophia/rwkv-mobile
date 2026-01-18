@@ -34,6 +34,7 @@ typedef enum {
   QNN_HTP_DEVICE_ARCH_V75     = 75,
   QNN_HTP_DEVICE_ARCH_V79     = 79,
   QNN_HTP_DEVICE_ARCH_V81     = 81,
+  QNN_HTP_DEVICE_ARCH_V85     = 85,
   QNN_HTP_DEVICE_ARCH_UNKNOWN = 0x7fffffff
 } QnnHtpDevice_Arch_t;
 

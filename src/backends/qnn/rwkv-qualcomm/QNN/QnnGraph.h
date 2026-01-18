@@ -131,6 +131,13 @@ typedef enum {
   /// QNN_GRAPH_CONFIG_OPTION_PROFILE_HANDLE. The default is the
   /// QnnGraph_Config_t::numProfilingExecutions maximum numerical limit.
   QNN_GRAPH_CONFIG_OPTION_SET_PROFILING_NUM_EXECUTIONS = 6,
+  /// Indicates that binary sections (see QnnContext_getBinarySection) requested of this graph
+  /// must be able to have their weights updated at a later time using
+  /// QnnContext_updateBinarySection. For full context binary sections, only graphs with this config
+  /// enabled when the binary section is requested can have their weights updated at a later time.
+  /// By default this is not enabled, and the graph's weights in a binary section cannot be
+  /// updated via QnnContext_updateBinarySection.
+  QNN_GRAPH_CONFIG_OPTION_ENABLE_BINARY_SECTION_WEIGHTS_UPDATES = 7,
   // Unused, present to ensure 32 bits.
   QNN_GRAPH_CONFIG_OPTION_UNDEFINED = 0x7FFFFFFF
 } QnnGraph_ConfigOption_t;
@@ -165,6 +172,7 @@ typedef struct {
     Qnn_ProfileHandle_t profileHandle;
     QnnGraph_ProfilingState_t profilingState;
     uint32_t numProfilingExecutions;
+    uint8_t enableBinarySectionWeightsUpdates;
   };
 } QnnGraph_Config_t;
 

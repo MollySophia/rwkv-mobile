@@ -413,7 +413,14 @@ class TypicalOpIO : public TypicalOpIoBase<ArgsTuples<Ftype>::n_outputs, ArgsTup
     {
         this->assign_input_pointers(ioptrs, n_inputs, this->io.inputs().data());
         auto const *gen_arr_p = output_generator_array();
-        this->output_create(ioptrs, n_nonscratch_outputs, this->io.outputs().data(), gen_arr_p);
+        // Different behaviour for cloning when 'scratch' outputs are present:
+        // when cloning, the full output count is supplied to output_create,
+        // and output_scratch_create is called as usual.
+        unsigned n_outputs_to_create = n_nonscratch_outputs;
+        if (n_scratch_outputs > 0 && ioptrs.is_clone_mode()) {
+            n_outputs_to_create += n_scratch_outputs;
+        }
+        this->output_create(ioptrs, n_outputs_to_create, this->io.outputs().data(), gen_arr_p);
         if constexpr (n_scratch_outputs > 0) {
             this->output_scratch_create(ioptrs.graph(), n_scratch_outputs,
                                         this->io.outputs().data() + n_nonscratch_outputs,
@@ -425,9 +432,13 @@ class TypicalOpIO : public TypicalOpIoBase<ArgsTuples<Ftype>::n_outputs, ArgsTup
         Graph &graph_in = op_io_ptrs.graph();
         size_t const n_inputs_in = op_io_ptrs.n_inputs();
         size_t const n_outputs_in = op_io_ptrs.n_outputs();
+        unsigned n_outs_expected = n_nonscratch_outputs;
+        if (n_scratch_outputs > 0 && op_io_ptrs.is_clone_mode()) {
+            n_outs_expected += n_scratch_outputs;
+        }
         //debuglog("n_inputs_in=%zd n_outputs_in=%zd",n_inputs_in,n_outputs_in);
         //debuglog("expected n_inputs=%zd n_outputs=%zd",n_inputs,n_outputs);
-        if (n_nonscratch_outputs != n_outputs_in) return false;
+        if (n_outs_expected != n_outputs_in) return false;
         if (n_inputs != n_inputs_in) return false;
         //debuglog("numbers OK");
         if (!are_input_tensors_compatible<n_inputs, input_tuple_type>(graph_in, op_io_ptrs.in_tensors.data()))

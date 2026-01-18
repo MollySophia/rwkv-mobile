@@ -12,6 +12,7 @@
 #include <cassert>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -222,6 +223,22 @@ class AnyGraphContext {
     GraphPrepare &graph() const { return *m_graphp; }
 };
 
+/**
+ * @brief: OutputDefPatch struct is used to update specific members of an OutputDef, rather than replacing/copying an entire object
+ */
+struct OutputDefPatch {
+    std::optional<NN_UINT32_T> rank;
+    std::optional<DType> dtype;
+    std::optional<std::array<size_t, MAX_DIMENSIONS>> max_sizes;
+    std::array<bool, MAX_DIMENSIONS> set_dim{};
+    bool patch_maxsizes_partially = false;
+    std::optional<NN_INT32_T> zero_offset;
+    std::optional<float> stepsize;
+    static OutputDefPatch stepsize_zeroOffset(float, NN_INT32_T);
+    static OutputDefPatch new_dtype(enum DType);
+    void set_dim_max_size(size_t dim, size_t max_size);
+};
+
 class OpRef final {
   public:
     unsigned long long int input_id;
@@ -271,7 +288,7 @@ class OpDef : public OpDefFlags {
     API_EXPORT OpDef(GraphPrepare &graph_in, OpId my_id_in, hnnx::opname_tag_parm_t opstr_in, OutputDef const &odef,
                      ForConst const &)
         : OpDefFlags(opstr_in, true), splithist(), graphref(graph_in), id(my_id_in), opstr(opstr_in), input_defs(),
-          output_def(odef)
+          m_outputdef(odef)
     {
     }
 
@@ -285,8 +302,10 @@ class OpDef : public OpDefFlags {
     }
 
     std::vector<OpRef> input_defs; // These should be mutable, we mess with them during optimization
-    OutputDef output_def;
+  protected:
+    OutputDef m_outputdef;
 
+  public:
     API_EXPORT inline hnnx::splithist_t get_splithist() const { return splithist; }
     API_EXPORT inline void set_splithist(hnnx::splithist_t val) { splithist = val; }
     API_EXPORT inline void set_splithist(OpDef const &other) { splithist = other.splithist; }
@@ -295,24 +314,24 @@ class OpDef : public OpDefFlags {
     API_EXPORT OpDef(GraphPrepare &graph_in, OpId my_id_in, hnnx::opname_tag_parm_t opstr_in,
                      std::vector<OpRef> &&input_defs_in, OutputDef const *output_def_in, hnnx::splithist_t sl)
         : OpDefFlags(opstr_in, input_defs_in.size(), (output_def_in == nullptr) ? 0 : 1), splithist(sl),
-          graphref(graph_in), id(my_id_in), opstr(opstr_in), input_defs(std::move(input_defs_in)), output_def()
+          graphref(graph_in), id(my_id_in), opstr(opstr_in), input_defs(std::move(input_defs_in)), m_outputdef()
     {
         if (output_def_in != nullptr) {
-            output_def = *output_def_in;
+            m_outputdef = *output_def_in;
         } else {
-            output_def.dtype = DType::None;
+            m_outputdef.dtype = DType::None;
         }
     }
 
     API_EXPORT OpDef(GraphPrepare &graph_in, OpId my_id_in, hnnx::opname_tag_parm_t opstr_in,
                      std::vector<OpRef> &&input_defs_in, OutputDef const *output_def_in)
         : OpDefFlags(opstr_in, input_defs_in.size(), (output_def_in == nullptr) ? 0 : 1), splithist(),
-          graphref(graph_in), id(my_id_in), opstr(opstr_in), input_defs(std::move(input_defs_in)), output_def()
+          graphref(graph_in), id(my_id_in), opstr(opstr_in), input_defs(std::move(input_defs_in)), m_outputdef()
     {
         if (output_def_in != nullptr) {
-            output_def = *output_def_in;
+            m_outputdef = *output_def_in;
         } else {
-            output_def.dtype = DType::None;
+            m_outputdef.dtype = DType::None;
         }
     }
 
@@ -325,23 +344,30 @@ class OpDef : public OpDefFlags {
     // copy shape from 'shape_from' (if not null) and output
     //  spec from 'outp_from' (if not null)
     API_EXPORT OpDef make_output_exemplar(OutputDef const *size_from, OutputDef const *outp_from) const;
+    API_EXPORT inline OpDef make_output_exemplar(OutputDef const *from) const
+    {
+        return make_output_exemplar(from, from);
+    }
     // make a copy with the same output and no inputs
     API_EXPORT inline OpDef make_output_exemplar() const { return make_output_exemplar(nullptr, nullptr); }
 
     API_EXPORT size_t n_inputs() const { return input_defs.size(); }
-    API_EXPORT size_t n_outputs() const { return output_def.dtype == DType::None ? 0 : 1; }
+    API_EXPORT size_t n_outputs() const { return m_outputdef.dtype == DType::None ? 0 : 1; }
     //> true if the OpDef has outputs
-    API_EXPORT bool has_outputs() const { return !(output_def.dtype == DType::None); }
+    API_EXPORT bool has_outputs() const { return !(m_outputdef.dtype == DType::None); }
     //> true if the node is a 'sink' for the purposes of sheduler
     /// If we add special nodes with no outputs that are not graph sinks, they can be excluded here.
     //
     API_EXPORT bool is_graph_sink() const { return !has_outputs(); }
     //> True if the OpDef has multiple outputs (has 'Multi' output type)
-    API_EXPORT bool has_multiple_outputs() const { return output_def.dtype == DType::Multi; }
+    API_EXPORT bool has_multiple_outputs() const { return m_outputdef.dtype == DType::Multi; }
     API_EXPORT OpRef reference() const { return OpRef{id, 0}; }
     // these are only safe to use when has_outputs()
-    API_EXPORT OutputDef &get_outputdef() { return output_def; } //use when need to modify output_def
-    API_EXPORT OutputDef const &get_outputdef() const { return output_def; } //return read-only output_def
+    //    API_EXPORT OutputDef &get_outputdef() { return output_def; } //use when need to modify output_def
+    API_EXPORT OutputDef const &get_outputdef() const { return m_outputdef; } //return read-only output_def
+
+    API_EXPORT void set_outputdef(const OutputDefPatch &);
+    API_EXPORT void set_outputdef(const OutputDef &);
 
     API_EXPORT virtual hnnx::uptr_Op generate(hnnx::OpIoPtrs const &) const;
     API_EXPORT virtual const uint8_t *const_data_ptr() const { return nullptr; }

@@ -87,6 +87,8 @@ namespace constraint_lib {
 #define IS_FLOAT16_BOTH(X, Y) AND(IS_FLOAT16(X), IS_FLOAT16(Y))
 //! IS_FLOAT16_ALL("operand", ...) -> bool (true if all operands are FP16 type)
 #define IS_FLOAT16_ALL(...) IS_DTYPE_ALL(DType::Float16, __VA_ARGS__)
+//! IS_BFLOAT16_ALL("operand", ...) -> bool (true if all operands are BF16 type)
+#define IS_BFLOAT16_ALL(...) IS_DTYPE_ALL(DType::BFloat16, __VA_ARGS__)
 //! IS_FLOAT32_ALL("operand", ...) -> bool (true if all operands are FP32 type)
 #define IS_FLOAT32_ALL(...) IS_DTYPE_ALL(DType::Float32, __VA_ARGS__)
 
@@ -117,6 +119,26 @@ namespace constraint_lib {
 
 //! IS_EMPTY("operand") -> bool (true if size of all dims is 0)
 #define IS_EMPTY(X) AND(IS_EMPTY_DIM(X, 0), IS_EMPTY_DIM(X, 1), IS_EMPTY_DIM(X, 2), IS_EMPTY_DIM(X, 3))
+
+#define IS_FP16_BF16_1(X) OR(EQ(DTYPE_OF(X), DType::Float16), EQ(DTYPE_OF(X), DType::BFloat16))
+
+#define IS_FP16_BF16_2(X, Y)                                                                                           \
+    OR(AND(EQ(DTYPE_OF(X), DType::Float16), EQ(DTYPE_OF(Y), DType::Float16)),                                          \
+       AND(EQ(DTYPE_OF(X), DType::BFloat16), EQ(DTYPE_OF(Y), DType::BFloat16)))
+
+#define IS_FP16_BF16_3(X, Y, Z)                                                                                        \
+    OR(AND(EQ(DTYPE_OF(X), DType::Float16), EQ(DTYPE_OF(Y), DType::Float16), EQ(DTYPE_OF(Z), DType::Float16)),         \
+       AND(EQ(DTYPE_OF(X), DType::BFloat16), EQ(DTYPE_OF(Y), DType::BFloat16), EQ(DTYPE_OF(Z), DType::BFloat16)))
+
+#define IS_FP16_BF16_4(W, X, Y, Z)                                                                                     \
+    OR(AND(EQ(DTYPE_OF(W), DType::Float16), EQ(DTYPE_OF(X), DType::Float16), EQ(DTYPE_OF(Y), DType::Float16),          \
+           EQ(DTYPE_OF(Z), DType::Float16)),                                                                           \
+       AND(EQ(DTYPE_OF(W), DType::BFloat16), EQ(DTYPE_OF(X), DType::BFloat16), EQ(DTYPE_OF(Y), DType::BFloat16),       \
+           EQ(DTYPE_OF(Z), DType::BFloat16)))
+
+#define IS_FP16_BF16_N(_1, _2, _3, _4, NAME, ...) NAME
+#define IS_FP16_BF16(...)                                                                                              \
+    IS_FP16_BF16_N(__VA_ARGS__, IS_FP16_BF16_4, IS_FP16_BF16_3, IS_FP16_BF16_2, IS_FP16_BF16_1)(__VA_ARGS__)
 
 } // namespace constraint_lib
 /** @} */

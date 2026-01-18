@@ -27,6 +27,11 @@ constexpr unsigned DesConcur_MIN_SEGMENTS = 8; // can't have less than this numb
 
 constexpr unsigned DesConcur_MAX_RUNLISTS = 4;
 
+// This is a identifer string for Backward Compatible Concurrent deserialization's measure.
+// This is string is used both by hexnn and QNN to understand that a particular graph has no segments
+// And therefore it should not try to measure it.
+constexpr const char *NoSegments_Identifier = "no_segments";
+
 // The 'Aux Data' record describing the runlist partition has a payload formed of
 // a runlist_auxdata_header, followed immediately by N+1 of runlist_auxdata_seg_desc.
 // The number N is in the header; there may be additional words after, which can be

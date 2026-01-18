@@ -60,7 +60,7 @@ typedef enum {
 
 // Provide values to use for API version.
 #define QNN_SYSTEM_API_VERSION_MAJOR 1
-#define QNN_SYSTEM_API_VERSION_MINOR 5
+#define QNN_SYSTEM_API_VERSION_MINOR 7
 #define QNN_SYSTEM_API_VERSION_PATCH 0
 
 // Error code space assigned to system API components

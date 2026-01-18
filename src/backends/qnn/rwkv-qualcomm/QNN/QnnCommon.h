@@ -44,7 +44,7 @@ extern "C" {
 
 // Provide values to use for API version.
 #define QNN_API_VERSION_MAJOR 2
-#define QNN_API_VERSION_MINOR 29
+#define QNN_API_VERSION_MINOR 32
 #define QNN_API_VERSION_PATCH 0
 
 /// NULL backend identifier.
@@ -110,7 +110,7 @@ extern "C" {
 #define QNN_PASTE_THREE(a, b, c) a##b##c
 
 /// Simple utility to extract 16-bit error code from 64-bit Qnn_ErrorHandle_t
-#define QNN_GET_ERROR_CODE(errorHandle) (errorHandle & 0xFFFF)
+#define QNN_GET_ERROR_CODE(errorHandle) ((errorHandle)&0xFFFF)
 
 //=============================================================================
 // Data Types

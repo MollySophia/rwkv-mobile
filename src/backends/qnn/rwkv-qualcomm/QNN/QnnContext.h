@@ -279,19 +279,10 @@ typedef struct {
  */
 typedef enum {
   QNN_CONTEXT_PARAMS_VERSION_1 = 1,
+  QNN_CONTEXT_PARAMS_VERSION_2 = 2,
   /// Unused, present to ensure 32 bits.
   QNN_CONTEXT_PARAMS_VERSION_UNDEFINED = 0x7FFFFFFF
 } QnnContext_ParamsVersion_t;
-
-/**
- * @brief Structure which provides various versions of context params
- */
-typedef struct {
-  QnnContext_ParamsVersion_t version;
-  union UNNAMED {
-    QnnContext_ParamsV1_t v1;
-  };
-} QnnContext_Params_t;
 
 /**
  * @brief This structure defines a request for context binary data.
@@ -526,6 +517,44 @@ typedef struct {
     Qnn_ContextBinaryDmaBufferCallback_t dmaBufferCallback;
   };
 } Qnn_ContextBinaryCallback_t;
+
+/**
+ * @brief Extension of QnnContext_ParamsV1_t which includes a callback pointer.
+ */
+typedef struct {
+  /// Config pointer to a NULL-terminated array of config option pointers for one context. NULL
+  /// is allowed and indicates that no config options are provided. If not provided, all config
+  /// options have default values consistent with the serialized context. If the same config option
+  /// type is provided multiple times, the last option value will be used.
+  const QnnContext_Config_t** config;
+  /// A pointer to the context binary
+  const void* binaryBuffer;
+  /// Holds the size of the context binary
+  const Qnn_ContextBinarySize_t binaryBufferSize;
+  /// The profile handle on which metrics are populated and can be queried. Use a NULL handle
+  /// to disable profile collection. If a handle is reused, it will reset and be populated with
+  /// values from the current call.
+  Qnn_ProfileHandle_t profile;
+  /// Pointer to a notification function, cannot be NULL
+  QnnContext_createFromBinaryNotifyFn_t notifyFunc;
+  /// Client-supplied data object which will be passed back via _notifyFn_ and can be used to
+  /// identify which context's asynchronous initialization instance the __notifyFn__ applies to.
+  /// Can be NULL if client does not need it.
+  void* notifyParam;
+  /// Callback for data provider and data release functions.
+  const Qnn_ContextBinaryCallback_t* callback;
+} QnnContext_ParamsV2_t;
+
+/**
+ * @brief Structure which provides various versions of context params
+ */
+typedef struct {
+  QnnContext_ParamsVersion_t version;
+  union UNNAMED {
+    QnnContext_ParamsV1_t v1;
+    QnnContext_ParamsV2_t* v2;
+  };
+} QnnContext_Params_t;
 
 /**
  * @brief Enum to distinguish type of binary section to retrieve
@@ -1264,6 +1293,93 @@ Qnn_ErrorHandle_t QnnContext_applyBinarySection(Qnn_ContextHandle_t context,
                                                 const QnnContext_Buffer_t* binaryBuffer,
                                                 Qnn_ProfileHandle_t profile,
                                                 Qnn_SignalHandle_t signal);
+
+/**
+ * @brief Apply updates to a previously created binary section. Memory is owned by the backend and
+ *        deallocated with a call to QnnContext_freeBinarySectionUpdate().
+ *
+ * @param[in] binaryBuffer Pointer to the user-allocated binary section memory containing a
+ *                         previously created updatable binary section.
+ *
+ * @param[in] auxiliaryBuffer Pointer to user-allocated binary section memory containing an
+ *                            auxiliary binary section that is also needed to update _binaryBuffer_.
+ *                            This argument is currently unused and must be NULL.
+ *
+ * @param[in] tensors Pointer to an array of tensor updates to apply to the previously created
+ *                    binary section contained in _binaryBuffer_.
+ *
+ * @param[in] numTensors The size of the _tensors_ array.
+ *
+ * @param[in] keepUpdatable A boolean indicating whether the updated adapter should remain updatable
+ *                          so it can be re-used as an input to this function at a later time. If
+ *                          this argument is 0 (false), the output adapter will have its updatable
+ *                          metadata removed and will no longer be updatable. Any non-zero value is
+ *                          interpreted as true.
+ *
+ * @param[in] logger A handle to a logger, use NULL handle to disable logging.
+ *
+ * @param[in] profile The profile handle on which metrics are populated and can be queried. Use
+ *                    NULL handle to disable profile collection. A handle being re-used would reset
+ *                    and is populated with values from the current call.
+ *
+ * @param[in] signal Signal object to control the execution of the binary section update process.
+ *                   NULL may be passed to indicate that no execution control is requested,
+ *                   and the update operation should continue to completion uninterrupted.
+ *                   The signal object, if not NULL, is considered to be in-use for
+ *                   the duration of the call.
+ *
+ * @param[out] binarySectionUpdate Pointer to a QnnContext_Buffer_t which will be populated by the
+ *                                 backend. The buffer pointed to by this object is owned and
+ *                                 managed by the backend, and can be deallocated using
+ *                                 QnnContext_freeBinarySectionUpdate(). Must be non-NULL.
+ *
+ * @return Error code:
+ *         - QNN_SUCCESS: no error is encountered
+ *         - QNN_CONTEXT_ERROR_UNSUPPORTED_FEATURE: a feature is not supported
+ *         - QNN_CONTEXT_ERROR_INVALID_ARGUMENT: _binaryBuffer_, _tensors_, or _binarySectionUpdate_
+ *           is NULL
+ *         - QNN_CONTEXT_ERROR_MEM_ALLOC: memory allocation error while updating binary section
+ *         - QNN_TENSOR_ERROR_DOES_NOT_EXIST: a tensor ID in _tensors_ is not recognized
+ *         - QNN_TENSOR_ERROR_INCOMPATIBLE_TENSOR_UPDATE: provided tensor is invalid and cannot
+ *           be applied as an update
+ *
+ * @note Use corresponding API through QnnInterface_t.
+ */
+QNN_API
+Qnn_ErrorHandle_t QnnContext_getBinarySectionUpdate(const QnnContext_Buffer_t* binaryBuffer,
+                                                    const QnnContext_Buffer_t* auxiliaryBuffer,
+                                                    const Qnn_Tensor_t** tensors,
+                                                    uint64_t numTensors,
+                                                    uint8_t keepUpdatable,
+                                                    Qnn_LogHandle_t logger,
+                                                    Qnn_ProfileHandle_t profile,
+                                                    Qnn_SignalHandle_t signal,
+                                                    QnnContext_Buffer_t* binarySectionUpdate);
+
+/**
+ * @brief Frees memory allocated during QnnContext_getBinarySectionUpdate().
+ *
+ * @param[in] binarySectionUpdate A buffer retrieved from QnnContext_getBinarySectionUpdate().
+ *                                The buffer pointer within this object must be non-NULL. If the
+ *                                pointer is non-NULL but unrecognized by the backend, an error will
+ *                                be returned.
+ *
+ * @param[in] logger A handle to a logger, use NULL handle to disable logging.
+ *
+ * @return Error code:
+ *         - QNN_SUCCESS: no error is encountered
+ *         - QNN_CONTEXT_ERROR_UNSUPPORTED_FEATURE: a feature is not supported
+ *         - QNN_CONTEXT_ERROR_INVALID_ARGUMENT: The pointer within _binarySectionUpdate_ is NULL
+ *           or unrecognized
+ *         - QNN_CONTEXT_ERROR_INVALID_HANDLE: logger_ is not a valid handle
+ *         - QNN_CONTEXT_ERROR_MEM_ALLOC: an error is encountered with de-allocation of associated
+ *           memory
+ *
+ * @note Use corresponding API through QnnInterface_t.
+ */
+QNN_API
+Qnn_ErrorHandle_t QnnContext_freeBinarySectionUpdate(QnnContext_Buffer_t binarySectionUpdate,
+                                                     Qnn_LogHandle_t logger);
 
 /**
  * @brief A function to get a list of context properties.
