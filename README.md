@@ -14,7 +14,7 @@ An inference runtime with multiple backends supported.
 - [x] WebRWKV (WebGPU): Compatible with most PC graphics cards, as well as macOS Metal. Doesn't work on Qualcomm's proprietary Adreno GPU driver though.
 - [x] llama.cpp: Run on Android devices with CPU inference.
 - [x] ncnn: Initial support for rwkv v6/v7 unquantized models (suitable for running tiny models everywhere).
-- [x] Qualcomm Hexagon NPU: Based on Qualcomm's QNN SDK.
+- [x] Qualcomm Hexagon NPU: Based on Qualcomm's QNN SDK 2.42.0.
 - [x] MLX: Running RWKV on Apple Silicon devices using Apple's MLX framework.
 - [x] MediaTek Neuropilot7: Running RWKV on MediaTek NPU. Currently only supports Dimensity 9300 devices.
 - [x] CoreML: Running RWKV with Apple Neural Engine. Based on Apple's CoreML framework.
@@ -23,10 +23,7 @@ An inference runtime with multiple backends supported.
 ## How to build:
 
 - Install [rust](https://www.rust-lang.org/tools/install) and [cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) (for building the web-rwkv backend)
-- `git clone --recursive https://github.com/MollySophia/rwkv-mobile`
-- `cd rwkv-mobile && mkdir build && cd build`
-- `cmake ..`
-- `cmake --build . -j $(nproc)`
+- Check https://github.com/MollySophia/rwkv-mobile/blob/master/.github/workflows/build.yml
 
 ## TODO:
 - [ ] Better tensor abstraction for different backends
