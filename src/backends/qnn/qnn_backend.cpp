@@ -602,7 +602,7 @@ int qnn_backend::load_model(std::string model_path) {
                 buffer[i] = std::shared_ptr<uint8_t>(
                     (uint8_t*)rmpack->readFileToMemory("model_" + std::to_string(i)), [this, i](uint8_t* p) {
                         if (p) {
-                            rmpack->freeMemory("model_" + std::to_string(i));
+                            rmpack->freeFileMemory("model_" + std::to_string(i));
                         }
                     }
                 );
@@ -1067,7 +1067,7 @@ int qnn_backend::load_model(std::string model_path) {
                 external_embeddings = std::shared_ptr<uint8_t>(
                     (uint8_t*)rmpack->readFileToMemory("embedding"),
                     [this](uint8_t* p) {
-                        rmpack->freeMemory("embedding");
+                        rmpack->freeFileMemory("embedding");
                     }
                 );
 #endif
@@ -1107,7 +1107,7 @@ int qnn_backend::load_model(std::string model_path) {
                 external_deep_embeddings = std::shared_ptr<uint8_t>(
                     (uint8_t*)rmpack->readFileToMemory("deep_embedding"),
                     [this](uint8_t* p) {
-                        rmpack->freeMemory("deep_embedding");
+                        rmpack->freeFileMemory("deep_embedding");
                     }
                 );
 #endif
@@ -1152,7 +1152,7 @@ int qnn_backend::load_model(std::string model_path) {
 #if USE_MMAP
                     rmpack->unmapFile("lmhead");
 #else
-                    rmpack->freeMemory("lmhead");
+                    rmpack->freeFileMemory("lmhead");
 #endif
                 } catch (const std::exception& e) {
                     LOGE("Failed to load external lmhead: %s", e.what());
