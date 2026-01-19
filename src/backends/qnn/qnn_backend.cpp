@@ -534,17 +534,12 @@ int qnn_backend::load_model(std::string model_path) {
 
     bool is_rmpack = model_path.find(".rmpack") != std::string::npos;
     if (is_rmpack) {
-#ifndef _WIN32
         try {
             rmpack = new RMPackReader(model_path);
         } catch (const std::exception& e) {
             LOGE("Error loading rmpack: %s", e.what());
             return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
         }
-#else
-        LOGE("TODO: add windows support for rmpack");
-        return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
-#endif
     }
 
     qnnIOTensorUtils = new IOTensor(BufferAlloc::SHARED_BUFFER, &g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface);
@@ -568,10 +563,8 @@ int qnn_backend::load_model(std::string model_path) {
         size_t pos = 0;
         int spill_fill_buffer_size = 0;
         if (is_rmpack) {
-#ifndef _WIN32
             n_chunks = rmpack->getConfig()["n_chunks"];
             spill_fill_buffer_size = rmpack->getConfig()["spill_fill_buffer_size"];
-#endif
         } else {
             pos = model_path.find("_chunk");
             if (pos != std::string::npos) {
@@ -596,7 +589,6 @@ int qnn_backend::load_model(std::string model_path) {
         for (int i = 0; i < n_chunks; i++) {
             // get file size and read file to memory / mmap file
             if (is_rmpack) {
-#ifndef _WIN32
                 bufferSizes[i] = rmpack->getFileSize("model_" + std::to_string(i));
 #if USE_MMAP
                 buffer[i] = std::shared_ptr<uint8_t>(
@@ -614,7 +606,6 @@ int qnn_backend::load_model(std::string model_path) {
                         }
                     }
                 );
-#endif
 #endif
             } else {
                 if (n_chunks > 1) {
@@ -1021,13 +1012,10 @@ int qnn_backend::load_model(std::string model_path) {
 
     }
 
-
-#ifndef _WIN32
     if (rmpack != nullptr) {
         int use_external_deep_embedding = rmpack->getConfig()["use_external_deep_embedding"];
         has_deep_embedding = use_external_deep_embedding != 0;
     }
-#endif
 
     if (RWKV_SUCCESS != qnn_initialize_tensors()) {
         LOGE("Could not initialize tensors");
@@ -1051,12 +1039,9 @@ int qnn_backend::load_model(std::string model_path) {
     }
     
 
-#ifndef _WIN32
     if (rmpack != nullptr) {
         vocab_size = rmpack->getConfig()["vocab_size"];
-    } else
-#endif
-    {
+    } else {
         std::vector<size_t> dims;
         getTensorDims(dims, QNN_TENSOR_GET_DIMENSIONS(logitsOutputTensor), QNN_TENSOR_GET_RANK(logitsOutputTensor));
         for (int i = 0; i < dims.size(); i++) {
@@ -1065,7 +1050,6 @@ int qnn_backend::load_model(std::string model_path) {
         vocab_size = dims[2];
     }
 
-#ifndef _WIN32
     if (rmpack != nullptr) {
         int use_external_embedding = rmpack->getConfig()["use_external_embedding"];
         LOGI("use_external_embedding: %d", use_external_embedding);
@@ -1143,7 +1127,6 @@ int qnn_backend::load_model(std::string model_path) {
         if (use_external_lmhead) {
             external_lmhead_filetype = rmpack->getConfig()["external_lmhead_filetype"];
             if (external_lmhead_filetype == "mnn") {
-#ifndef _WIN32
                 try {
 #if USE_MMAP
                     void* buffer = rmpack->mmapFile("lmhead");
@@ -1175,17 +1158,12 @@ int qnn_backend::load_model(std::string model_path) {
                     LOGE("Failed to load external lmhead: %s", e.what());
                     return RWKV_ERROR_MODEL;
                 }
-#else
-                LOGE("TODO: MNN Windows arm64 building");
-                return RWKV_ERROR_MODEL;
-#endif
             } else {
                 LOGE("Unsupported external lmhead filetype: %s", external_lmhead_filetype.c_str());
                 return RWKV_ERROR_MODEL;
             }
         }
     }
-#endif
     return RWKV_SUCCESS;
 }
 
@@ -1769,7 +1747,6 @@ int qnn_backend::post_graph_execute(Tensor1D & logits) {
         logitsOutputTensorSize = dims[2];
     }
 
-#ifndef _WIN32
     if (logitsOutputTensorSize != vocab_size) {
         if (external_lmhead_filetype != "mnn" || external_lmhead_interpretor == nullptr || external_lmhead_mnn_session == nullptr) {
             LOGE("The model requires external lmhead, but external lmhead is not loaded");
@@ -1793,14 +1770,11 @@ int qnn_backend::post_graph_execute(Tensor1D & logits) {
 
             memcpy(logits_buffer.data(), output_ptr, vocab_size * sizeof(float));
             output->unmap(MNN::Tensor::MAP_TENSOR_READ, output->getDimensionType(), output_ptr);
-        } else
-        {
+        } else {
             LOGE("Unsupported external lmhead filetype: %s", external_lmhead_filetype.c_str());
             return RWKV_ERROR_IO;
         }
-    } else
-#endif
-    {
+    } else {
         if (RWKV_SUCCESS != copy_qnn_tensor_to_float(logitsOutputTensor, logits_buffer.data(), vocab_size)) {
             return RWKV_ERROR_IO;
         }

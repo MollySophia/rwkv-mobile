@@ -40,7 +40,7 @@ jobs:
   
   build-windows-library-arm64:
     needs: [setup]
-    runs-on: windows-2025
+    runs-on: windows-2022
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64
     steps:
