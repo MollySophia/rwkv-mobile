@@ -125,10 +125,10 @@ if (ENABLE_MNN_BACKEND)
     FetchContent_Declare(
         mnn
         GIT_REPOSITORY https://github.com/alibaba/MNN
-        GIT_TAG a739ea5870a4a45680f0e36ba9662ca39f2f4eec
+        GIT_TAG 3.3.0
     )
 
-    if (ANDROID)
+    if (ANDROID OR (WIN32 AND (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")))
         option(MNN_ARM82 "" ON)
     else()
         # TODO: fix iOS MNN_ARM82
@@ -153,6 +153,11 @@ if (ENABLE_MNN_BACKEND)
     option(MNN_SEP_BUILD "" OFF)
     option(MNN_USE_SYSTEM_LIB "" ON)
     option(MNN_BUILD_TOOLS "" OFF)
+    if (WIN32)
+        if (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+            option(MNN_KLEIDIAI "" OFF)
+        endif()
+    endif()
     FetchContent_MakeAvailable(mnn)
     target_compile_definitions(MNN PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
     # target_compile_definitions(Express PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
