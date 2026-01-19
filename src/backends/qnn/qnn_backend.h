@@ -41,6 +41,7 @@ public:
     Qnn_DeviceHandle_t qnnDeviceHandle = nullptr;
 
     std::mutex qnnMutex;
+    int ref_count = 0;
 };
 
 class qnn_backend : public execution_provider {

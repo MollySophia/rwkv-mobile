@@ -516,6 +516,11 @@ int qnn_backend::init(void * extra) {
             return RWKV_ERROR_BACKEND | RWKV_ERROR_INIT;
         }
     }
+    {
+        std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
+        g_qnn_backend_context_ptr->ref_count++;
+        LOGI("[QNN] qnn_backend ref_count: %d", g_qnn_backend_context_ptr->ref_count);
+    }
 
     return RWKV_SUCCESS;
 }
@@ -2430,6 +2435,16 @@ void qnn_backend::cleanup_batch_graphs() {
 }
 
 int qnn_backend::release() {
+    if (g_qnn_backend_context_ptr->ref_count > 0) {
+        std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
+        g_qnn_backend_context_ptr->ref_count--;
+        LOGI("[QNN] qnn_backend::release: qnn_backend ref_count: %d", g_qnn_backend_context_ptr->ref_count);
+    }
+
+    if (g_qnn_backend_context_ptr->ref_count == 0) {
+        g_qnn_backend_context_ptr.reset();
+        LOGI("[QNN] qnn_backend::release: qnn_backend context reset");
+    }
     return RWKV_SUCCESS;
 }
 

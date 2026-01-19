@@ -58,10 +58,11 @@ bool RpcMem::initialize() {
 }
 
 RpcMem::~RpcMem() {
-  if (m_libCdspRpc) {
-    rwkvmobile::LOGD("Closing libcdsprpc.so handle");
-    dlclose(m_libCdspRpc);
-  }
+  // TODO: Fix libcdsprpc.so handle closing order issue
+  // if (m_libCdspRpc) {
+  //   rwkvmobile::LOGI("Closing libcdsprpc.so handle");
+  //   dlclose(m_libCdspRpc);
+  // }
 }
 
 RpcMemTensorData* RpcMem::getRpcMemTensorData(Qnn_Tensor_t* tensor) {
