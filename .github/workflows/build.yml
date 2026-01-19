@@ -40,7 +40,7 @@ jobs:
   
   build-windows-library-arm64:
     needs: [setup]
-    runs-on: windows-2022
+    runs-on: windows-11-arm
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64
     steps:
@@ -48,7 +48,7 @@ jobs:
     - name: build
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
         cmake -S . -B build -G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake\arm64-windows-llvm.cmake -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=OFF -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=OFF -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF
         cmake --build build --config Release -j 8
 
