@@ -242,16 +242,3 @@ size_t RMPackReader::getFileSize(const std::string& filename) const {
 bool RMPackReader::hasFile(const std::string& filename) const {
     return getFileInfo(filename) != nullptr;
 }
-
-void RMPackReader::listFiles() const {
-    std::cout << "RWKV模型文件: " << file_path_ << std::endl;
-    std::cout << "配置项:" << std::endl;
-    for (const auto& [key, value] : config_.items()) {
-        std::cout << "  " << key << ": " << value << std::endl;
-    }
-    std::cout << "文件列表:" << std::endl;
-    for (const auto& file : files_) {
-        std::cout << "  " << file.filename << " (大小: " << file.size
-                  << " 字节, 偏移: " << file.offset << ")" << std::endl;
-    }
-}

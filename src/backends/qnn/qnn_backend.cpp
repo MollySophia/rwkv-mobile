@@ -199,7 +199,7 @@ qnn_backend_context::qnn_backend_context(std::string qnnBackendPath) : qnnBacken
 
     std::string qnnSystemLibPath;
     qnnBackendBasePath =
-#ifdef WIN32
+#ifdef _WIN32
         qnnBackendPath.substr(0, qnnBackendPath.find("QnnHtp.dll"));// + "QnnSystem.dll";
         qnnSystemLibPath = qnnBackendBasePath + "QnnSystem.dll";
 #else

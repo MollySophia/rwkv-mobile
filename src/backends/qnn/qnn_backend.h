@@ -210,9 +210,7 @@ private:
     MNN::Tensor *external_lmhead_input_tensor = nullptr;
 #endif
 
-#ifndef _WIN32
     RMPackReader *rmpack = nullptr;
-#endif
 
     // Helpers for dynamic batch decode processing
     static int parse_bsz_from_graph_name(const std::string &graphName);

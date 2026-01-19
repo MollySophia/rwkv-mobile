@@ -46,8 +46,6 @@ public:
     void* readFileToMemory(const std::string& filename);
     void freeFileMemory(const std::string& filename);
 
-    void listFiles() const;
-
 private:
     static const char* MAGIC_HEADER;
     static const size_t MAGIC_HEADER_SIZE;
