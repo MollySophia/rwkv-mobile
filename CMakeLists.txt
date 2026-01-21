@@ -78,7 +78,7 @@ if (ENABLE_WEBRWKV_BACKEND)
     FetchContent_Declare(
         Corrosion
         GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-        GIT_TAG v0.5
+        GIT_TAG v0.6.1
     )
     FetchContent_MakeAvailable(Corrosion)
 
@@ -344,7 +344,9 @@ if (ENABLE_WEBRWKV_BACKEND)
         GIT_REPOSITORY https://gitlab.com/bzip2/bzip2
         GIT_TAG master
     )
-    option(ENABLE_STATIC_LIB "Build libbz2 in static mode also" ON)
+    option(ENABLE_STATIC_LIB "" ON)
+    option(ENABLE_STATIC_LIB_IS_PIC "" ON)
+    option(ENABLE_APP "" OFF)
     FetchContent_MakeAvailable(bzip2)
     if (APPLE)
         find_library(FOUNDATION_FRAMEWORK Foundation)
