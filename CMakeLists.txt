@@ -85,7 +85,7 @@ if (ENABLE_WEBRWKV_BACKEND)
     FetchContent_Declare(
         web_rwkv_ffi
         GIT_REPOSITORY https://github.com/MollySophia/web-rwkv-ffi
-        GIT_TAG dd40143957f070c1a7518f30d31d2cee28b0137c
+        GIT_TAG 57f27295e2320b146477ff0642addbdeae6df4ed
     )
     FetchContent_MakeAvailable(web_rwkv_ffi)
 
