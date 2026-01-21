@@ -339,7 +339,13 @@ if (ENABLE_WHISPER OR ENABLE_TTS)
 endif()
 
 if (ENABLE_WEBRWKV_BACKEND)
-    find_package(BZip2 REQUIRED)
+    set(ENABLE_STATIC_LIB ON)
+    FetchContent_Declare(
+        bzip2
+        GIT_REPOSITORY https://gitlab.com/bzip2/bzip2
+        GIT_TAG master
+    )
+    FetchContent_MakeAvailable(bzip2)
     if (APPLE)
         find_library(FOUNDATION_FRAMEWORK Foundation)
         find_library(QUARTZCORE_FRAMEWORK QuartzCore)
@@ -357,7 +363,7 @@ if (ENABLE_WEBRWKV_BACKEND)
     if (IOS)
         target_compile_options(rwkv_mobile_internal PUBLIC "-I${web_rwkv_ffi_SOURCE_DIR}/include")
     endif()
-    target_link_libraries(rwkv_mobile_internal PUBLIC web_rwkv_ffi ${WEBRWKV_EXTRA_LIBS} BZip2::BZip2)
+    target_link_libraries(rwkv_mobile_internal PUBLIC web_rwkv_ffi ${WEBRWKV_EXTRA_LIBS} bz2_static)
 endif()
 
 if (ENABLE_NCNN_BACKEND)
@@ -588,6 +594,7 @@ if (BUILD_STATIC_LIB)
     if (ENABLE_WEBRWKV_BACKEND)
         target_link_libraries(rwkv_mobile_static PRIVATE web_rwkv_ffi ${WEBRWKV_EXTRA_LIBS})
         set (STATIC_LIBS_LIST ${STATIC_LIBS_LIST} ${CMAKE_BINARY_DIR}/Release/cargo/build/${Rust_CARGO_TARGET}/release/libweb_rwkv_ffi.a)
+        set (STATIC_LIBS_LIST ${STATIC_LIBS_LIST} $<TARGET_FILE:bz2_static>)
     endif()
 
     if (ENABLE_LLAMACPP_BACKEND)
