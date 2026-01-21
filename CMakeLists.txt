@@ -85,7 +85,7 @@ if (ENABLE_WEBRWKV_BACKEND)
     FetchContent_Declare(
         web_rwkv_ffi
         GIT_REPOSITORY https://github.com/MollySophia/web-rwkv-ffi
-        GIT_TAG 410af745d782af1d0a8969ffcd9c69c39b9966d3
+        GIT_TAG dd40143957f070c1a7518f30d31d2cee28b0137c
     )
     FetchContent_MakeAvailable(web_rwkv_ffi)
 
@@ -339,6 +339,7 @@ if (ENABLE_WHISPER OR ENABLE_TTS)
 endif()
 
 if (ENABLE_WEBRWKV_BACKEND)
+    find_package(BZip2 REQUIRED)
     if (APPLE)
         find_library(FOUNDATION_FRAMEWORK Foundation)
         find_library(QUARTZCORE_FRAMEWORK QuartzCore)
@@ -356,7 +357,7 @@ if (ENABLE_WEBRWKV_BACKEND)
     if (IOS)
         target_compile_options(rwkv_mobile_internal PUBLIC "-I${web_rwkv_ffi_SOURCE_DIR}/include")
     endif()
-    target_link_libraries(rwkv_mobile_internal PUBLIC web_rwkv_ffi ${WEBRWKV_EXTRA_LIBS})
+    target_link_libraries(rwkv_mobile_internal PUBLIC web_rwkv_ffi ${WEBRWKV_EXTRA_LIBS} BZip2::BZip2)
 endif()
 
 if (ENABLE_NCNN_BACKEND)

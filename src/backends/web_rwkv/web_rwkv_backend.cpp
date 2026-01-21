@@ -26,7 +26,9 @@ int web_rwkv_backend::load_model(std::string model_path) {
     }
 
     int ret = 0;
-    if (model_path.find("prefab") != std::string::npos) {
+    if (model_path.find(".pth") != std::string::npos) {
+        ret = load_pth(model_path.c_str(), 0, 0, 0, use_fp16, batch_size);
+    } else if (model_path.find("prefab") != std::string::npos) {
         ret = load_prefab(model_path.c_str(), use_fp16, batch_size);
     } else if (model_path.find("ABC") != std::string::npos
         || model_path.find("abc") != std::string::npos
