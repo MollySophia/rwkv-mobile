@@ -339,12 +339,12 @@ if (ENABLE_WHISPER OR ENABLE_TTS)
 endif()
 
 if (ENABLE_WEBRWKV_BACKEND)
-    set(ENABLE_STATIC_LIB ON)
     FetchContent_Declare(
         bzip2
         GIT_REPOSITORY https://gitlab.com/bzip2/bzip2
         GIT_TAG master
     )
+    option(ENABLE_STATIC_LIB "Build libbz2 in static mode also" ON)
     FetchContent_MakeAvailable(bzip2)
     if (APPLE)
         find_library(FOUNDATION_FRAMEWORK Foundation)
