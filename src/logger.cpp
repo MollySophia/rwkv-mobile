@@ -26,12 +26,21 @@ std::string get_timestamp() {
     return ss.str();
 }
 
+std::string remove_endl(const std::string &msg) {
+    std::string result = msg;
+    while (result.size() > 0 && result[result.size() - 1] == '\n') {
+        result = result.substr(0, result.size() - 1);
+    }
+    return result;
+}
+
 #if defined(__ANDROID__)
 #include <android/log.h>
 #define LOG_TAG "RWKV-MOBILE"
 void Logger::log(const std::string &msg, const int level) {
+    std::string log_msg = remove_endl(msg);
     auto timestamp = get_timestamp();
-    auto log_msg = "[" + timestamp + "] " + std::string(level_str[level]) + " " + msg;
+    log_msg = "[" + timestamp + "] " + std::string(level_str[level]) + " " + log_msg;
 
     auto split_log_msg = [](const std::string &msg, const int max_length) {
         std::vector<std::string> splits;
@@ -88,11 +97,12 @@ void Logger::log(const std::string &msg, const int level) {
 #else
 #include <cstdio>
 void Logger::log(const std::string &msg, const int level) {
+    std::string log_msg = remove_endl(msg);
     auto timestamp = get_timestamp();
-    auto log_msg = "[" + timestamp + "] " + std::string(level_str[level]) + " " + msg;
+    log_msg = "[" + timestamp + "] " + std::string(level_str[level]) + " " + log_msg;
     _log(log_msg);
     if (level >= _level) {
-        printf("[%s] %s %s\n", timestamp.c_str(), level_str[level], msg.c_str());
+        printf("%s\n", log_msg.c_str());
     }
 }
 #endif
