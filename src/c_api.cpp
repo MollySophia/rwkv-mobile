@@ -7,6 +7,10 @@
 #include <cstdlib>
 #include <thread>
 
+#ifdef ENABLE_WEBRWKV
+#include "web_rwkv_ffi.h"
+#endif
+
 namespace rwkvmobile {
 
 extern "C" {
@@ -1197,6 +1201,19 @@ int rwkvmobile_runtime_get_seed(rwkvmobile_runtime_t runtime, int model_id) {
     }
     auto rt = static_cast<class Runtime *>(runtime);
     return rt->get_seed(model_id);
+}
+
+int rwkvmobile_convert_pth_to_safetensors(const char * pth_path, const char * st_path) {
+#ifdef ENABLE_WEBRWKV
+    if (pth_path == nullptr || st_path == nullptr) {
+        LOGE("Invalid parameters: pth_path: %s, st_path: %s\n", pth_path == nullptr ? "nullptr" : pth_path, st_path == nullptr ? "nullptr" : st_path);
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    return ::convert_pth_to_st(pth_path, st_path);
+#else
+    LOGE("WebRWKV backend is not enabled on this platform\n");
+    return RWKV_ERROR_UNSUPPORTED;
+#endif
 }
 
 } // extern "C"

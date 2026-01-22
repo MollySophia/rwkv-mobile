@@ -18,7 +18,7 @@ int mnn_rwkv_backend::init(void * extra) {
     return RWKV_SUCCESS;
 }
 
-int mnn_rwkv_backend::load_model(std::string model_path) {
+int mnn_rwkv_backend::load_model(std::string model_path, void * extra) {
     interpreter = MNN::Interpreter::createFromFile(model_path.c_str());
     MNN::ScheduleConfig config;
 #ifdef PLATFORM_IS_IOS

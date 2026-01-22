@@ -10,7 +10,7 @@ int coreml_rwkv_backend::init(void * extra) {
     return RWKV_SUCCESS;
 }
 
-int coreml_rwkv_backend::load_model(std::string model_path) {
+int coreml_rwkv_backend::load_model(std::string model_path, void * extra) {
     ctx = rwkv_coreml_init(model_path.c_str());
     if (ctx == NULL) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;

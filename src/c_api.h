@@ -261,6 +261,8 @@ void rwkvmobile_runtime_free_loaded_models_list(struct loaded_models_list list);
 
 const char * rwkvmobile_runtime_get_model_path_by_id(rwkvmobile_runtime_t runtime, int model_id);
 
+// conversion
+int rwkvmobile_convert_pth_to_safetensors(const char * pth_path, const char * st_path);
 #ifdef __cplusplus
 }
 #endif

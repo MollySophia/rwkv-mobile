@@ -14,7 +14,7 @@ int web_rwkv_backend::init(void * extra) {
     return RWKV_SUCCESS;
 }
 
-int web_rwkv_backend::load_model(std::string model_path) {
+int web_rwkv_backend::load_model(std::string model_path, void * extra) {
     const int batch_size = 12;
 
     if (!std::filesystem::exists(model_path)) {
@@ -38,14 +38,15 @@ int web_rwkv_backend::load_model(std::string model_path) {
     } else if (model_path.find("extended") != std::string::npos) {
         ret = load_extended(model_path.c_str(), 0, 0, 999, use_fp16, batch_size);
     } else {
-        if (model_path.find("0.1B") != std::string::npos
-        || model_path.find("0.4B") != std::string::npos
-        || model_path.find("0.1b") != std::string::npos
-        || model_path.find("0.4b") != std::string::npos) {
-            ret = load(model_path.c_str(), 999, 0, 0, use_fp16, batch_size);
-        } else {
-            ret = load(model_path.c_str(), 0, 999, 0, use_fp16, batch_size);
-        }
+        // if (model_path.find("0.1B") != std::string::npos
+        // || model_path.find("0.4B") != std::string::npos
+        // || model_path.find("0.1b") != std::string::npos
+        // || model_path.find("0.4b") != std::string::npos) {
+        //     ret = load(model_path.c_str(), 999, 0, 0, use_fp16, batch_size);
+        // } else {
+        //     ret = load(model_path.c_str(), 0, 999, 0, use_fp16, batch_size);
+        // }
+        ret = load(model_path.c_str(), 0, 0, 0, use_fp16, batch_size);
     }
     if (ret != 0) {
         LOGE("web_rwkv_backend::load_model: failed to load model");

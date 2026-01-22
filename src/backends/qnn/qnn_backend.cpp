@@ -525,7 +525,7 @@ int qnn_backend::init(void * extra) {
     return RWKV_SUCCESS;
 }
 
-int qnn_backend::load_model(std::string model_path) {
+int qnn_backend::load_model(std::string model_path, void * extra) {
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }

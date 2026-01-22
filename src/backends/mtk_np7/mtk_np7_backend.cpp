@@ -141,7 +141,7 @@ int mtk_np7_backend::init(void * extra) {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::load_model(std::string model_path) {
+int mtk_np7_backend::load_model(std::string model_path, void * extra) {
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }

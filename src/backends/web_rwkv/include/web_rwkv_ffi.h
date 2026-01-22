@@ -101,6 +101,8 @@ void set_state(struct StateRaw state, uintptr_t batch);
 
 void free_state(struct StateRaw state);
 
+int convert_pth_to_st(const char *input_path, const char *output_path);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

@@ -13,7 +13,7 @@ public:
         release();
     }
     int init(void * extra) override;
-    int load_model(std::string model_path) override;
+    int load_model(std::string model_path, void * extra = nullptr) override;
     int eval(int id, Tensor1D & logits) override;
     int eval(std::vector<int> ids, Tensor1D & logits) override;
     int eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) override;

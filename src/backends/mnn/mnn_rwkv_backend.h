@@ -15,7 +15,7 @@ namespace rwkvmobile {
 class mnn_rwkv_backend : public execution_provider {
 public:
     int init(void * extra) override;
-    int load_model(std::string model_path) override;
+    int load_model(std::string model_path, void * extra = nullptr) override;
     int eval(int id, Tensor1D & logits) override;
     int eval(std::vector<int> ids, Tensor1D & logits) override;
     bool is_available() override;

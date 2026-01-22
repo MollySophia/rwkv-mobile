@@ -14,7 +14,7 @@ int ncnn_rwkv_backend::init(void * extra) {
     return RWKV_SUCCESS;
 }
 
-int ncnn_rwkv_backend::load_model(std::string model_path) {
+int ncnn_rwkv_backend::load_model(std::string model_path, void * extra) {
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }

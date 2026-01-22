@@ -45,7 +45,7 @@ class execution_provider {
 public:
     virtual int init(void * extra) { return 0; }
     virtual int init(std::string model_path, void * extra) { return 0; }
-    virtual int load_model(std::string model_path) { return RWKV_ERROR_MODEL; }
+    virtual int load_model(std::string model_path, void * extra) { return RWKV_ERROR_MODEL; }
     virtual int eval(int id, Tensor1D & logits) { (void)id; logits = {}; return 0; };
     virtual int eval(std::vector<int> ids, Tensor1D & logits) { (void)ids; logits = {}; return 0; };
     virtual int eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) { (void)ids; logits = {}; return RWKV_ERROR_UNSUPPORTED; };

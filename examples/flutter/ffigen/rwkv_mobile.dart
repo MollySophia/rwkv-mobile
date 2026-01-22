@@ -1180,6 +1180,18 @@ late final _rwkvmobile_runtime_get_model_path_by_idPtr = _lookup<
     ffi.NativeFunction<ffi.Pointer<ffi.Char> Function(rwkvmobile_runtime_t , ffi.Int )>>('rwkvmobile_runtime_get_model_path_by_id');
 late final _rwkvmobile_runtime_get_model_path_by_id = _rwkvmobile_runtime_get_model_path_by_idPtr.asFunction<ffi.Pointer<ffi.Char> Function(rwkvmobile_runtime_t , int )>();
 
+int rwkvmobile_convert_pth_to_safetensors(ffi.Pointer<ffi.Char> pth_path,
+ffi.Pointer<ffi.Char> st_path,
+) {
+  return _rwkvmobile_convert_pth_to_safetensors(pth_path,
+st_path,
+);
+}
+
+late final _rwkvmobile_convert_pth_to_safetensorsPtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char> , ffi.Pointer<ffi.Char> )>>('rwkvmobile_convert_pth_to_safetensors');
+late final _rwkvmobile_convert_pth_to_safetensors = _rwkvmobile_convert_pth_to_safetensorsPtr.asFunction<int Function(ffi.Pointer<ffi.Char> , ffi.Pointer<ffi.Char> )>();
+
 }
 
 final class sampler_params extends ffi.Struct{

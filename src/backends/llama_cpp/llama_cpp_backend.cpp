@@ -42,7 +42,7 @@ int llama_cpp_backend::init(void * extra) {
     return RWKV_SUCCESS;
 }
 
-int llama_cpp_backend::load_model(std::string model_path) {
+int llama_cpp_backend::load_model(std::string model_path, void * extra) {
     llama_model_params model_params = llama_model_default_params();
 
 #if defined(__APPLE__) || defined(__MACH__)

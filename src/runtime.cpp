@@ -253,7 +253,7 @@ int Runtime::load_model(std::string model_path, std::string backend_name, std::s
     }
 
     // 2. Load model
-    ret = model_instance->backend->load_model(model_path);
+    ret = model_instance->backend->load_model(model_path, extra);
     if (ret) {
         LOGE("Failed to load model from: %s, errno = %d\n", model_path.c_str(), ret);
         return ret_model_id;

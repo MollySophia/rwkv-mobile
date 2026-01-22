@@ -21,7 +21,7 @@ int mlx_rwkv_backend::init(void * extra) {
     return RWKV_SUCCESS;
 }
 
-int mlx_rwkv_backend::load_model(std::string model_path) {
+int mlx_rwkv_backend::load_model(std::string model_path, void * extra) {
     if (!model_handle) {
         model_handle = mlx_model_load(model_path.c_str());
         if (!model_handle) {
