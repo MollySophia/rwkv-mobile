@@ -1313,6 +1313,15 @@ final class evaluation_results extends ffi.Struct{
 
 }
 
+final class web_rwkv_args extends ffi.Struct{
+  @ffi.Int()
+  external int quant_type;
+
+  @ffi.Int()
+  external int quant_layers;
+
+}
+
 typedef rwkvmobile_runtime_t = ffi.Pointer<ffi.Void>;
 
 const int RWKV_LOG_LEVEL_DEBUG = 0;

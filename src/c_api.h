@@ -69,6 +69,11 @@ struct evaluation_results {
     char ** output_texts;
 };
 
+struct web_rwkv_args {
+    int quant_type;    // 0: fp, 1: int8, 2: nf4
+    int quant_layers;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif

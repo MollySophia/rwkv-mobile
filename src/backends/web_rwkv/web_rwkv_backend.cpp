@@ -9,6 +9,11 @@
 
 namespace rwkvmobile {
 
+struct web_rwkv_args {
+    int quant_type;    // 0: fp, 1: int8, 2: nf4
+    int quant_layers;
+};
+
 int web_rwkv_backend::init(void * extra) {
     ::init((uint64_t)time(NULL));
     return RWKV_SUCCESS;
@@ -25,28 +30,43 @@ int web_rwkv_backend::load_model(std::string model_path, void * extra) {
         use_fp16 = false;
     }
 
+    web_rwkv_args *args = nullptr;
+    if (extra) {
+        args = reinterpret_cast<web_rwkv_args*>(extra);
+    }
+
+    int quant = 0;
+    int quant_nf4 = 0;
+    int quant_sf4 = 0;
+    if (args) {
+        switch (args->quant_type) {
+            case 1:
+                quant = args->quant_layers;
+                break;
+            case 2:
+                quant_nf4 = args->quant_layers;
+                break;
+            case 3:
+                quant_sf4 = args->quant_layers;
+                break;
+            default:
+                break;
+    }
+
     int ret = 0;
     if (model_path.find(".pth") != std::string::npos) {
-        ret = load_pth(model_path.c_str(), 0, 0, 0, use_fp16, batch_size);
+        ret = load_pth(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size);
     } else if (model_path.find("prefab") != std::string::npos) {
         ret = load_prefab(model_path.c_str(), use_fp16, batch_size);
     } else if (model_path.find("ABC") != std::string::npos
         || model_path.find("abc") != std::string::npos
         || model_path.find("MIDI") != std::string::npos
         || model_path.find("midi") != std::string::npos) {
-        ret = load_with_rescale(model_path.c_str(), 0, 0, 0, 999, use_fp16, batch_size);
+        ret = load_with_rescale(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size);
     } else if (model_path.find("extended") != std::string::npos) {
-        ret = load_extended(model_path.c_str(), 0, 0, 999, use_fp16, batch_size);
-    } else {
-        // if (model_path.find("0.1B") != std::string::npos
-        // || model_path.find("0.4B") != std::string::npos
-        // || model_path.find("0.1b") != std::string::npos
-        // || model_path.find("0.4b") != std::string::npos) {
-        //     ret = load(model_path.c_str(), 999, 0, 0, use_fp16, batch_size);
-        // } else {
-        //     ret = load(model_path.c_str(), 0, 999, 0, use_fp16, batch_size);
-        // }
-        ret = load(model_path.c_str(), 0, 0, 0, use_fp16, batch_size);
+        ret = load_extended(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size);
+    } else { // .st
+        ret = load(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size);
     }
     if (ret != 0) {
         LOGE("web_rwkv_backend::load_model: failed to load model");
