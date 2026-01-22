@@ -51,6 +51,7 @@ int web_rwkv_backend::load_model(std::string model_path, void * extra) {
                 break;
             default:
                 break;
+        }
     }
 
     int ret = 0;
