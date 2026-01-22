@@ -62,7 +62,7 @@ int web_rwkv_backend::load_model(std::string model_path, void * extra) {
         || model_path.find("abc") != std::string::npos
         || model_path.find("MIDI") != std::string::npos
         || model_path.find("midi") != std::string::npos) {
-        ret = load_with_rescale(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size);
+        ret = load_with_rescale(model_path.c_str(), quant, quant_nf4, quant_sf4, 999, use_fp16, batch_size);
     } else if (model_path.find("extended") != std::string::npos) {
         ret = load_extended(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size);
     } else { // .st
