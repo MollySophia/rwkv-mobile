@@ -81,7 +81,7 @@ jobs:
         rustup target add aarch64-apple-ios
         rm -rf build-arm64
         mkdir build-arm64 && cd build-arm64
-        # export LIBRARY_PATH="$LIBRARY_PATH:${{ env.DEVELOPER_DIR }}/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/usr/lib"
+        export LIBRARY_PATH="$LIBRARY_PATH:${{ env.DEVELOPER_DIR }}/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/usr/lib"
         cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_COREML_BACKEND=ON \
           -DENABLE_MLX_BACKEND=ON -DBUILD_STATIC_LIB=ON -DBUILD_EXAMPLES=OFF \
           -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON \

@@ -71,26 +71,28 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if (ENABLE_WEBRWKV_BACKEND)
     set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS} src/backends/web_rwkv/web_rwkv_backend.cpp)
 
-    if (IOS)
-        set(Rust_CARGO_TARGET "aarch64-apple-ios")
+    # if (IOS)
+    #     set(Rust_CARGO_TARGET "aarch64-apple-ios")
+    # endif()
+
+    if (NOT IOS)
+        FetchContent_Declare(
+            Corrosion
+            GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+            GIT_TAG v0.6.1
+        )
+        FetchContent_MakeAvailable(Corrosion)
+
+        FetchContent_Declare(
+            web_rwkv_ffi
+            GIT_REPOSITORY https://github.com/MollySophia/web-rwkv-ffi
+            GIT_TAG 57f27295e2320b146477ff0642addbdeae6df4ed
+        )
+        FetchContent_MakeAvailable(web_rwkv_ffi)
+
+        corrosion_import_crate(MANIFEST_PATH ${web_rwkv_ffi_SOURCE_DIR}/Cargo.toml
+            CRATE_TYPES staticlib)
     endif()
-
-    FetchContent_Declare(
-        Corrosion
-        GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-        GIT_TAG v0.6.1
-    )
-    FetchContent_MakeAvailable(Corrosion)
-
-    FetchContent_Declare(
-        web_rwkv_ffi
-        GIT_REPOSITORY https://github.com/MollySophia/web-rwkv-ffi
-        GIT_TAG 57f27295e2320b146477ff0642addbdeae6df4ed
-    )
-    FetchContent_MakeAvailable(web_rwkv_ffi)
-
-    corrosion_import_crate(MANIFEST_PATH ${web_rwkv_ffi_SOURCE_DIR}/Cargo.toml
-        CRATE_TYPES staticlib)
 
 endif()
 
@@ -362,10 +364,14 @@ if (ENABLE_WEBRWKV_BACKEND)
     endif()
     target_compile_definitions(rwkv_mobile_internal PUBLIC ENABLE_WEBRWKV)
     target_include_directories(rwkv_mobile_internal PUBLIC src/backends/web_rwkv ${web_rwkv_ffi_SOURCE_DIR}/include)
+    set(WEBRWKV_FFI_LIB web_rwkv_ffi)
     if (IOS)
-        target_compile_options(rwkv_mobile_internal PUBLIC "-I${web_rwkv_ffi_SOURCE_DIR}/include")
+        # target_compile_options(rwkv_mobile_internal PUBLIC "-I${web_rwkv_ffi_SOURCE_DIR}/include")
+        target_include_directories(rwkv_mobile_internal PUBLIC src/backends/web_rwkv/include)
+        target_compile_options(rwkv_mobile_internal PUBLIC "-Isrc/backends/web_rwkv/include")
+        set(WEBRWKV_FFI_LIB "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/web_rwkv/prebuilt/aarch64-apple-ios/libweb_rwkv_ffi.a")
     endif()
-    target_link_libraries(rwkv_mobile_internal PUBLIC web_rwkv_ffi ${WEBRWKV_EXTRA_LIBS} bz2_static)
+    target_link_libraries(rwkv_mobile_internal PUBLIC ${WEBRWKV_FFI_LIB} ${WEBRWKV_EXTRA_LIBS} bz2_static)
 endif()
 
 if (ENABLE_NCNN_BACKEND)
@@ -594,8 +600,12 @@ if (BUILD_STATIC_LIB)
     set (STATIC_LIBS_LIST $<TARGET_FILE:rwkv_mobile_static> $<TARGET_FILE:rwkv_mobile_internal>)
 
     if (ENABLE_WEBRWKV_BACKEND)
-        target_link_libraries(rwkv_mobile_static PRIVATE web_rwkv_ffi ${WEBRWKV_EXTRA_LIBS})
-        set (STATIC_LIBS_LIST ${STATIC_LIBS_LIST} ${CMAKE_BINARY_DIR}/Release/cargo/build/${Rust_CARGO_TARGET}/release/libweb_rwkv_ffi.a)
+        target_link_libraries(rwkv_mobile_static PRIVATE ${WEBRWKV_FFI_LIB} ${WEBRWKV_EXTRA_LIBS})
+        if (IOS)
+            set (STATIC_LIBS_LIST ${STATIC_LIBS_LIST} ${WEBRWKV_FFI_LIB})
+        else()
+            set (STATIC_LIBS_LIST ${STATIC_LIBS_LIST} ${CMAKE_BINARY_DIR}/Release/cargo/build/${Rust_CARGO_TARGET}/release/libweb_rwkv_ffi.a)
+        endif()
         set (STATIC_LIBS_LIST ${STATIC_LIBS_LIST} $<TARGET_FILE:bz2_static>)
     endif()
 
@@ -648,6 +658,6 @@ else()
         target_link_libraries(rwkv_mobile PRIVATE -static-openmp)
     endif()
     if (ENABLE_WEBRWKV_BACKEND)
-        target_link_libraries(rwkv_mobile PRIVATE web_rwkv_ffi ${WEBRWKV_EXTRA_LIBS})
+        target_link_libraries(rwkv_mobile PRIVATE ${WEBRWKV_FFI_LIB} ${WEBRWKV_EXTRA_LIBS})
     endif()
 endif()
