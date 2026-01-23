@@ -1,0 +1,287 @@
+from rwkv_src.rwkv_modeling import RWKV_RNN_Stateful, RWKV_LMHead, make_chunks_stateful
+import coremltools as ct
+from coremltools.optimize.torch.quantization import PostTrainingQuantizer, PostTrainingQuantizerConfig
+from coremltools.optimize.torch.palettization import PostTrainingPalettizer, PostTrainingPalettizerConfig
+from pathlib import Path
+import argparse, types, os, shutil
+import torch
+from transformers import AutoTokenizer
+import numpy as np
+
+parser = argparse.ArgumentParser(description='Export coreml model')
+parser.add_argument('model', type=Path, help='Path to RWKV pth file')
+parser.add_argument('--chunks', type=int, default=1, help='Number of chunks')
+parser.add_argument('--int8', action='store_true', help='Use int8 quantization')
+parser.add_argument('--int4', action='store_true', help='Use int4 quantization')
+parser.add_argument('--lut8', action='store_true', help='Use lut8 palettization')
+parser.add_argument('--lut6', action='store_true', help='Use lut6 palettization')
+parser.add_argument('--lut4', action='store_true', help='Use lut4 palettization')
+parser_args = parser.parse_args()
+
+model_args = types.SimpleNamespace()
+model_args.USE_CUDA = False
+model_args.fp16 = False
+model_args.USE_EMBEDDING = True
+model_args.SKIP_LMHEAD = True
+
+model_args.MODEL_NAME = str(parser_args.model).replace('.pth', '')
+if parser_args.chunks > 1:
+    models = make_chunks_stateful(parser_args.chunks, model_args)
+else:
+    models = [RWKV_RNN_Stateful(model_args)]
+lmhead = RWKV_LMHead(model_args)
+args = models[0].args
+
+layers_for_chunk = []
+for i in range(parser_args.chunks):
+    n = args.n_layer // parser_args.chunks
+    layer_start = i * n
+    layer_end = min(args.n_layer, (i + 1) * n)
+    layers_for_chunk.append(layer_end - layer_start)
+
+PREFILL_SEQ_LENGTH = 32
+
+def build_inputs_decode(chunk_idx: int = 0):
+    if chunk_idx == 0:
+        return [torch.tensor([[0]*1 for _ in range(1)], dtype=torch.int32).to(models[0].device)]
+    else:
+        inputs = [torch.zeros(1, 1, args.n_embd).to(models[0].device)]
+        if parser_args.chunks > 1:
+            inputs.append(torch.zeros(1, 1, args.n_embd).to(models[0].device))
+        return inputs
+
+def build_inputs_prefill(chunk_idx: int = 0):
+    if chunk_idx == 0:
+        return [torch.tensor([[0]*PREFILL_SEQ_LENGTH for _ in range(1)], dtype=torch.int32).to(models[0].device)]
+    else:
+        inputs = [torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(models[0].device)]
+        if parser_args.chunks > 1:
+            inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(models[0].device))
+        return inputs
+
+def build_inputs_lmhead():
+    return [torch.zeros(1, 1, args.n_embd).to(models[0].device)]
+
+tokenizer = AutoTokenizer.from_pretrained("RWKV/rwkv-5-world-1b5", trust_remote_code=True)
+prompt = "The Eiffel Tower is in the city of"
+
+use_int = False
+use_lut = False
+if parser_args.int4:
+    config = PostTrainingQuantizerConfig.from_dict(
+        {
+            "global_config": {
+                "weight_dtype": "int4",
+                "granularity": "per_block",
+                "block_size": 128,
+            },
+            "module_type_configs": {
+            }
+        }
+    )
+    use_int = True
+elif parser_args.int8:
+    config = PostTrainingQuantizerConfig.from_dict(
+        {
+            "global_config": {
+                "weight_dtype": "int8",
+                "granularity": "per_channel",
+            },
+            "module_type_configs": {
+            }
+        }
+    )
+    use_int = True
+elif parser_args.lut8:
+    palettization_config_dict = {
+        "global_config": {"n_bits": 8, "granularity": "per_grouped_channel", "group_size": 128},
+    }
+    palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+    use_lut = True
+elif parser_args.lut6:
+    palettization_config_dict = {
+        "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 16},
+    }
+    palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+    use_lut = True
+elif parser_args.lut4:
+    palettization_config_dict = {
+        "global_config": {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 32},
+    }
+    palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+    use_lut = True
+
+if use_lut:
+    for i in range(len(models)):
+        palettizer = PostTrainingPalettizer(models[i], palettization_config)
+        models[i] = palettizer.compress()
+elif use_int:
+    for i in range(len(models)):
+        quantizer = PostTrainingQuantizer(models[i], config)
+        models[i] = quantizer.compress()
+
+# use_lut_lmhead = True
+# use_int_lmhead = False
+# lmhead_palettization_config_dict = {
+#     "global_config": {"n_bits": 8, "granularity": "per_grouped_channel", "group_size": 128},
+# }
+# lmhead_palettization_config = PostTrainingPalettizerConfig.from_dict(lmhead_palettization_config_dict)
+# lmhead_palettizer = PostTrainingPalettizer(lmhead, lmhead_palettization_config)
+# lmhead = lmhead_palettizer.compress()
+
+use_int_lmhead = True
+use_lut_lmhead = False
+lmhead_quantization_config_dict = {
+    "global_config": {"weight_dtype": "int8", "granularity": "per_channel"},
+}
+lmhead_quantization_config = PostTrainingQuantizerConfig.from_dict(lmhead_quantization_config_dict)
+lmhead_quantizer = PostTrainingQuantizer(lmhead, lmhead_quantization_config)
+lmhead = lmhead_quantizer.compress()
+
+def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
+    output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
+    output_name += f'_{mode_tag}'
+    if parser_args.int4:
+        output_name += '_int4'
+    elif parser_args.int8:
+        output_name += '_int8'
+    elif parser_args.lut8:
+        output_name += '_lut8'
+    elif parser_args.lut6:
+        output_name += '_lut6'
+    elif parser_args.lut4:
+        output_name += '_lut4'
+    # Add chunk suffix
+    chunk_suffix = f'_chunk{chunk_idx + 1}of{parser_args.chunks}'
+    output_name += chunk_suffix
+    return output_name
+
+def _build_output_name_lmhead() -> str:
+    output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
+    output_name += f'_lmhead'
+    if use_lut_lmhead:
+        output_name += '_lut8'
+    elif use_int_lmhead:
+        output_name += '_int8'
+    return output_name
+
+def _build_coreml_io_lmhead(inputs):
+    dtype = np.float16
+    ct_inputs = [ct.TensorType('in0', inputs[0].shape, dtype=dtype)]
+    ct_outputs = [ct.TensorType(name='out0', dtype=dtype)]
+    return ct_inputs, ct_outputs
+
+def _build_coreml_io(inputs, chunk_idx: int = 0, num_chunks: int = 1):
+    dtype = np.float16
+    # chunk0 uses token ids (int32), others use hidden state (float16)
+    if chunk_idx == 0:
+        ct_inputs = [ct.TensorType('in0', inputs[0].shape, dtype=np.int32)]
+        ct_outputs = [ct.TensorType(name='out0', dtype=dtype)]
+        if num_chunks > 1:
+            ct_outputs.append(ct.TensorType(name='v_first_out', dtype=dtype))
+    else:
+        ct_inputs = [ct.TensorType('in0', inputs[0].shape, dtype=dtype), ct.TensorType('v_first_in', inputs[1].shape, dtype=dtype)]
+        ct_outputs = [ct.TensorType(name='out0', dtype=dtype)]
+
+    return ct_inputs, ct_outputs
+
+
+def convert_and_save_coreml(jit_model, inputs, mode_tag: str, chunk_idx: int = 0):
+    ct_inputs, ct_outputs = _build_coreml_io(inputs, chunk_idx, parser_args.chunks)
+    output_name = _build_output_name(mode_tag, chunk_idx)
+
+    states = [
+        ct.StateType(
+            wrapped_type=ct.TensorType(
+                shape=(2, layers_for_chunk[chunk_idx], args.n_embd),
+            ),
+            name="state_tokenshift",
+        ),
+        ct.StateType(
+            wrapped_type=ct.TensorType(
+                shape=(layers_for_chunk[chunk_idx], args.n_head, args.head_size, args.head_size),
+            ),
+            name="state_wkv",
+        ),
+    ]
+
+    mlmodel = ct.convert(
+        jit_model,
+        inputs=ct_inputs,
+        outputs=ct_outputs,
+        states=states,
+        minimum_deployment_target=ct.target.iOS18,
+        compute_units=ct.ComputeUnit.CPU_AND_NE,
+    )
+
+    mlmodel.save(f'{output_name}.mlpackage')
+    return output_name
+
+def convert_and_save_coreml_lmhead():
+    ct_inputs, ct_outputs = _build_coreml_io_lmhead(build_inputs_lmhead())
+    output_name = _build_output_name_lmhead()
+    mlmodel_lmhead = ct.convert(
+        torch.jit.trace(lmhead, example_inputs=build_inputs_lmhead()),
+        inputs=ct_inputs,
+        outputs=ct_outputs,
+        minimum_deployment_target=ct.target.iOS18,
+        compute_units=ct.ComputeUnit.CPU_AND_NE,
+    )
+    mlmodel_lmhead.save(f'{output_name}.mlpackage')
+    return output_name
+
+print("Converting LMHead")
+convert_and_save_coreml_lmhead()
+
+# Export combined models for each chunk (each containing decode and prefill functions).
+for chunk_idx, model in enumerate(models):
+    print(f"Converting chunk {chunk_idx + 1} of {parser_args.chunks}")
+
+    inputs_decode = build_inputs_decode(chunk_idx)
+    inputs_prefill = build_inputs_prefill(chunk_idx)
+
+    desc = ct.utils.MultiFunctionDescriptor()
+
+    # Trace and convert decode model
+    jit_decode = torch.jit.trace(model, example_inputs=inputs_decode)
+    decode_output_name = convert_and_save_coreml(jit_decode, inputs_decode, mode_tag='decode', chunk_idx=chunk_idx)
+    del jit_decode
+
+    # Trace and convert prefill model
+    jit_prefill = torch.jit.trace(model, example_inputs=inputs_prefill)
+    prefill_output_name = convert_and_save_coreml(jit_prefill, inputs_prefill, mode_tag='prefill', chunk_idx=chunk_idx)
+    del jit_prefill
+
+    # Add functions to multi-function descriptor
+    desc.add_function(
+        decode_output_name + '.mlpackage',
+        src_function_name="main",
+        target_function_name="decode"
+    )
+    desc.add_function(
+        prefill_output_name + '.mlpackage',
+        src_function_name="main",
+        target_function_name="prefill"
+    )
+
+    desc.default_function_name = "decode"
+
+    # Save combined model for this chunk
+    combined_output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
+    combined_output_name += '_combined'
+    if parser_args.int4:
+        combined_output_name += '_int4'
+    elif parser_args.int8:
+        combined_output_name += '_int8'
+    elif parser_args.lut8:
+        combined_output_name += '_lut8'
+    elif parser_args.lut6:
+        combined_output_name += '_lut6'
+    elif parser_args.lut4:
+        combined_output_name += '_lut4'
+    combined_output_name += f'_chunk{chunk_idx + 1}of{parser_args.chunks}'
+    ct.utils.save_multifunction(desc, combined_output_name + '.mlpackage')
+
+    # Clean up individual files
+    shutil.rmtree(decode_output_name + '.mlpackage')
+    shutil.rmtree(prefill_output_name + '.mlpackage')
