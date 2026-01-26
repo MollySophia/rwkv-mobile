@@ -88,6 +88,11 @@ struct ModelInstance {
     std::deque<SpeedSample> decode_samples_us;
     std::deque<SpeedSample> prefill_samples_us;
 
+    // Prefill progress
+    int current_prefill_total_tokens = -1;
+    int current_prefill_finished_tokens = 0;
+    double prefill_progress = 0.0;
+
 #if defined(ENABLE_VISION) || defined(ENABLE_WHISPER)
     std::unique_ptr<MultimodalEncoder> multimodal_encoder;
 #endif
@@ -400,19 +405,23 @@ private:
 
     const int _prefill_chunk_size = 64;
 
-    int _current_prefill_total_tokens = -1;
-    int _current_prefill_finished_tokens = 0;
-    double _prefill_progress = 0.0;
-
-    void _prefill_progress_start(int total_tokens) {
-        _current_prefill_total_tokens = total_tokens;
-        _current_prefill_finished_tokens = 0;
-        _prefill_progress = 0;
+    void _prefill_progress_start(int model_id, int total_tokens) {
+        if (_models.find(model_id) == _models.end()) {
+            return;
+        }
+        auto &model = _models.at(model_id);
+        model->current_prefill_total_tokens = total_tokens;
+        model->current_prefill_finished_tokens = 0;
+        model->prefill_progress = 0;
     }
 
-    void _prefill_progress_finish() {
-        _current_prefill_total_tokens = -1;
-        _prefill_progress = 1.0;
+    void _prefill_progress_finish(int model_id) {
+        if (_models.find(model_id) == _models.end()) {
+            return;
+        }
+        auto &model = _models.at(model_id);
+        model->current_prefill_total_tokens = -1;
+        model->prefill_progress = 1.0;
     }
 
     std::string _cache_dir = "";

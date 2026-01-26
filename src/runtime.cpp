@@ -526,19 +526,19 @@ int Runtime::eval_logits(int model_id, std::vector<int> ids, Tensor1D & logits) 
         auto ids_chunk = std::vector<int>(ids.begin() + i, ids.begin() + i + _prefill_chunk_size);
         ret = model->backend->eval(ids_chunk, logits);
         if (ret != RWKV_SUCCESS) return ret;
-        if (_current_prefill_total_tokens > 0) {
-            _current_prefill_finished_tokens += _prefill_chunk_size;
-            _prefill_progress = (double)_current_prefill_finished_tokens / _current_prefill_total_tokens;
-            LOGD("Update prefill_progress = %f", _prefill_progress);
+        if (model->current_prefill_total_tokens > 0) {
+            model->current_prefill_finished_tokens += _prefill_chunk_size;
+            model->prefill_progress = (double)model->current_prefill_finished_tokens / model->current_prefill_total_tokens;
+            LOGD("Update prefill_progress = %f", model->prefill_progress);
         }
     }
     if (i < ids.size()) {
         auto ids_left = std::vector<int>(ids.begin() + i, ids.end());
         ret = model->backend->eval(ids_left, logits);
-        if (_current_prefill_total_tokens > 0) {
-            _current_prefill_finished_tokens += ids_left.size();
-            _prefill_progress = (double)_current_prefill_finished_tokens / _current_prefill_total_tokens;
-            LOGD("Update prefill_progress = %f", _prefill_progress);
+        if (model->current_prefill_total_tokens > 0) {
+            model->current_prefill_finished_tokens += ids_left.size();
+            model->prefill_progress = (double)model->current_prefill_finished_tokens / model->current_prefill_total_tokens;
+            LOGD("Update prefill_progress = %f", model->prefill_progress);
         }
     }
     auto end = std::chrono::high_resolution_clock::now();
@@ -1013,7 +1013,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     LOGI("matched state cache for prefix: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
 
     if (tokens_to_prefill.size() > 0) {
-        _prefill_progress_start(tokens_to_prefill.size());
+        _prefill_progress_start(model_id, tokens_to_prefill.size());
         auto text_to_prefill = model->tokenizer->decode(tokens_to_prefill);
         LOGI("new text to prefill: \"%s\"", escape_special_chars(text_to_prefill).c_str());
 
@@ -1088,7 +1088,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
             }
         }
     }
-    _prefill_progress_finish();
+    _prefill_progress_finish(model_id);
 
     model->response_buffer = input_text.substr(input_text.rfind(model->response_role + ":") + (model->response_role + ":").size());
     std::vector<int> response_ids_raw;
@@ -1309,7 +1309,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
         // prefill needed tokens
         if (tokens_to_prefill.size() > 0) {
-            _prefill_progress_start(tokens_to_prefill.size());
+            _prefill_progress_start(model_id, tokens_to_prefill.size());
             LOGI("new text to prefill: \"%s\"", escape_special_chars(model->tokenizer->decode(tokens_to_prefill)).c_str());
 
             // save a state checkpoint every about 256 tokens
@@ -1331,7 +1331,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
             }
         }
-        _prefill_progress_finish();
+        _prefill_progress_finish(model_id);
 
         if (logits.data_ptr == nullptr) {
             if (!nodes_batch[batch_idx]->logits.empty()) {
@@ -2563,7 +2563,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         std::vector<int> ids = model->tokenizer->encode(prompts[batch_idx]);
         std::vector<int> tokens_to_prefill;
         nodes_batch[batch_idx] = model->backend->match_and_load_state(ids, tokens_to_prefill);
-        _prefill_progress_start(tokens_to_prefill.size());
+        _prefill_progress_start(model_id, tokens_to_prefill.size());
 
         // save a state checkpoint every about 256 tokens
         int checkpoint_interval = 256;
@@ -2583,7 +2583,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
             }
             LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
         }
-        _prefill_progress_finish();
+        _prefill_progress_finish(model_id);
 
         model->response_buffer_batch[batch_idx] = prompts[batch_idx];
         model->response_buffer_ids_batch[batch_idx] = ids;
@@ -2673,7 +2673,7 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     std::vector<int> ids = model->tokenizer->encode(prompt);
     std::vector<int> tokens_to_prefill;
     state_node* node = model->backend->match_and_load_state(ids, tokens_to_prefill);
-    _prefill_progress_start(tokens_to_prefill.size());
+    _prefill_progress_start(model_id, tokens_to_prefill.size());
 
     Tensor1D logits;
     // save a state checkpoint every about 256 tokens
@@ -2694,7 +2694,7 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
         }
         LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
     }
-    _prefill_progress_finish();
+    _prefill_progress_finish(model_id);
 
     model->response_buffer = prompt;
     model->response_buffer_ids = ids;
@@ -2757,7 +2757,7 @@ int Runtime::gen_completion_singletoken_topk(int model_id, std::string prompt, i
     std::vector<int> ids = model->tokenizer->encode(prompt);
     std::vector<int> tokens_to_prefill;
     state_node* node = model->backend->match_and_load_state(ids, tokens_to_prefill);
-    _prefill_progress_start(tokens_to_prefill.size());
+    _prefill_progress_start(model_id, tokens_to_prefill.size());
 
     Tensor1D logits;
     // The target usage requires more frequent state checkpoints.
@@ -2829,7 +2829,7 @@ int Runtime::gen_completion_singletoken_topk(int model_id, std::string prompt, i
         }
         LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
     }
-    _prefill_progress_finish();
+    _prefill_progress_finish(model_id);
 
     static int idx = 0;
     if (logits.data_ptr == nullptr) {
@@ -3348,7 +3348,11 @@ std::vector<bool> Runtime::get_response_buffer_eos_found_batch(int model_id) {
 }
 
 double Runtime::get_prefill_progress(int model_id) {
-    return _prefill_progress;
+    if (_models.find(model_id) == _models.end()) {
+        return 0.0;
+    }
+    auto &model = _models.at(model_id);
+    return model->prefill_progress;
 }
 
 void Runtime::set_token_banned(int model_id, std::vector<int> token_banned) {
