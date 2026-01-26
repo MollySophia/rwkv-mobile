@@ -9,6 +9,7 @@
 #include <string>
 #include <unordered_set>
 #include <sstream>
+#include <cctype>
 #include <cstdint>
 
 std::string processVocabFormat(const std::string &input) {
@@ -108,6 +109,191 @@ std::vector<uint8_t> processEscapes(const std::string &input, bool utf8_string =
     }
 
     return result;
+}
+
+static inline std::string trimWhitespace(const std::string& input) {
+    size_t start = input.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+        return "";
+    }
+    size_t end = input.find_last_not_of(" \t\r\n");
+    return input.substr(start, end - start + 1);
+}
+
+static inline int hexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+}
+
+static inline void appendUtf8Bytes(std::vector<uint8_t>& out, uint32_t codePoint) {
+    if (codePoint <= 0x7F) {
+        out.push_back(static_cast<uint8_t>(codePoint));
+    } else if (codePoint <= 0x7FF) {
+        out.push_back(static_cast<uint8_t>(192 + (codePoint >> 6)));
+        out.push_back(static_cast<uint8_t>(128 + (codePoint & 0x3F)));
+    } else if (codePoint <= 0xFFFF) {
+        out.push_back(static_cast<uint8_t>(224 + (codePoint >> 12)));
+        out.push_back(static_cast<uint8_t>(128 + ((codePoint >> 6) & 0x3F)));
+        out.push_back(static_cast<uint8_t>(128 + (codePoint & 0x3F)));
+    } else if (codePoint <= 0x10FFFF) {
+        out.push_back(static_cast<uint8_t>(240 + (codePoint >> 18)));
+        out.push_back(static_cast<uint8_t>(128 + ((codePoint >> 12) & 0x3F)));
+        out.push_back(static_cast<uint8_t>(128 + ((codePoint >> 6) & 0x3F)));
+        out.push_back(static_cast<uint8_t>(128 + (codePoint & 0x3F)));
+    }
+}
+
+static inline std::vector<uint8_t> parsePythonLiteralBytes(const std::string& literal) {
+    std::string input = trimWhitespace(literal);
+    if (input.empty()) {
+        return {};
+    }
+
+    bool is_bytes = false;
+    size_t i = 0;
+    char quote = 0;
+    if (input.size() >= 2 && input[0] == 'b' && (input[1] == '\'' || input[1] == '"')) {
+        is_bytes = true;
+        quote = input[1];
+        i = 2;
+    } else if (input[0] == '\'' || input[0] == '"') {
+        quote = input[0];
+        i = 1;
+    } else {
+        return std::vector<uint8_t>(input.begin(), input.end());
+    }
+
+    size_t end = input.size();
+    if (end > 0 && input[end - 1] == quote) {
+        --end;
+    }
+
+    std::vector<uint8_t> out;
+    for (; i < end; ++i) {
+        unsigned char c = static_cast<unsigned char>(input[i]);
+        if (c != '\\') {
+            // Literal UTF-8 bytes are already present in the source string.
+            out.push_back(static_cast<uint8_t>(c));
+            continue;
+        }
+
+        if (i + 1 >= end) {
+            out.push_back(static_cast<uint8_t>('\\'));
+            break;
+        }
+
+        char esc = input[++i];
+        switch (esc) {
+            case 'n':
+                if (is_bytes) out.push_back('\n'); else appendUtf8Bytes(out, '\n');
+                break;
+            case 't':
+                if (is_bytes) out.push_back('\t'); else appendUtf8Bytes(out, '\t');
+                break;
+            case 'r':
+                if (is_bytes) out.push_back('\r'); else appendUtf8Bytes(out, '\r');
+                break;
+            case '\\':
+                if (is_bytes) out.push_back('\\'); else appendUtf8Bytes(out, '\\');
+                break;
+            case '\'':
+                if (is_bytes) out.push_back('\''); else appendUtf8Bytes(out, '\'');
+                break;
+            case '"':
+                if (is_bytes) out.push_back('"'); else appendUtf8Bytes(out, '"');
+                break;
+            case 'a':
+                if (is_bytes) out.push_back('\a'); else appendUtf8Bytes(out, '\a');
+                break;
+            case 'b':
+                if (is_bytes) out.push_back('\b'); else appendUtf8Bytes(out, '\b');
+                break;
+            case 'f':
+                if (is_bytes) out.push_back('\f'); else appendUtf8Bytes(out, '\f');
+                break;
+            case 'v':
+                if (is_bytes) out.push_back('\v'); else appendUtf8Bytes(out, '\v');
+                break;
+            case 'x': {
+                if (i + 2 <= end - 1) {
+                    int hi = hexValue(input[i + 1]);
+                    int lo = hexValue(input[i + 2]);
+                    if (hi >= 0 && lo >= 0) {
+                        uint8_t byte = static_cast<uint8_t>((hi << 4) | lo);
+                        if (is_bytes) {
+                            out.push_back(byte);
+                        } else {
+                            appendUtf8Bytes(out, byte);
+                        }
+                        i += 2;
+                        break;
+                    }
+                }
+                if (is_bytes) out.push_back('x'); else appendUtf8Bytes(out, 'x');
+                break;
+            }
+            case 'u':
+            case 'U': {
+                int hex_count = (esc == 'u') ? 4 : 8;
+                uint32_t codePoint = 0;
+                bool ok = true;
+                if (i + hex_count <= end - 1) {
+                    for (int j = 0; j < hex_count; ++j) {
+                        int hv = hexValue(input[i + 1 + j]);
+                        if (hv < 0) {
+                            ok = false;
+                            break;
+                        }
+                        codePoint = (codePoint << 4) | static_cast<uint32_t>(hv);
+                    }
+                } else {
+                    ok = false;
+                }
+
+                if (ok) {
+                    if (is_bytes) {
+                        // In bytes literals, \u/\U are not valid; keep raw.
+                        out.push_back(static_cast<uint8_t>(esc));
+                    } else {
+                        appendUtf8Bytes(out, codePoint);
+                        i += hex_count;
+                    }
+                } else {
+                    if (is_bytes) out.push_back(static_cast<uint8_t>(esc));
+                    else appendUtf8Bytes(out, static_cast<uint8_t>(esc));
+                }
+                break;
+            }
+            default: {
+                if (esc >= '0' && esc <= '7') {
+                    uint32_t value = static_cast<uint32_t>(esc - '0');
+                    size_t j = i;
+                    for (int digits = 1; digits < 3 && j + 1 < end; ++digits) {
+                        char next = input[j + 1];
+                        if (next < '0' || next > '7') {
+                            break;
+                        }
+                        value = (value << 3) | static_cast<uint32_t>(next - '0');
+                        ++j;
+                    }
+                    i = j;
+                    if (is_bytes) {
+                        out.push_back(static_cast<uint8_t>(value & 0xFF));
+                    } else {
+                        appendUtf8Bytes(out, value & 0xFF);
+                    }
+                } else {
+                    if (is_bytes) out.push_back(static_cast<uint8_t>(esc));
+                    else appendUtf8Bytes(out, static_cast<uint8_t>(esc));
+                }
+                break;
+            }
+        }
+    }
+
+    return out;
 }
 
 struct VectorEqual {
@@ -258,19 +444,34 @@ public:
             return;
         }
 
+        std::string base_name = file_name;
+        size_t slash_pos = base_name.find_last_of("/\\");
+        if (slash_pos != std::string::npos) {
+            base_name = base_name.substr(slash_pos + 1);
+        }
+        bool is_converted = base_name.rfind("b_", 0) == 0;
+
         std::string line;
         while (getline(file, line)) {
             size_t firstSpace = line.find(' ');
             size_t lastSpace = line.rfind(' ');
             int idx = std::stoi(line.substr(0, firstSpace));
             int utf8_byte_length = std::stoi(line.substr(lastSpace + 1));
-            bool utf8_string = line[firstSpace+1] != 'b';
-
-            std::vector<uint8_t> x = processEscapes(
-                processVocabFormat(line.substr(firstSpace + 1, lastSpace - firstSpace)),
-                utf8_string,
-                utf8_byte_length
-            );
+            std::string token_literal = line.substr(firstSpace + 1, lastSpace - firstSpace);
+            std::vector<uint8_t> x;
+            if (is_converted) {
+                bool utf8_string = line[firstSpace + 1] != 'b';
+                x = processEscapes(
+                    processVocabFormat(token_literal),
+                    utf8_string,
+                    utf8_byte_length
+                );
+            } else {
+                x = parsePythonLiteralBytes(token_literal);
+                while (utf8_byte_length > 0 && x.size() < static_cast<size_t>(utf8_byte_length)) {
+                    x.insert(x.begin(), 0);
+                }
+            }
 
             token_mapping.add_token(idx, x);
             root->add(x, 0, idx);
