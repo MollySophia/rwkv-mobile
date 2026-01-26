@@ -396,6 +396,7 @@ private:
         const std::deque<ModelInstance::SpeedSample>& samples,
         double trim_ratio_total
     );
+    void _clear_speed_samples(ModelInstance& model);
 
     const int _prefill_chunk_size = 64;
 

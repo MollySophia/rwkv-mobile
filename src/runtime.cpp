@@ -79,6 +79,12 @@ void Runtime::_record_speed_sample(ModelInstance& model, bool is_prefill, int to
     }
 }
 
+void Runtime::_clear_speed_samples(ModelInstance& model) {
+    std::lock_guard<std::mutex> lock(model.speed_samples_mutex);
+    model.decode_samples_us.clear();
+    model.prefill_samples_us.clear();
+}
+
 double Runtime::_compute_trimmed_mean_speed_tokens_per_s(
     const std::deque<ModelInstance::SpeedSample>& samples,
     double trim_ratio_total
@@ -984,6 +990,8 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     model->response_buffer_ids.clear();
     model->response_buffer_eos_found = false;
 
+    _clear_speed_samples(*model);
+
     if (_prefilling_thread.joinable() && _prefilling_thread.get_id() != std::this_thread::get_id()) {
         LOGD("Found prefilling thread, joining\n");
         _prefilling_thread.join();
@@ -1119,6 +1127,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
             tensor1d_set_f32(logits, 11, -1e9f); // '\n'
             tensor1d_set_f32(logits, 61, -1e9f); // '<'
             tensor1d_set_f32(logits, 261, -1e9f); // '\n\n'
+            tensor1d_set_f32(logits, 295, -1e9f); // ' <'
             tensor1d_set_f32(logits, 0, -1e9f); // <EOD>
         }
 
@@ -1241,6 +1250,8 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         model->response_buffer_eos_found_batch[batch_idx] = false;
     }
 
+    _clear_speed_samples(*model);
+
     std::vector<std::vector<int>> response_ids_raw_batch(batch_size);
 
     std::vector<std::string> input_texts(batch_size);
@@ -1344,6 +1355,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
             tensor1d_set_f32(logits, 11, -1e9f); // '\n'
             tensor1d_set_f32(logits, 61, -1e9f); // '<'
             tensor1d_set_f32(logits, 261, -1e9f); // '\n\n'
+            tensor1d_set_f32(logits, 295, -1e9f); // ' <'
             tensor1d_set_f32(logits, 0, -1e9f); // <EOD>
         }
         decoded_idx[batch_idx] = model->sampler->sample(logits, num_vocab);
@@ -1378,6 +1390,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     tensor1d_set_f32(view, 11, -1e9f); // '\n'
                     tensor1d_set_f32(view, 61, -1e9f); // '<'
                     tensor1d_set_f32(view, 261, -1e9f); // '\n\n'
+                    tensor1d_set_f32(view, 295, -1e9f); // ' <'
                     tensor1d_set_f32(view, 0, -1e9f); // <EOD>
                 }
             }
@@ -2534,6 +2547,8 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     model->response_buffer_ids_batch.resize(batch_size);
     model->response_buffer_eos_found_batch.resize(batch_size);
 
+    _clear_speed_samples(*model);
+
     std::vector<int> decoded_idx_batch(batch_size);
     std::vector<std::string> decoded_text_batch(batch_size);
     std::vector<state_node*> nodes_batch(batch_size);
@@ -2653,6 +2668,8 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     model->stop_signal = false;
     model->sampler->clear_occurences();
 
+    _clear_speed_samples(*model);
+
     std::vector<int> ids = model->tokenizer->encode(prompt);
     std::vector<int> tokens_to_prefill;
     state_node* node = model->backend->match_and_load_state(ids, tokens_to_prefill);
@@ -2732,6 +2749,8 @@ int Runtime::gen_completion_singletoken_topk(int model_id, std::string prompt, i
         LOGE("gen_completion: Backend or tokenizer for model ID %d not found", model_id);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
+
+    _clear_speed_samples(*model);
 
     model->is_generating = true;
 
