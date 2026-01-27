@@ -66,7 +66,7 @@ int VisionEncoder::load_model(const std::string &model_path, const std::string &
 #endif
 
     auto pixelValTensor = vision_encoder_mnn_interpretor->getSessionInput(vision_encoder_mnn_session, "pixel_values");
-    std::vector<int> input_shape = {1, 3, 384, 384};
+    std::vector<int> input_shape = {1, 3, split_image_size, split_image_size};
     vision_encoder_mnn_interpretor->resizeTensor(pixelValTensor, input_shape);
     vision_encoder_mnn_interpretor->resizeSession(vision_encoder_mnn_session);
 
@@ -95,12 +95,39 @@ bool VisionEncoder::encode(const std::string &path, std::vector<float> &embeddin
     std::vector<image_f32> img_batch;
     preprocess(img, img_batch);
 
+    int batch_size = static_cast<int>(img_batch.size());
+    LOGI("image batch size: %d", batch_size);
+    if (batch_size <= 0) {
+        LOGE("Empty image batch after preprocessing");
+        return false;
+    }
+
     auto pixelValTensor = vision_encoder_mnn_interpretor->getSessionInput(vision_encoder_mnn_session, "pixel_values");
+    if (batch_size != last_batch_size) {
+        std::vector<int> input_shape = {batch_size, 3, split_image_size, split_image_size};
+        vision_encoder_mnn_interpretor->resizeTensor(pixelValTensor, input_shape);
+        vision_encoder_mnn_interpretor->resizeSession(vision_encoder_mnn_session);
+
+        auto adapterInputTensor = vision_adapter_mnn_interpretor->getSessionInput(vision_adapter_mnn_session, "input");
+        std::vector<int> adapter_input_shape = {batch_size, 576, 768};
+        vision_adapter_mnn_interpretor->resizeTensor(adapterInputTensor, adapter_input_shape);
+        vision_adapter_mnn_interpretor->resizeSession(vision_adapter_mnn_session);
+
+        last_batch_size = batch_size;
+    }
+
     auto nchw_tensor = new MNN::Tensor(pixelValTensor, MNN::Tensor::CAFFE);
-    for (int k = 0; k < 3; k++) {
-        for (int y = 0; y < img_batch[0].ny; y++) {
-            for (int x = 0; x < img_batch[0].nx; x++) {
-                nchw_tensor->host<float>()[k * img_batch[0].ny * img_batch[0].nx + y * img_batch[0].nx + x] = img_batch[0].buf[3 * (y * img_batch[0].nx + x) + k];
+    const int target_h = split_image_size;
+    const int target_w = split_image_size;
+    for (int b = 0; b < batch_size; b++) {
+        const auto &img = img_batch[b];
+        for (int k = 0; k < 3; k++) {
+            for (int y = 0; y < target_h; y++) {
+                for (int x = 0; x < target_w; x++) {
+                    size_t src_index = 3 * (y * img.nx + x) + k;
+                    size_t dst_index = ((b * 3 + k) * target_h + y) * target_w + x;
+                    nchw_tensor->host<float>()[dst_index] = img.buf[src_index];
+                }
             }
         }
     }
@@ -129,7 +156,17 @@ bool VisionEncoder::encode(const std::string &path, std::vector<float> &embeddin
     void *adapterOutputPtr = adapterOutputTensor->map(MNN::Tensor::MAP_TENSOR_READ, adapterOutputTensor->getDimensionType());
     embeddings.assign((float*)adapterOutputPtr, (float*)adapterOutputPtr + output_size);
     adapterOutputTensor->unmap(MNN::Tensor::MAP_TENSOR_READ, adapterOutputTensor->getDimensionType(), adapterOutputPtr);
-    n_tokens = 576;
+    int dims = adapterOutputTensor->dimensions();
+    int embed_dim = dims > 0 ? adapterOutputTensor->length(dims - 1) : 0;
+    int token_count = 0;
+    if (embed_dim > 0) {
+        token_count = 1;
+        for (int i = 0; i < dims - 1; i++) {
+            token_count *= adapterOutputTensor->length(i);
+        }
+    }
+    n_tokens = token_count;
+    LOGI("image n_tokens: %d", n_tokens);
 
     return true;
 }

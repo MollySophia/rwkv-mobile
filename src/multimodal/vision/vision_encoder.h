@@ -33,7 +33,11 @@ public:
     VisionEncoder();
     ~VisionEncoder() override;
 
-    int image_size = 384;
+    int max_image_size = 768;
+    int split_image_size = 384;
+    bool resize_to_max_side_len = true;
+
+    int last_batch_size = -1;
 
     float image_mean[3] = {0.5, 0.5, 0.5};
     float image_std[3] = {0.5, 0.5, 0.5};
@@ -53,6 +57,7 @@ private:
     void preprocess(const image_u8 &img, std::vector<image_f32> &res_imgs);
 
     void bilinear_resize(const image_u8& src, image_u8& dst, int target_width, int target_height);
+    void bicubic_resize(const image_u8& src, image_u8& dst, int target_width, int target_height);
     void rescale_image_u8_to_f32(const image_u8* src, image_f32* dst, const double scale);
     void normalize_image_f32(const image_f32* src, image_f32* dst, const float mean[3], const float std[3]);
 

@@ -1030,12 +1030,12 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
 #ifdef ENABLE_VISION
                     // "<|vision_start|>" = 65530
                     // "<|vision_end|>" = 65531
-                    ret = eval_logits(model_id, 65530, logits);
-                    if (ret) {
-                        model->is_generating = false;
-                        LOGE("failed to eval logits for image chunk\n");
-                        return ret;
-                    }
+                    // ret = eval_logits(model_id, 65530, logits);
+                    // if (ret) {
+                    //     model->is_generating = false;
+                    //     LOGE("failed to eval logits for image chunk\n");
+                    //     return ret;
+                    // }
                     auto start = std::chrono::high_resolution_clock::now();
                     std::vector<float> embeddings;
                     int n_tokens;
@@ -1052,12 +1052,12 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
                         LOGE("failed to eval logits with embeddings for image chunk\n");
                         return ret;
                     }
-                    ret = eval_logits(model_id, 65531, logits);
-                    if (ret) {
-                        model->is_generating = false;
-                        LOGE("failed to eval logits for image chunk\n");
-                        return ret;
-                    }
+                    // ret = eval_logits(model_id, 65531, logits);
+                    // if (ret) {
+                    //     model->is_generating = false;
+                    //     LOGE("failed to eval logits for image chunk\n");
+                    //     return ret;
+                    // }
 #endif
                     ret = model->backend->register_state_checkpoint(node, chunk.tokens, logits);
                     if (ret) {

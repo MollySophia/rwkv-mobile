@@ -19,7 +19,7 @@ void custom_sleep(int seconds) {
 #endif
 }
 
-char msg0[100];
+char msg0[300];
 
 int main(int argc, char **argv) {
     // set stdout to be unbuffered
@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
     const char *unique_identifier = "abababababa";
     rwkvmobile_runtime_set_image_unique_identifier(runtime, unique_identifier);
 
-    snprintf(msg0, sizeof(msg0), "<%s>%s</%s>please recognize the text in this picture", unique_identifier, argv[5], unique_identifier);
+    snprintf(msg0, sizeof(msg0), "<%s>%s</%s>Recognize text", unique_identifier, argv[5], unique_identifier);
     const char *input_list[] = {msg0};
 
     rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, input_list, 1, 500, nullptr, 0, 0);
