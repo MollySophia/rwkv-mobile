@@ -52,6 +52,8 @@ snapdragon_soc_info snapdragon_soc_ids[] = {
 
 mediatek_soc_info mediatek_soc_ids[] = {
     {"6989", "Dimensity 9300"},
+    {"6991", "Dimensity 9400"},
+    {"6993", "Dimensity 9500"},
 };
 
 soc_detect::soc_detect() {
