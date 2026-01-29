@@ -336,8 +336,14 @@ bool sparktts::get_global_and_semantic_tokens(
                 cache.read(reinterpret_cast<char*>(semantic_tokens.data()), semantic_tokens_size * sizeof(int));
 
                 cache.close();
-                read_from_cache = true;
-                LOGI("[TTS] Loaded speech tokens from cache file: %s", cache_file.c_str());
+                if (global_tokens_size == 0 || semantic_tokens_size == 0) {
+                    LOGW("[TTS] cached global or semantic tokens are empty, ignoring cache file");
+                    global_tokens.clear();
+                    semantic_tokens.clear();
+                } else {
+                    read_from_cache = true;
+                    LOGI("[TTS] Loaded speech tokens from cache file: %s", cache_file.c_str());
+                }
             }
         }
     }
@@ -365,10 +371,16 @@ bool sparktts::get_global_and_semantic_tokens(
             std::ofstream cache(cache_file, std::ios::binary);
             if (cache) {
                 size_t global_tokens_size = global_tokens.size();
+                size_t semantic_tokens_size = semantic_tokens.size();
+                if (global_tokens_size == 0 || semantic_tokens_size == 0) {
+                    LOGE("[TTS] Global or semantic tokens are empty");
+                    cache.close();
+                    return false;
+                }
+
                 cache.write(reinterpret_cast<char*>(&global_tokens_size), sizeof(size_t));
                 cache.write(reinterpret_cast<char*>(global_tokens.data()), global_tokens_size * sizeof(int));
 
-                size_t semantic_tokens_size = semantic_tokens.size();
                 cache.write(reinterpret_cast<char*>(&semantic_tokens_size), sizeof(size_t));
                 cache.write(reinterpret_cast<char*>(semantic_tokens.data()), semantic_tokens_size * sizeof(int));
 
