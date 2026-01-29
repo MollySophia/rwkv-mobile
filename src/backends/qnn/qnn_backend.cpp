@@ -1039,9 +1039,10 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
     }
     
 
-    if (rmpack != nullptr) {
-        vocab_size = rmpack->getConfig()["vocab_size"];
-    } else {
+    // if (rmpack != nullptr) {
+    //     vocab_size = rmpack->getConfig()["vocab_size"];
+    // } else {
+    {
         std::vector<size_t> dims;
         getTensorDims(dims, QNN_TENSOR_GET_DIMENSIONS(logitsOutputTensor), QNN_TENSOR_GET_RANK(logitsOutputTensor));
         for (int i = 0; i < dims.size(); i++) {
