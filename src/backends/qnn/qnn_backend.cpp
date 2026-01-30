@@ -284,6 +284,8 @@ qnn_backend_context::qnn_backend_context(std::string qnnBackendPath) : qnnBacken
 #endif
     }
 
+    // Don't load custom op package on Windows for now
+#ifndef _WIN32
     for (auto dir : paths) {
         std::string fullPath = dir + "/" + custom_op_name;
         std::ifstream file(fullPath);
@@ -295,6 +297,7 @@ qnn_backend_context::qnn_backend_context(std::string qnnBackendPath) : qnnBacken
             break;
         }
     }
+#endif
 }
 
 qnn_backend_context::~qnn_backend_context() {
