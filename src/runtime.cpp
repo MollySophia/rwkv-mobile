@@ -1,6 +1,7 @@
 #include "runtime.h"
 #include "backend.h"
 #include "logger.h"
+#include "utils.h"
 #include <functional>
 #include <filesystem>
 #include <chrono>
@@ -1028,14 +1029,6 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
                 if (!chunk.tokens.empty()) {
                     int ret;
 #ifdef ENABLE_VISION
-                    // "<|vision_start|>" = 65530
-                    // "<|vision_end|>" = 65531
-                    // ret = eval_logits(model_id, 65530, logits);
-                    // if (ret) {
-                    //     model->is_generating = false;
-                    //     LOGE("failed to eval logits for image chunk\n");
-                    //     return ret;
-                    // }
                     auto start = std::chrono::high_resolution_clock::now();
                     std::vector<float> embeddings;
                     int n_tokens;
@@ -1052,12 +1045,6 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
                         LOGE("failed to eval logits with embeddings for image chunk\n");
                         return ret;
                     }
-                    // ret = eval_logits(model_id, 65531, logits);
-                    // if (ret) {
-                    //     model->is_generating = false;
-                    //     LOGE("failed to eval logits for image chunk\n");
-                    //     return ret;
-                    // }
 #endif
                     ret = model->backend->register_state_checkpoint(node, chunk.tokens, logits);
                     if (ret) {
@@ -1116,8 +1103,6 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     int decoded_idx = 0;
     bool thinking_end_tag_found = false;
     bool is_pseudo_thinking = enable_reasoning && model->response_buffer.find("</think>") != std::string::npos;
-    const int rewind_token_list[] = {28324, 28329, 10080, 9830}; // "…\n" "。\n" "…" "。"
-    std::any state_for_rewinding;
     bool first_token_ban_thinking_tag = !enable_reasoning || is_pseudo_thinking || force_reasoning;
 
     for (int i = 0; i < max_length; i++) {
@@ -1145,7 +1130,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
             }
             if (tmp.size() >= stop_code.size() &&
                 tmp.compare(tmp.size() - stop_code.size(), stop_code.size(), stop_code) == 0) {
-                LOGD("stop code found: %s\n", stop_code.c_str());
+                LOGD("stop code found: %s\n", escape_special_chars(stop_code).c_str());
                 model->response_buffer_eos_found = true;
                 break;
             }
@@ -1155,17 +1140,6 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
             if (tmp.find("</think>") != std::string::npos) {
                 thinking_end_tag_found = true;
             }
-        }
-
-        if (model->response_buffer_eos_found || model->stop_signal) {
-            LOGD("stopping generation, eos_found: %d, stop_signal: %d\n", model->response_buffer_eos_found, model->stop_signal);
-            break;
-        } else if (state_for_rewinding.has_value()) {
-            state_for_rewinding.reset();
-        }
-
-        if (std::any_of(rewind_token_list, rewind_token_list + sizeof(rewind_token_list) / sizeof(rewind_token_list[0]), [decoded_idx](int token) { return decoded_idx == token; })) {
-            model->backend->get_state(state_for_rewinding);
         }
 
         ret = eval_logits(model_id, decoded_idx, logits);
@@ -1186,22 +1160,23 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
         if (callback) {
             callback(model->response_buffer.c_str(), decoded_idx, decoded.c_str());
         }
+
+        if (model->response_buffer_eos_found || model->stop_signal) {
+            LOGD("stopping generation, eos_found: %d, stop_signal: %d\n", model->response_buffer_eos_found, model->stop_signal);
+            break;
+        }
     }
 
     if (response_ids_raw.size() > 0 && max_length > 0) {
         int ret;
-        if (state_for_rewinding.has_value()) {
-            response_ids_raw.pop_back();
-            ret = model->backend->register_state_checkpoint_with_state(node, response_ids_raw, logits, state_for_rewinding);
-        } else {
-            ret = model->backend->register_state_checkpoint(node, response_ids_raw, logits);
-        }
+        ret = model->backend->register_state_checkpoint(node, response_ids_raw, logits);
         if (ret) {
             model->is_generating = false;
             LOGE("failed to register state checkpoint\n");
             return ret;
         }
         LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
+        model->response_buffer = remove_endl(model->response_buffer);
     }
 
     model->is_generating = false;
@@ -1256,7 +1231,6 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
     std::vector<std::string> input_texts(batch_size);
     std::vector<std::vector<int>> text_ids_batch(batch_size);
-    // std::vector<float*> logits_batch(batch_size, nullptr);
     Tensor1D logits;
     std::vector<state_node*> nodes_batch(batch_size);
 
@@ -1265,13 +1239,9 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     std::vector<bool> is_pseudo_thinking_batch(batch_size, false);
     std::vector<std::any> state_batch(batch_size);
     std::vector<bool> thinking_end_tag_found_batch(batch_size, false);
-    const int rewind_token_list[] = {28324, 28329, 10080, 9830}; // "…\n" "。\n" "…" "。"
-    std::vector<std::any> state_for_rewinding_batch(batch_size);
     std::vector<std::vector<float>> prefill_logits_f32_batch(batch_size);
     std::vector<std::vector<float>> logits_final_f32_batch(batch_size);
     std::vector<bool> logits_final_set(batch_size, false);
-    std::vector<std::vector<float>> logits_for_rewinding_f32_batch(batch_size);
-    std::vector<bool> logits_for_rewinding_set(batch_size, false);
 
     auto copy_logits_to_f32 = [&](const Tensor1D &t, std::vector<float> &out, int expected_elems) -> int {
         if (t.data_ptr == nullptr || t.count < (size_t)expected_elems) {
@@ -1401,6 +1371,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         for (int j = 0; j < current_batch_size; j++) {
             int original_j = active_batch_indices[j];
             if (decoded_idx[j] == 0) {
+                LOGD("sampled token 0 for batch %d\n", original_j);
                 model->response_buffer_eos_found_batch[original_j] = true;
                 std::any state_end;
                 model->backend->get_state_on_batch_slot(j, state_end);
@@ -1431,7 +1402,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     }
                     if (tmp.size() >= stop_code.size() &&
                         tmp.compare(tmp.size() - stop_code.size(), stop_code.size(), stop_code) == 0) {
-                        LOGD("stop code found for batch %d: %s\n", original_j, stop_code.c_str());
+                        LOGD("stop code found for batch %d: %s\n", original_j, escape_special_chars(stop_code).c_str());
                         model->response_buffer_eos_found_batch[original_j] = true;
                         std::any state_end;
                         model->backend->get_state_on_batch_slot(j, state_end);
@@ -1458,28 +1429,6 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 if (enable_reasoning && !thinking_end_tag_found_batch[original_j]) {
                     if (tmp.find("</think>") != std::string::npos) {
                         thinking_end_tag_found_batch[original_j] = true;
-                    }
-                } else if (state_for_rewinding_batch[original_j].has_value()) {
-                    state_for_rewinding_batch[original_j].reset();
-                    logits_for_rewinding_set[original_j] = false;
-                    logits_for_rewinding_f32_batch[original_j].clear();
-                }
-
-                if (std::any_of(rewind_token_list, rewind_token_list + sizeof(rewind_token_list) / sizeof(rewind_token_list[0]), [decoded_idx, j](int token) { return decoded_idx[j] == token; })) {
-                    model->backend->get_state_on_batch_slot(j, state_for_rewinding_batch[original_j]);
-                    // also snapshot logits corresponding to this rewinding checkpoint state
-                    if (i == 0) {
-                        logits_for_rewinding_f32_batch[original_j] = prefill_logits_f32_batch[original_j];
-                        logits_for_rewinding_set[original_j] = true;
-                    } else {
-                        Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
-                        int r = copy_logits_to_f32(view, logits_for_rewinding_f32_batch[original_j], num_vocab);
-                        if (r) {
-                            model->is_generating = false;
-                            LOGE("failed to snapshot rewinding logits for batch %d\n", original_j);
-                            return r;
-                        }
-                        logits_for_rewinding_set[original_j] = true;
                     }
                 }
             }
@@ -1545,10 +1494,10 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     int current_slot_idx = original_to_active_mapping[original_batch_idx];
                     if (current_slot_idx >= 0 && current_slot_idx < current_batch_size) {
                         temp_decoded_idx[k] = decoded_idx[current_slot_idx];
-                        LOGD("Rearranging decoded_idx[%d]: original_batch=%d, current_slot=%d, token=%d\n", 
+                        LOGD("Rearranging decoded_idx[%d]: original_batch=%d, current_slot=%d, token=%d\n",
                              k, original_batch_idx, current_slot_idx, decoded_idx[current_slot_idx]);
                     } else {
-                        LOGE("Invalid mapping for batch %d: current_slot=%d (should be in [0,%d))\n", 
+                        LOGE("Invalid mapping for batch %d: current_slot=%d (should be in [0,%d))\n",
                              original_batch_idx, current_slot_idx, current_batch_size);
                         temp_decoded_idx[k] = 0; // fallback to EOS to avoid undefined behavior
                     }
@@ -1628,24 +1577,6 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         }
     }
     if (any_generated) {
-        for (int j = 0; j < batch_size; j++) {
-            if (state_for_rewinding_batch[j].has_value()) {
-                if (!response_ids_raw_batch[j].empty()) {
-                    response_ids_raw_batch[j].pop_back();
-                    state_batch[j] = std::move(state_for_rewinding_batch[j]);
-                    if (!logits_final_set[j] && logits_for_rewinding_set[j]) {
-                        logits_final_f32_batch[j] = std::move(logits_for_rewinding_f32_batch[j]);
-                        logits_final_set[j] = true;
-                        logits_for_rewinding_set[j] = false;
-                    }
-                } else {
-                    // Nothing to rewind in ids; discard the stored checkpoint to avoid underflow.
-                    state_for_rewinding_batch[j].reset();
-                    logits_for_rewinding_set[j] = false;
-                    logits_for_rewinding_f32_batch[j].clear();
-                }
-            }
-        }
         // Register per-batch checkpoints with correct logits for each original batch.
         // Dynamic batch resizing reorders/overwrites the shared logits buffer, so we must not rely on it directly for finished batches.
         for (int j = 0; j < batch_size; j++) {
@@ -1672,6 +1603,8 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 LOGE("failed to register state checkpoint for batch %d\n", j);
                 return r;
             }
+
+            model->response_buffer_batch[j] = remove_endl(model->response_buffer_batch[j]);
         }
     }
 

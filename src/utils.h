@@ -24,4 +24,12 @@ inline std::string escape_special_chars(const std::string &text) {
     return escaped_text;
 }
 
+inline std::string remove_endl(const std::string &msg) {
+    std::string result = msg;
+    while (result.size() > 0 && result[result.size() - 1] == '\n') {
+        result = result.substr(0, result.size() - 1);
+    }
+    return result;
+}
+
 #endif

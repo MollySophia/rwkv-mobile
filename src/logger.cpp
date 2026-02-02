@@ -1,4 +1,5 @@
 #include "logger.h"
+#include "utils.h"
 #include <string>
 #include <cstdarg>
 #include <chrono>
@@ -24,14 +25,6 @@ std::string get_timestamp() {
     ss << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S");
     ss << "." << std::setfill('0') << std::setw(3) << ms.count();
     return ss.str();
-}
-
-std::string remove_endl(const std::string &msg) {
-    std::string result = msg;
-    while (result.size() > 0 && result[result.size() - 1] == '\n') {
-        result = result.substr(0, result.size() - 1);
-    }
-    return result;
 }
 
 #if defined(__ANDROID__)
