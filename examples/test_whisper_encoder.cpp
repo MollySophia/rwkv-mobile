@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
 
     rwkvmobile_runtime_set_audio_prompt(runtime, model_id, argv[4]);
 
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, prompt_list, 1, 100, nullptr, 0, 0);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, prompt_list, 1, 100, nullptr, false, false, FORCE_LANG_NONE);
 
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         custom_sleep(1);

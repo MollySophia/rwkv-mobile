@@ -120,8 +120,8 @@ public:
     int eval_logits_batch_decode(int model_id, std::vector<int> ids, Tensor1D & logits);
 
     // with history
-    int chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *) = nullptr, bool enable_reasoning = false, bool force_reasoning = false);
-    int chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **) = nullptr, bool enable_reasoning = false, bool force_reasoning = false);
+    int chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *) = nullptr, bool enable_reasoning = false, bool force_reasoning = false, int force_lang = 0);
+    int chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **) = nullptr, bool enable_reasoning = false, bool force_reasoning = false, int force_lang = 0);
     int gen_completion(int model_id, std::string prompt, int max_length, int stop_code, void (*callback)(const char *, const int, const char *));
     int gen_completion_batch(int model_id, std::vector<std::string> prompts, int batch_size, int max_length, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **));
     int gen_completion_singletoken_topk(int model_id, std::string prompt, int top_k, std::vector<std::string> &candidate_output_texts, void (*callback)(const char *, const int, const char *));
@@ -427,8 +427,6 @@ private:
     std::string _cache_dir = "";
 
     soc_detect _soc_detect;
-
-    std::thread _prefilling_thread;
 
 #ifdef ENABLE_TTS
     std::unique_ptr<sparktts> _sparktts;

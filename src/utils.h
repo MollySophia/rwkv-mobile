@@ -3,6 +3,7 @@
 
 #include <string>
 #include <algorithm>
+#include <vector>
 
 inline std::string escape_special_chars(const std::string &text) {
     std::string escaped_text;
@@ -24,12 +25,17 @@ inline std::string escape_special_chars(const std::string &text) {
     return escaped_text;
 }
 
-inline std::string remove_endl(const std::string &msg) {
+inline std::string remove_ending_char(const std::string &msg, const char c) {
     std::string result = msg;
-    while (result.size() > 0 && result[result.size() - 1] == '\n') {
+    while (result.size() > 0 && result[result.size() - 1] == c) {
         result = result.substr(0, result.size() - 1);
     }
     return result;
+}
+
+
+inline std::string remove_endl(const std::string &msg) {
+    return remove_ending_char(msg, '\n');
 }
 
 #endif

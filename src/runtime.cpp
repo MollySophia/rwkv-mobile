@@ -64,6 +64,28 @@
 
 namespace rwkvmobile {
 
+const int chinese_tokens_start = 10250;
+const int chinese_tokens_end = 18493;
+
+inline void mask_thinking_tag(Tensor1D &logits) {
+    tensor1d_set_f32(logits, 11, -1e9f); // '\n'
+    tensor1d_set_f32(logits, 61, -1e9f); // '<'
+    tensor1d_set_f32(logits, 261, -1e9f); // '\n\n'
+    tensor1d_set_f32(logits, 295, -1e9f); // ' <'
+    tensor1d_set_f32(logits, 0, -1e9f); // <EOD>
+}
+
+inline void mask_non_chinese_tokens(Tensor1D &logits, int num_vocab) {
+    int current_token = 0, current_range_idx = 0;
+    while (current_token < num_vocab) {
+        if (current_token >= chinese_tokens_start && current_token <= chinese_tokens_end) {
+            current_token = chinese_tokens_end + 1;
+        }
+        tensor1d_set_f32(logits, (size_t)current_token, -1e9f);
+        current_token++;
+    }
+}
+
 void Runtime::_record_speed_sample(ModelInstance& model, bool is_prefill, int tokens, int64_t duration_us) {
     if (tokens <= 0 || duration_us <= 0) {
         return;
@@ -976,7 +998,9 @@ std::string Runtime::get_state_cache_info(int model_id) {
     return state_cache_info;
 }
 
-int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *), bool enable_reasoning, bool force_reasoning) {
+int Runtime::chat(int model_id, std::vector<std::string> inputs,
+    const int max_length, void (*callback)(const char *, const int, const char *),
+    bool enable_reasoning, bool force_reasoning, int force_lang) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -993,10 +1017,8 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
 
     _clear_speed_samples(*model);
 
-    if (_prefilling_thread.joinable() && _prefilling_thread.get_id() != std::this_thread::get_id()) {
-        LOGD("Found prefilling thread, joining\n");
-        _prefilling_thread.join();
-        LOGD("_prefilling_thread finished.\n");
+    if (force_lang == 1) {
+        LOGI("forcing output language to Chinese\n");
     }
 
     auto input_text = apply_chat_template(model_id, inputs, enable_reasoning);
@@ -1108,12 +1130,12 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     for (int i = 0; i < max_length; i++) {
         model->sampler->apply_penalties(logits, model->backend->get_num_vocab());
 
-        if ((i == 0 || i == 1 || i == 2) && first_token_ban_thinking_tag) {
-            tensor1d_set_f32(logits, 11, -1e9f); // '\n'
-            tensor1d_set_f32(logits, 61, -1e9f); // '<'
-            tensor1d_set_f32(logits, 261, -1e9f); // '\n\n'
-            tensor1d_set_f32(logits, 295, -1e9f); // ' <'
-            tensor1d_set_f32(logits, 0, -1e9f); // <EOD>
+        if (i <= 2 && first_token_ban_thinking_tag) {
+            mask_thinking_tag(logits);
+        }
+
+        if (i <= 2 && force_lang == 1) {
+            mask_non_chinese_tokens(logits, model->backend->get_num_vocab());
         }
 
         decoded_idx = model->sampler->sample(logits, model->backend->get_num_vocab());
@@ -1177,6 +1199,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
         }
         LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
         model->response_buffer = remove_endl(model->response_buffer);
+        model->response_buffer = remove_ending_char(model->response_buffer, '\x17');
     }
 
     model->is_generating = false;
@@ -1187,13 +1210,20 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs, const int max_l
     return RWKV_SUCCESS;
 }
 
-int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **), bool enable_reasoning, bool force_reasoning) {
+int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs,
+    const int max_length, const int batch_size,
+    void (*callback_batch)(const int, const char **, const int*, const char **),
+    bool enable_reasoning, bool force_reasoning, int force_lang) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
     auto &model = _models.at(model_id);
     if (model->backend == nullptr || model->tokenizer == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    if (force_lang == 1) {
+        LOGI("forcing output language to Chinese\n");
     }
 
     bool supported = false;
@@ -1322,12 +1352,13 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
         model->sampler->apply_penalties(logits, num_vocab);
         if (is_pseudo_thinking_batch[batch_idx] || force_reasoning) {
-            tensor1d_set_f32(logits, 11, -1e9f); // '\n'
-            tensor1d_set_f32(logits, 61, -1e9f); // '<'
-            tensor1d_set_f32(logits, 261, -1e9f); // '\n\n'
-            tensor1d_set_f32(logits, 295, -1e9f); // ' <'
-            tensor1d_set_f32(logits, 0, -1e9f); // <EOD>
+            mask_thinking_tag(logits);
         }
+
+        if (force_lang == 1) {
+            mask_non_chinese_tokens(logits, num_vocab);
+        }
+
         decoded_idx[batch_idx] = model->sampler->sample(logits, num_vocab);
 
         model->backend->get_state(state_batch[batch_idx]);
@@ -1356,12 +1387,12 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
                     model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
 
-                if ((is_pseudo_thinking_batch[original_j] || force_reasoning) && (i == 1 || i == 2)) {
-                    tensor1d_set_f32(view, 11, -1e9f); // '\n'
-                    tensor1d_set_f32(view, 61, -1e9f); // '<'
-                    tensor1d_set_f32(view, 261, -1e9f); // '\n\n'
-                    tensor1d_set_f32(view, 295, -1e9f); // ' <'
-                    tensor1d_set_f32(view, 0, -1e9f); // <EOD>
+                if ((is_pseudo_thinking_batch[original_j] || force_reasoning) && i <= 2) {
+                    mask_thinking_tag(view);
+                }
+
+                if (force_lang == 1 && i <= 2) {
+                    mask_non_chinese_tokens(view, num_vocab);
                 }
             }
 
@@ -1605,6 +1636,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
             }
 
             model->response_buffer_batch[j] = remove_endl(model->response_buffer_batch[j]);
+            model->response_buffer_batch[j] = remove_ending_char(model->response_buffer_batch[j], '\x17');
         }
     }
 

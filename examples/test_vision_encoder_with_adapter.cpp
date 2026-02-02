@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
     snprintf(msg0, sizeof(msg0), "<%s>%s</%s>Recognize text", unique_identifier, argv[5], unique_identifier);
     const char *input_list[] = {msg0};
 
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, input_list, 1, 500, nullptr, 0, 0);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, input_list, 1, 500, nullptr, false, false, FORCE_LANG_NONE);
 
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         custom_sleep(1);

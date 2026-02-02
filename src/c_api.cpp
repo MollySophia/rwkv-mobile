@@ -86,7 +86,8 @@ int rwkvmobile_runtime_eval_chat_with_history_async(
     const int max_tokens,
     void (*callback)(const char *, const int, const char *),
     int enable_reasoning,
-    int force_reasoning) {
+    int force_reasoning,
+    int force_lang) {
     if (handle == nullptr || inputs == nullptr || num_inputs == 0) {
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -106,7 +107,8 @@ int rwkvmobile_runtime_eval_chat_with_history_async(
             max_tokens,
             callback,
             enable_reasoning != 0,
-            force_reasoning != 0);
+            force_reasoning != 0,
+            force_lang);
         return ret;
     });
 
@@ -124,7 +126,8 @@ int rwkvmobile_runtime_eval_chat_batch_with_history_async(
     const int max_tokens,
     void (*callback_batch)(const int, const char **, const int*, const char **),
     int enable_reasoning,
-    int force_reasoning) {
+    int force_reasoning,
+    int force_lang) {
     if (handle == nullptr || inputs == nullptr || num_inputs == 0 || max_tokens <= 0 || batch_size <= 0) {
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -148,7 +151,8 @@ int rwkvmobile_runtime_eval_chat_batch_with_history_async(
             batch_size,
             callback_batch,
             enable_reasoning != 0,
-            force_reasoning != 0);
+            force_reasoning != 0,
+            force_lang);
         return ret;
     });
 
