@@ -122,7 +122,7 @@ int soc_detect::detect_platform() {
     // TODO
 #endif
 
-#if defined(_WIN32) && ENABLE_QNN_BACKEND
+#if defined(_WIN32) && defined(ENABLE_QNN)
     // TODO: Detect this
     m_platform_type = PLATFORM_SNAPDRAGON;
     m_htp_arch = "v73";
