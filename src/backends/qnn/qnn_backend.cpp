@@ -27,6 +27,7 @@
 
 #ifdef _WIN32
 #define USE_MMAP 0
+#include <cstdlib>
 #else
 #define USE_MMAP 1
 #include <sys/mman.h>
@@ -173,6 +174,7 @@ int qnn_backend::initialize_batch_decode_graphs(
     return RWKV_SUCCESS;
 }
 qnn_backend_context::qnn_backend_context(std::string qnnBackendPath) : qnnBackendPath(qnnBackendPath) {
+    LOGI("QNN Backend Path: %s", qnnBackendPath.c_str());
     if (qnnBackendPath.empty()) {
         throw std::invalid_argument("QNN backend path is empty");
     }
@@ -507,6 +509,17 @@ int qnn_backend::init(void * extra) {
         LOGI("Setting LD_LIBRARY_PATH and ADSP_LIBRARY_PATH to %s\n", path_to_set.c_str());
         setenv("LD_LIBRARY_PATH", path_to_set.c_str(), 1);
         setenv("ADSP_LIBRARY_PATH", path_to_set.c_str(), 1);
+    }
+#else
+    std::string path_to_set;
+    if (path != "QnnHtp.dll") {
+        if (path.find('/') != std::string::npos)
+            path_to_set = path.substr(0, path.find_last_of('/'));
+        else
+            path_to_set = path.substr(0, path.find_last_of('\\'));
+        LOGI("Setting ADSP_LIBRARY_PATH to %s\n", path_to_set.c_str());
+        // setenv("LD_LIBRARY_PATH", path_to_set.c_str(), 1);
+        _putenv_s("ADSP_LIBRARY_PATH", path_to_set.c_str());
     }
 #endif
 
@@ -1130,6 +1143,7 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
         int use_external_lmhead = rmpack->getConfig()["use_external_lmhead"];
         if (use_external_lmhead) {
             external_lmhead_filetype = rmpack->getConfig()["external_lmhead_filetype"];
+#ifdef ENABLE_MNN
             if (external_lmhead_filetype == "mnn") {
                 try {
 #if USE_MMAP
@@ -1163,6 +1177,9 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
                     return RWKV_ERROR_MODEL;
                 }
             } else {
+#else
+            {
+#endif // ENABLE_MNN                
                 LOGE("Unsupported external lmhead filetype: %s", external_lmhead_filetype.c_str());
                 return RWKV_ERROR_MODEL;
             }
@@ -1752,6 +1769,7 @@ int qnn_backend::post_graph_execute(Tensor1D & logits) {
     }
 
     if (logitsOutputTensorSize != vocab_size) {
+#ifdef ENABLE_MNN
         if (external_lmhead_filetype != "mnn" || external_lmhead_interpretor == nullptr || external_lmhead_mnn_session == nullptr) {
             LOGE("The model requires external lmhead, but external lmhead is not loaded");
             return RWKV_ERROR_IO;
@@ -1775,6 +1793,9 @@ int qnn_backend::post_graph_execute(Tensor1D & logits) {
             memcpy(logits_buffer.data(), output_ptr, vocab_size * sizeof(float));
             output->unmap(MNN::Tensor::MAP_TENSOR_READ, output->getDimensionType(), output_ptr);
         } else {
+#else
+        {
+#endif
             LOGE("Unsupported external lmhead filetype: %s", external_lmhead_filetype.c_str());
             return RWKV_ERROR_IO;
         }
@@ -2413,6 +2434,10 @@ void qnn_backend::cleanup_batch_graphs() {
 }
 
 int qnn_backend::release() {
+    if (g_qnn_backend_context_ptr == nullptr) {
+        LOGW("[QNN] qnn_backend::release: qnn_backend context is already null");
+        return RWKV_SUCCESS;
+    }
     if (g_qnn_backend_context_ptr->ref_count > 0) {
         std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
         g_qnn_backend_context_ptr->ref_count--;

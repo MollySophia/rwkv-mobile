@@ -1,6 +1,14 @@
 #ifndef RWKVMOBILE_TENSOR_H
 #define RWKVMOBILE_TENSOR_H
 
+#ifdef max
+#undef max
+#endif
+
+#ifdef min
+#undef min
+#endif
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

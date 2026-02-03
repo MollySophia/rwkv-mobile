@@ -1,6 +1,15 @@
 #ifndef BACKEND_H
 #define BACKEND_H
 
+// avoid macro conflicts on Windows
+#ifdef max
+#undef max
+#endif
+
+#ifdef min
+#undef min
+#endif
+
 #include <string>
 #include <vector>
 #include <memory>

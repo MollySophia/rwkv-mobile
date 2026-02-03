@@ -8,7 +8,9 @@
 
 #include <mutex>
 
+#ifdef ENABLE_MNN
 #include <MNN/Interpreter.hpp>
+#endif
 
 namespace rwkvmobile {
 
@@ -202,9 +204,12 @@ private:
     std::shared_ptr<uint8_t> external_deep_embeddings = nullptr;
     int deep_embeddings_elembytes = 2;
     std::string external_lmhead_filetype = "None";
+
+#ifdef ENABLE_MNN
     MNN::Interpreter *external_lmhead_interpretor = nullptr;
     MNN::Session *external_lmhead_mnn_session = nullptr;
     MNN::Tensor *external_lmhead_input_tensor = nullptr;
+#endif
 
     RMPackReader *rmpack = nullptr;
 

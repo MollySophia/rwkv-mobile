@@ -15,5 +15,11 @@ set( warn_c_flags "-Wno-format -Wno-unused-variable -Wno-unused-function -Wno-gn
 # Use dynamic CRT on Windows (equivalent to /MD) to match prebuilt libs like ncnn.
 set( msvc_runtime_flags "-D_DLL -D_MT -Xclang --dependent-lib=msvcrt" )
 
+# Ensure debug CRT symbols (_CrtDbgReport, _malloc_dbg, etc.) are resolved on Windows ARM64.
+set( msvc_runtime_flags_debug "-Xclang --dependent-lib=ucrtd -Xclang --dependent-lib=vcruntimed" )
+
 set( CMAKE_C_FLAGS_INIT   "${arch_c_flags} ${warn_c_flags} ${msvc_runtime_flags}" )
 set( CMAKE_CXX_FLAGS_INIT "${arch_c_flags} ${warn_c_flags} ${msvc_runtime_flags}" )
+
+set( CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG} ${msvc_runtime_flags_debug}" )
+set( CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${msvc_runtime_flags_debug}" )
