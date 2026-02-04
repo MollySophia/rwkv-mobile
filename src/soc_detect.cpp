@@ -45,7 +45,11 @@ snapdragon_soc_info snapdragon_soc_ids[] = {
     {642, "SM8635", "8s Gen 3", "v73"},
     {618, "SM8750", "8 Elite", "v79"},
     {639, "SM8750P", "8 Elite", "v79"},
+    {640, "SM7635", "7s Gen 3", "v73"},
+    {641, "SM7635P", "7s Gen 3", "v73"},
     {643, "SM7675", "7+ Gen 3", "v73"},
+    {657, "QCM6690", "QCM6690", "v73"},
+    {658, "QCS6690", "QCS6690", "v73"},
     {660, "SM8850", "8 Elite Gen5", "v81"},
     {685, "SM8845", "8 Gen 5", "v81"},
     // TODO: add more
