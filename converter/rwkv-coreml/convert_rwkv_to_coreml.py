@@ -5,7 +5,6 @@ from coremltools.optimize.torch.palettization import PostTrainingPalettizer, Pos
 from pathlib import Path
 import argparse, types, os, shutil
 import torch
-from transformers import AutoTokenizer
 import numpy as np
 
 parser = argparse.ArgumentParser(description='Export coreml model')
@@ -22,14 +21,15 @@ model_args = types.SimpleNamespace()
 model_args.USE_CUDA = False
 model_args.fp16 = False
 model_args.USE_EMBEDDING = True
-model_args.SKIP_LMHEAD = True
+model_args.SKIP_LMHEAD = False
+# model_args.SKIP_LMHEAD = True
 
 model_args.MODEL_NAME = str(parser_args.model).replace('.pth', '')
 if parser_args.chunks > 1:
     models = make_chunks_stateful(parser_args.chunks, model_args)
 else:
     models = [RWKV_RNN_Stateful(model_args)]
-lmhead = RWKV_LMHead(model_args)
+# lmhead = RWKV_LMHead(model_args)
 args = models[0].args
 
 layers_for_chunk = []
@@ -61,9 +61,6 @@ def build_inputs_prefill(chunk_idx: int = 0):
 
 def build_inputs_lmhead():
     return [torch.zeros(1, 1, args.n_embd).to(models[0].device)]
-
-tokenizer = AutoTokenizer.from_pretrained("RWKV/rwkv-5-world-1b5", trust_remote_code=True)
-prompt = "The Eiffel Tower is in the city of"
 
 use_int = False
 use_lut = False
@@ -129,14 +126,14 @@ elif use_int:
 # lmhead_palettizer = PostTrainingPalettizer(lmhead, lmhead_palettization_config)
 # lmhead = lmhead_palettizer.compress()
 
-use_int_lmhead = True
-use_lut_lmhead = False
-lmhead_quantization_config_dict = {
-    "global_config": {"weight_dtype": "int8", "granularity": "per_channel"},
-}
-lmhead_quantization_config = PostTrainingQuantizerConfig.from_dict(lmhead_quantization_config_dict)
-lmhead_quantizer = PostTrainingQuantizer(lmhead, lmhead_quantization_config)
-lmhead = lmhead_quantizer.compress()
+# use_int_lmhead = True
+# use_lut_lmhead = False
+# lmhead_quantization_config_dict = {
+#     "global_config": {"weight_dtype": "int8", "granularity": "per_channel"},
+# }
+# lmhead_quantization_config = PostTrainingQuantizerConfig.from_dict(lmhead_quantization_config_dict)
+# lmhead_quantizer = PostTrainingQuantizer(lmhead, lmhead_quantization_config)
+# lmhead = lmhead_quantizer.compress()
 
 def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
@@ -156,20 +153,20 @@ def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name += chunk_suffix
     return output_name
 
-def _build_output_name_lmhead() -> str:
-    output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
-    output_name += f'_lmhead'
-    if use_lut_lmhead:
-        output_name += '_lut8'
-    elif use_int_lmhead:
-        output_name += '_int8'
-    return output_name
+# def _build_output_name_lmhead() -> str:
+#     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
+#     output_name += f'_lmhead'
+#     if use_lut_lmhead:
+#         output_name += '_lut8'
+#     elif use_int_lmhead:
+#         output_name += '_int8'
+#     return output_name
 
-def _build_coreml_io_lmhead(inputs):
-    dtype = np.float16
-    ct_inputs = [ct.TensorType('in0', inputs[0].shape, dtype=dtype)]
-    ct_outputs = [ct.TensorType(name='out0', dtype=dtype)]
-    return ct_inputs, ct_outputs
+# def _build_coreml_io_lmhead(inputs):
+#     dtype = np.float16
+#     ct_inputs = [ct.TensorType('in0', inputs[0].shape, dtype=dtype)]
+#     ct_outputs = [ct.TensorType(name='out0', dtype=dtype)]
+#     return ct_inputs, ct_outputs
 
 def _build_coreml_io(inputs, chunk_idx: int = 0, num_chunks: int = 1):
     dtype = np.float16
@@ -217,21 +214,21 @@ def convert_and_save_coreml(jit_model, inputs, mode_tag: str, chunk_idx: int = 0
     mlmodel.save(f'{output_name}.mlpackage')
     return output_name
 
-def convert_and_save_coreml_lmhead():
-    ct_inputs, ct_outputs = _build_coreml_io_lmhead(build_inputs_lmhead())
-    output_name = _build_output_name_lmhead()
-    mlmodel_lmhead = ct.convert(
-        torch.jit.trace(lmhead, example_inputs=build_inputs_lmhead()),
-        inputs=ct_inputs,
-        outputs=ct_outputs,
-        minimum_deployment_target=ct.target.iOS18,
-        compute_units=ct.ComputeUnit.CPU_AND_NE,
-    )
-    mlmodel_lmhead.save(f'{output_name}.mlpackage')
-    return output_name
+# def convert_and_save_coreml_lmhead():
+#     ct_inputs, ct_outputs = _build_coreml_io_lmhead(build_inputs_lmhead())
+#     output_name = _build_output_name_lmhead()
+#     mlmodel_lmhead = ct.convert(
+#         torch.jit.trace(lmhead, example_inputs=build_inputs_lmhead()),
+#         inputs=ct_inputs,
+#         outputs=ct_outputs,
+#         minimum_deployment_target=ct.target.iOS18,
+#         compute_units=ct.ComputeUnit.CPU_AND_NE,
+#     )
+#     mlmodel_lmhead.save(f'{output_name}.mlpackage')
+#     return output_name
 
-print("Converting LMHead")
-convert_and_save_coreml_lmhead()
+# print("Converting LMHead")
+# convert_and_save_coreml_lmhead()
 
 # Export combined models for each chunk (each containing decode and prefill functions).
 for chunk_idx, model in enumerate(models):

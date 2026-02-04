@@ -133,10 +133,10 @@ class RWKV_RNN(torch.nn.Module):
             else:
                 x = in0
 
-            try:
-                batch_size, seq_length, _ = x.size()
-            except:
-                batch_size, seq_length = 1, 1
+            # try:
+            #     batch_size, seq_length, _ = x.size()
+            # except:
+            #     batch_size, seq_length = 1, 1
 
             for i in range(self.layer_begin, self.layer_end):
                 x, state, v_first = self.blocks[i-self.layer_begin](x, state, v_first=v_first)
@@ -145,8 +145,8 @@ class RWKV_RNN(torch.nn.Module):
                 if not self.args.SKIP_LMHEAD:
                     x = self.ln_out(x)
                     x = self.head(x)
-            else:
-                x = x.view(batch_size, seq_length, self.args.n_embd)
+            # else:
+            #     x = x.view(batch_size, seq_length, self.args.n_embd)
 
             if self.chunk_idx == self.chunks - 1:
                 return x, state
@@ -173,9 +173,9 @@ class RWKV_RNN_Stateful(RWKV_RNN):
         else:
             x, states, v_first = outputs
         for i in range(self.layers_this_chunk):
-            self.state_tokenshift[0:1, i:i+1, :] = states[3*i]
-            self.state_wkv[i:i+1, :, :, :] = states[3*i+1]
-            self.state_tokenshift[1:2, i:i+1, :] = states[3*i+2]
+            self.state_tokenshift[0:1, i:i+1, :] = states[3*i] + torch.finfo(torch.float32).smallest_normal
+            self.state_wkv[i:i+1, :, :, :] = states[3*i+1] + torch.finfo(torch.float32).smallest_normal
+            self.state_tokenshift[1:2, i:i+1, :] = states[3*i+2] + torch.finfo(torch.float32).smallest_normal
 
         if self.chunk_idx == self.chunks - 1:
             return x

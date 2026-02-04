@@ -204,7 +204,7 @@ class Rwkv7FeedForward(nn.Module):
             past = torch.cat([state, x[:, :-1, :]], dim=1)
             sx = self.sub_shifted(past, x)
             # mystery trick for coreml
-            state_out = x[:, -1, :] + torch.finfo(torch.float32).smallest_normal
+            state_out = x[:, -1, :]
             if self.layer_id == self.num_layers - 1:
                 sx = sx[:, -1, :]
                 x = x[:, -1, :]
