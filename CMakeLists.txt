@@ -403,8 +403,12 @@ if (ENABLE_COREML_BACKEND)
     add_library(rwkv_coreml STATIC
         src/backends/coreml/rwkv-coreml.h
         src/backends/coreml/rwkv-coreml.mm
-        src/backends/coreml/rwkv-coreml-stateful-impl.h
-        src/backends/coreml/rwkv-coreml-stateful-impl.m
+        src/backends/coreml/rwkv_coreml_firstchunk_impl.h
+        src/backends/coreml/rwkv_coreml_firstchunk_impl.m
+        src/backends/coreml/rwkv_coreml_impl.h
+        src/backends/coreml/rwkv_coreml_impl.m
+        src/backends/coreml/rwkv_coreml_singlechunk_impl.h
+        src/backends/coreml/rwkv_coreml_singlechunk_impl.m
     )
 
     target_include_directories(rwkv_coreml PUBLIC src)

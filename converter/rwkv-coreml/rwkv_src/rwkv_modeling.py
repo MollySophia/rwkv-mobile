@@ -148,10 +148,10 @@ class RWKV_RNN(torch.nn.Module):
             # else:
             #     x = x.view(batch_size, seq_length, self.args.n_embd)
 
-            if self.chunk_idx == self.chunks - 1:
-                return x, state
-            else:
+            if self.chunk_idx == 0 and self.chunks != 1:
                 return x, state, v_first
+            else:
+                return x, state
 
 class RWKV_RNN_Stateful(RWKV_RNN):
     def __init__(self, args, chunks=1, chunk_idx=0):
@@ -177,10 +177,10 @@ class RWKV_RNN_Stateful(RWKV_RNN):
             self.state_wkv[i:i+1, :, :, :] = states[3*i+1] + torch.finfo(torch.float32).smallest_normal
             self.state_tokenshift[1:2, i:i+1, :] = states[3*i+2] + torch.finfo(torch.float32).smallest_normal
 
-        if self.chunk_idx == self.chunks - 1:
-            return x
-        else:
+        if self.chunk_idx == 0 and self.chunks != 1:
             return x, v_first
+        else:
+            return x
 
 class RWKV_LMHead(torch.nn.Module):
     def __init__(self, args):
