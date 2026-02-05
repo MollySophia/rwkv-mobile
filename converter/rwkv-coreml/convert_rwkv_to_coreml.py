@@ -144,44 +144,44 @@ elif use_int:
 
 def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
-    output_name += f'_{mode_tag}'
+    output_name += f'-{mode_tag}'
     if parser_args.int4:
-        output_name += '_int4'
+        output_name += '-int4'
     elif parser_args.int8:
-        output_name += '_int8'
+        output_name += '-int8'
     elif parser_args.lut8:
-        output_name += '_lut8'
+        output_name += '-lut8'
     elif parser_args.lut6:
-        output_name += '_lut6'
+        output_name += '-lut6'
     elif parser_args.lut4:
-        output_name += '_lut4'
+        output_name += '-lut4'
     # Add chunk suffix
-    chunk_suffix = f'_chunk{chunk_idx + 1}of{parser_args.chunks}'
+    chunk_suffix = f'-chunk{chunk_idx + 1}of{parser_args.chunks}'
     output_name += chunk_suffix
     return output_name
 
 def _build_combined_base_name() -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
-    output_name += '_combined'
+    output_name += '-coreml'
     if parser_args.int4:
-        output_name += '_int4'
+        output_name += '-int4'
     elif parser_args.int8:
-        output_name += '_int8'
+        output_name += '-int8'
     elif parser_args.lut8:
-        output_name += '_lut8'
+        output_name += '-lut8'
     elif parser_args.lut6:
-        output_name += '_lut6'
+        output_name += '-lut6'
     elif parser_args.lut4:
-        output_name += '_lut4'
+        output_name += '-lut4'
     return output_name
 
 # def _build_output_name_lmhead() -> str:
 #     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
-#     output_name += f'_lmhead'
+#     output_name += f'-lmhead'
 #     if use_lut_lmhead:
-#         output_name += '_lut8'
+#         output_name += '-lut8'
 #     elif use_int_lmhead:
-#         output_name += '_int8'
+#         output_name += '-int8'
 #     return output_name
 
 # def _build_coreml_io_lmhead(inputs):
@@ -308,7 +308,7 @@ for chunk_idx, model in enumerate(models):
     desc.default_function_name = "decode"
 
     # Save combined model for this chunk
-    combined_output_name = combined_base_name + f'_chunk{chunk_idx + 1}of{parser_args.chunks}'
+    combined_output_name = combined_base_name + f'-chunk{chunk_idx + 1}of{parser_args.chunks}'
     ct.utils.save_multifunction(desc, str(output_dir / (combined_output_name + '.mlpackage')))
 
     # Clean up individual files
