@@ -33,10 +33,17 @@ else:
 args = models[0].args
 
 layers_for_chunk = []
+assert parser_args.chunks > 0, "chunks must be >= 1"
+base_layers = args.n_layer // parser_args.chunks
+extra_layers = args.n_layer % parser_args.chunks
 for i in range(parser_args.chunks):
-    n = args.n_layer // parser_args.chunks
-    layer_start = i * n
-    layer_end = min(args.n_layer, (i + 1) * n)
+    if i < extra_layers:
+        layers_in_chunk = base_layers + 1
+        layer_start = i * layers_in_chunk
+    else:
+        layers_in_chunk = base_layers
+        layer_start = extra_layers * (base_layers + 1) + (i - extra_layers) * base_layers
+    layer_end = min(args.n_layer, layer_start + layers_in_chunk)
     layers_for_chunk.append(layer_end - layer_start)
 
 PREFILL_SEQ_LENGTH = 32
@@ -153,6 +160,21 @@ def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name += chunk_suffix
     return output_name
 
+def _build_combined_base_name() -> str:
+    output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
+    output_name += '_combined'
+    if parser_args.int4:
+        output_name += '_int4'
+    elif parser_args.int8:
+        output_name += '_int8'
+    elif parser_args.lut8:
+        output_name += '_lut8'
+    elif parser_args.lut6:
+        output_name += '_lut6'
+    elif parser_args.lut4:
+        output_name += '_lut4'
+    return output_name
+
 # def _build_output_name_lmhead() -> str:
 #     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
 #     output_name += f'_lmhead'
@@ -183,7 +205,7 @@ def _build_coreml_io(inputs, chunk_idx: int = 0, num_chunks: int = 1):
     return ct_inputs, ct_outputs
 
 
-def convert_and_save_coreml(jit_model, inputs, mode_tag: str, chunk_idx: int = 0):
+def convert_and_save_coreml(jit_model, inputs, mode_tag: str, chunk_idx: int = 0, output_dir: Path | None = None):
     ct_inputs, ct_outputs = _build_coreml_io(inputs, chunk_idx, parser_args.chunks)
     output_name = _build_output_name(mode_tag, chunk_idx)
 
@@ -211,7 +233,10 @@ def convert_and_save_coreml(jit_model, inputs, mode_tag: str, chunk_idx: int = 0
         compute_units=ct.ComputeUnit.CPU_AND_NE,
     )
 
-    mlmodel.save(f'{output_name}.mlpackage')
+    output_path = f'{output_name}.mlpackage'
+    if output_dir is not None:
+        output_path = str(output_dir / output_path)
+    mlmodel.save(output_path)
     return output_name
 
 # def convert_and_save_coreml_lmhead():
@@ -230,6 +255,13 @@ def convert_and_save_coreml(jit_model, inputs, mode_tag: str, chunk_idx: int = 0
 # print("Converting LMHead")
 # convert_and_save_coreml_lmhead()
 
+combined_base_name = _build_combined_base_name()
+output_dir = Path(combined_base_name)
+output_dir.mkdir(parents=True, exist_ok=True)
+with open(output_dir / 'config.yaml', 'w', encoding='utf-8') as f:
+    f.write(f'basename: {combined_base_name}\n')
+    f.write(f'num_chunks: {parser_args.chunks}\n')
+
 # Export combined models for each chunk (each containing decode and prefill functions).
 for chunk_idx, model in enumerate(models):
     print(f"Converting chunk {chunk_idx + 1} of {parser_args.chunks}")
@@ -241,22 +273,34 @@ for chunk_idx, model in enumerate(models):
 
     # Trace and convert decode model
     jit_decode = torch.jit.trace(model, example_inputs=inputs_decode)
-    decode_output_name = convert_and_save_coreml(jit_decode, inputs_decode, mode_tag='decode', chunk_idx=chunk_idx)
+    decode_output_name = convert_and_save_coreml(
+        jit_decode,
+        inputs_decode,
+        mode_tag='decode',
+        chunk_idx=chunk_idx,
+        output_dir=output_dir,
+    )
     del jit_decode
 
     # Trace and convert prefill model
     jit_prefill = torch.jit.trace(model, example_inputs=inputs_prefill)
-    prefill_output_name = convert_and_save_coreml(jit_prefill, inputs_prefill, mode_tag='prefill', chunk_idx=chunk_idx)
+    prefill_output_name = convert_and_save_coreml(
+        jit_prefill,
+        inputs_prefill,
+        mode_tag='prefill',
+        chunk_idx=chunk_idx,
+        output_dir=output_dir,
+    )
     del jit_prefill
 
     # Add functions to multi-function descriptor
     desc.add_function(
-        decode_output_name + '.mlpackage',
+        str(output_dir / (decode_output_name + '.mlpackage')),
         src_function_name="main",
         target_function_name="decode"
     )
     desc.add_function(
-        prefill_output_name + '.mlpackage',
+        str(output_dir / (prefill_output_name + '.mlpackage')),
         src_function_name="main",
         target_function_name="prefill"
     )
@@ -264,21 +308,9 @@ for chunk_idx, model in enumerate(models):
     desc.default_function_name = "decode"
 
     # Save combined model for this chunk
-    combined_output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
-    combined_output_name += '_combined'
-    if parser_args.int4:
-        combined_output_name += '_int4'
-    elif parser_args.int8:
-        combined_output_name += '_int8'
-    elif parser_args.lut8:
-        combined_output_name += '_lut8'
-    elif parser_args.lut6:
-        combined_output_name += '_lut6'
-    elif parser_args.lut4:
-        combined_output_name += '_lut4'
-    combined_output_name += f'_chunk{chunk_idx + 1}of{parser_args.chunks}'
-    ct.utils.save_multifunction(desc, combined_output_name + '.mlpackage')
+    combined_output_name = combined_base_name + f'_chunk{chunk_idx + 1}of{parser_args.chunks}'
+    ct.utils.save_multifunction(desc, str(output_dir / (combined_output_name + '.mlpackage')))
 
     # Clean up individual files
-    shutil.rmtree(decode_output_name + '.mlpackage')
-    shutil.rmtree(prefill_output_name + '.mlpackage')
+    shutil.rmtree(output_dir / (decode_output_name + '.mlpackage'))
+    shutil.rmtree(output_dir / (prefill_output_name + '.mlpackage'))

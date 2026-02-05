@@ -11,3 +11,4 @@ pubspec.lock
 .DS_Store
 *.mlpackage
 *.mlmodelc
+*.yaml

@@ -79,9 +79,16 @@ class RWKV_RNN(torch.nn.Module):
 
         assert self.args.version == 7, "Only version 7 is supported"
 
-        layers_per_chunk = self.args.n_layer // chunks
-        self.layer_begin = chunk_idx * layers_per_chunk
-        self.layer_end = min(self.args.n_layer, (chunk_idx + 1) * layers_per_chunk)
+        assert chunks > 0, "chunks must be >= 1"
+        base_layers = self.args.n_layer // chunks
+        extra_layers = self.args.n_layer % chunks
+        if chunk_idx < extra_layers:
+            layers_in_chunk = base_layers + 1
+            self.layer_begin = chunk_idx * layers_in_chunk
+        else:
+            layers_in_chunk = base_layers
+            self.layer_begin = extra_layers * (base_layers + 1) + (chunk_idx - extra_layers) * base_layers
+        self.layer_end = min(self.args.n_layer, self.layer_begin + layers_in_chunk)
         self.chunk_idx = chunk_idx
         self.chunks = chunks
         print(f"Chunk {chunk_idx}: layers {self.layer_begin} to {self.layer_end}")
