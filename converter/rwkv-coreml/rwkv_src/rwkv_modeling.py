@@ -104,9 +104,10 @@ class RWKV_RNN(torch.nn.Module):
 
         if self.chunk_idx == 0:
             emb_weight = w['emb.weight']
-            emb_weight = F.layer_norm(emb_weight, emb_weight.size()[-1:], weight=w['blocks.0.ln0.weight'].flatten(), bias=w['blocks.0.ln0.bias'].flatten())
+            emb_weight = F.layer_norm(emb_weight, emb_weight.size()[-1:], weight=w['blocks.0.ln0.weight'].flatten(), bias=w['blocks.0.ln0.bias'].flatten()).detach()
             if self.args.USE_EMBEDDING:
-                self.embedding = torch.nn.Embedding.from_pretrained(emb_weight)
+                self.embedding = torch.nn.Embedding(emb_weight.shape[0], emb_weight.shape[1])
+                self.embedding.weight = nn.Parameter(emb_weight)
                 if self.args.fp16:
                     self.embedding.half()
             else:
@@ -134,7 +135,8 @@ class RWKV_RNN(torch.nn.Module):
             self.half()
 
     def forward(self, in0, state, v_first=None):
-        with torch.no_grad():
+        grad_ctx = torch.enable_grad() if getattr(self.args, "USE_GRAD", False) else torch.no_grad()
+        with grad_ctx:
             if self.args.USE_EMBEDDING and self.chunk_idx == 0:
                 x = self.embedding(in0)
             else:

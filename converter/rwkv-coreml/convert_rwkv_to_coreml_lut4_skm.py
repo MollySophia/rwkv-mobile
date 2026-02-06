@@ -19,6 +19,7 @@ model_args.USE_CUDA = False
 model_args.fp16 = False
 model_args.USE_EMBEDDING = True
 model_args.SKIP_LMHEAD = False
+model_args.USE_GRAD = True
 
 if not torch.backends.mps.is_available() or not torch.backends.mps.is_built():
     DEVICE = torch.device("cpu")
@@ -73,7 +74,7 @@ def build_inputs_prefill(chunk_idx: int = 0):
             inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(DEVICE))
         return inputs
 
-num_samples = 64
+num_samples = 20
 palettization_config_dict = {
     "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 32},
     "module_name_configs": {},
@@ -90,6 +91,8 @@ palettization_config_dict["module_name_configs"]["blocks.*.ffn.value"] = lut4_co
 
 palettization_config = SKMPalettizerConfig.from_dict(palettization_config_dict)
 
+# torch.autograd.set_detect_anomaly(True)
+
 with open("../../assets/calibration_data_v5_rc.txt", "r", encoding="utf-8") as f:
     calibration_data = f.readlines()
     calibration_data = "\n".join(calibration_data)
@@ -102,6 +105,7 @@ def _reset_state(model):
         model.state_wkv.zero_()
 
 def _run_model(model, inputs):
+    _reset_state(model)
     if isinstance(inputs, (tuple, list)):
         return model(*inputs)
     return model(inputs)

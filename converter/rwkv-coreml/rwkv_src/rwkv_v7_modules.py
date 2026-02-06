@@ -50,11 +50,12 @@ class Rwkv7SelfAttention(nn.Module):
         self.matmul_a2 = nn.Linear(self.D_AAA_LORA, hidden_size, bias=False)
         self.matmul_a2.weight = nn.Parameter(state_dict[prefix + 'a2'].t())
 
-        self.v0 = nn.Parameter(state_dict[prefix + 'v0'])
-        self.matmul_v1 = nn.Linear(hidden_size, self.D_MV_LORA, bias=False)
-        self.matmul_v1.weight = nn.Parameter(state_dict[prefix + 'v1'].t())
-        self.matmul_v2 = nn.Linear(self.D_MV_LORA, hidden_size, bias=False)
-        self.matmul_v2.weight = nn.Parameter(state_dict[prefix + 'v2'].t())
+        if self.layer_id != 0:
+            self.v0 = nn.Parameter(state_dict[prefix + 'v0'])
+            self.matmul_v1 = nn.Linear(hidden_size, self.D_MV_LORA, bias=False)
+            self.matmul_v1.weight = nn.Parameter(state_dict[prefix + 'v1'].t())
+            self.matmul_v2 = nn.Linear(self.D_MV_LORA, hidden_size, bias=False)
+            self.matmul_v2.weight = nn.Parameter(state_dict[prefix + 'v2'].t())
 
         self.matmul_g1 = nn.Linear(hidden_size, self.D_GATE_LORA, bias=False)
         self.matmul_g1.weight = nn.Parameter(state_dict[prefix + 'g1'].t())
@@ -138,11 +139,12 @@ class Rwkv7SelfAttention(nn.Module):
         r = receptance.view(seq_length, self.num_heads, self.head_size, 1)
         if seq_length == 1:
             vk = v @ k
-            state2_out = state2 * time_decay + state2 @ a @ b + vk
+            state2_base = state2.clone()
+            state2_out = state2_base * time_decay + state2_base @ a @ b + vk
             x = (state2_out @ r).view(seq_length, self.num_heads, 1, self.head_size)
         else:
             x_list = []
-            state2_out = state2
+            state2_out = state2.clone()
             v_list = torch.split(v, 1, dim=0)
             k_list = torch.split(k, 1, dim=0)
             r_list = torch.split(r, 1, dim=0)
@@ -151,8 +153,9 @@ class Rwkv7SelfAttention(nn.Module):
             time_decay_list = torch.split(time_decay, 1, dim=0)
             for i in range(seq_length):
                 vk = v_list[i] @ k_list[i]
-                state2_out = state2_out * time_decay_list[i] + state2_out @ a_list[i] @ b_list[i] + vk
-                x_list.append(state2_out @ r_list[i])
+                next_state2 = state2_out * time_decay_list[i] + state2_out @ a_list[i] @ b_list[i] + vk
+                x_list.append(next_state2 @ r_list[i])
+                state2_out = next_state2
             x = torch.cat(x_list, dim=0)
 
         # group_norm
