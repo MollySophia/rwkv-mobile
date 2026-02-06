@@ -7,7 +7,6 @@
 #import "rwkv_coreml_firstchunk_impl.h"
 #import "rwkv_coreml_impl.h"
 #import "rwkv_coreml_singlechunk_impl.h"
-#import "lmhead.h"
 
 #import <CoreML/CoreML.h>
 
@@ -36,7 +35,6 @@ struct rwkv_coreml_context {
     // leaks (and/or premature frees) when overwritten in decode/prefill loops.
     __strong id out_prefill = nil;
     __strong id out_decode = nil;
-    __strong id model_lmhead = nil;
 
     // Exact byte sizes of CoreML state buffers (including any padding due to strides/alignment).
     std::vector<size_t> state_wkv_bytes_per_chunk;
@@ -152,9 +150,6 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
         config_prefill.computeUnits = MLComputeUnitsCPUAndNeuralEngine;
         config_prefill.functionName = @"prefill";
 
-        MLModelConfiguration *config_lmhead = [[MLModelConfiguration alloc] init];
-        config_lmhead.computeUnits = MLComputeUnitsCPUAndNeuralEngine;
-
         NSError *error = nil;
 
         rwkv_coreml_context * ctx = new rwkv_coreml_context;
@@ -172,32 +167,6 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
         int vocab_size = 0;
 
         auto total_start = std::chrono::steady_clock::now();
-
-        NSString *lmhead_name = [NSString stringWithFormat:@"%@_lmhead.mlmodelc", basename];
-        NSString *lmhead_path = [path_model_str stringByAppendingPathComponent:lmhead_name];
-        NSURL *url_lmhead = [NSURL fileURLWithPath:lmhead_path];
-        error = nil;
-        auto lmhead_start = std::chrono::steady_clock::now();
-        MLModel *mlmodel_lmhead = [MLModel modelWithContentsOfURL:url_lmhead configuration:config_lmhead error:&error];
-        auto lmhead_end = std::chrono::steady_clock::now();
-        double lmhead_ms = std::chrono::duration<double, std::milli>(lmhead_end - lmhead_start).count();
-        NSLog(@"Loaded lmhead (%@): %.2f ms", lmhead_name, lmhead_ms);
-        if (error || !mlmodel_lmhead) {
-            NSLog(@"Error loading lmhead model %@: %@", lmhead_name, error);
-            rwkv_coreml_free(ctx);
-            return NULL;
-        }
-        lmhead *model_lmhead = [[lmhead alloc] initWithMLModel:mlmodel_lmhead];
-        ctx->model_lmhead = model_lmhead;
-
-        NSDictionary *lmhead_outputs = mlmodel_lmhead.modelDescription.outputDescriptionsByName;
-        NSArray<NSNumber *> *lmhead_out_shape = get_shape_by_name(lmhead_outputs, @"out0");
-        if (lmhead_out_shape == nil) {
-            NSLog(@"Error getting lmhead out0 shape");
-            rwkv_coreml_free(ctx);
-            return NULL;
-        }
-        vocab_size = [lmhead_out_shape[2] intValue];
         for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
             NSString *model_name = nil;
             model_name = [NSString stringWithFormat:@"%@_chunk%dof%d.mlmodelc", basename, chunk_idx + 1, num_chunks];
@@ -256,6 +225,17 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
                     return NULL;
                 }
                 prefill_seq_length = [in_prefill_shape[1] intValue];
+            }
+
+            NSDictionary *model_outputs = mlmodel_decode.modelDescription.outputDescriptionsByName;
+            if (chunk_idx == num_chunks - 1) {
+                NSArray<NSNumber *> *logits_out_shape = get_shape_by_name(model_outputs, @"out0");
+                if (logits_out_shape == nil) {
+                    NSLog(@"Error getting out0 shape");
+                    rwkv_coreml_free(ctx);
+                    return NULL;
+                }
+                vocab_size = [logits_out_shape[2] intValue];
             }
 
             __block MLMultiArray *state_wkv = nil;
@@ -331,7 +311,6 @@ void rwkv_coreml_free(struct rwkv_coreml_context * ctx) {
         // Release retained Objective-C objects eagerly (they are __strong).
         ctx->out_decode = nil;
         ctx->out_prefill = nil;
-        ctx->model_lmhead = nil;
         delete ctx;
     }
 }
@@ -349,13 +328,11 @@ void* rwkv_coreml_decode(struct rwkv_coreml_context * ctx, int token) {
                                                error: nil
         ];
 
-        lmhead *model_lmhead = (lmhead *)ctx->model_lmhead;
         if (ctx->num_chunks == 1) {
             rwkv_coreml_singlechunk_impl *model_decode = (__bridge rwkv_coreml_singlechunk_impl *)ctx->model_decode[0];
             rwkv_coreml_singlechunk_implState *state = (__bridge rwkv_coreml_singlechunk_implState *)ctx->states[0];
-            rwkv_coreml_singlechunk_implOutput *rwkv_out = [model_decode predictionFromIn0: inMultiArray usingState: state error: nil];
-            ctx->out_decode = [model_lmhead predictionFromIn0: rwkv_out.out0 error: nil];
-            return [(lmheadOutput *)ctx->out_decode out0].dataPointer;
+            ctx->out_decode = [model_decode predictionFromIn0: inMultiArray usingState: state error: nil];
+            return [(rwkv_coreml_singlechunk_implOutput *)ctx->out_decode out0].dataPointer;
         }
 
         rwkv_coreml_firstchunk_impl *first_model_decode = (__bridge rwkv_coreml_firstchunk_impl *)ctx->model_decode[0];
@@ -369,9 +346,11 @@ void* rwkv_coreml_decode(struct rwkv_coreml_context * ctx, int token) {
             rwkv_coreml_implState *state = (__bridge rwkv_coreml_implState *)ctx->states[chunk_idx];
             rwkv_coreml_implOutput *out = [model_decode predictionFromIn0: current v_first_in: v_first_out usingState: state error: nil];
             current = out.out0;
+            if (chunk_idx == ctx->num_chunks - 1) {
+                ctx->out_decode = out;
+            }
         }
-        ctx->out_decode = [model_lmhead predictionFromIn0: current error: nil];
-        return [(lmheadOutput *)ctx->out_decode out0].dataPointer;
+        return [(rwkv_coreml_implOutput *)ctx->out_decode out0].dataPointer;
     }
 }
 
@@ -391,13 +370,11 @@ void* rwkv_coreml_prefill(struct rwkv_coreml_context * ctx, std::vector<int> tok
                                                error: nil
         ];
 
-        lmhead *model_lmhead = (lmhead *)ctx->model_lmhead;
         if (ctx->num_chunks == 1) {
             rwkv_coreml_singlechunk_impl *model_prefill = (__bridge rwkv_coreml_singlechunk_impl *)ctx->model_prefill[0];
             rwkv_coreml_singlechunk_implState *state = (__bridge rwkv_coreml_singlechunk_implState *)ctx->states[0];
-            rwkv_coreml_singlechunk_implOutput *rwkv_out = [model_prefill predictionFromIn0: inMultiArray usingState: state error: nil];
-            ctx->out_prefill = [model_lmhead predictionFromIn0: rwkv_out.out0 error: nil];
-            return [(lmheadOutput *)ctx->out_prefill out0].dataPointer;
+            ctx->out_prefill = [model_prefill predictionFromIn0: inMultiArray usingState: state error: nil];
+            return [(rwkv_coreml_singlechunk_implOutput *)ctx->out_prefill out0].dataPointer;
         }
 
         rwkv_coreml_firstchunk_impl *first_model_prefill = (__bridge rwkv_coreml_firstchunk_impl *)ctx->model_prefill[0];
@@ -411,9 +388,11 @@ void* rwkv_coreml_prefill(struct rwkv_coreml_context * ctx, std::vector<int> tok
             rwkv_coreml_implState *state = (__bridge rwkv_coreml_implState *)ctx->states[chunk_idx];
             rwkv_coreml_implOutput *out = [model_prefill predictionFromIn0: current v_first_in: v_first_out usingState: state error: nil];
             current = out.out0;
+            if (chunk_idx == ctx->num_chunks - 1) {
+                ctx->out_prefill = out;
+            }
         }
-        ctx->out_prefill = [model_lmhead predictionFromIn0: current error: nil];
-        return [(lmheadOutput *)ctx->out_prefill out0].dataPointer;
+        return [(rwkv_coreml_implOutput *)ctx->out_prefill out0].dataPointer;
     }
 }
 
