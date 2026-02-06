@@ -20,12 +20,21 @@ model_args.fp16 = False
 model_args.USE_EMBEDDING = True
 model_args.SKIP_LMHEAD = False
 
+if not torch.backends.mps.is_available() or not torch.backends.mps.is_built():
+    DEVICE = torch.device("cpu")
+else:
+    DEVICE = torch.device("mps")
+
 model_args.MODEL_NAME = str(parser_args.model).replace('.pth', '')
 if parser_args.chunks > 1:
     models = make_chunks_stateful(parser_args.chunks, model_args)
 else:
     models = [RWKV_RNN_Stateful(model_args)]
 args = models[0].args
+
+for i in range(len(models)):
+    models[i] = models[i].to(DEVICE)
+    models[i].device = DEVICE
 
 tokenizer = RWKV_TOKENIZER("../../assets/rwkv_vocab_v20230424.txt")
 
@@ -48,20 +57,20 @@ CALIB_SEQ_LENGTH = 4096
 
 def build_inputs_decode(chunk_idx: int = 0):
     if chunk_idx == 0:
-        return [torch.tensor([[0]*1 for _ in range(1)], dtype=torch.int32).to(models[0].device)]
+        return [torch.tensor([[0]*1 for _ in range(1)], dtype=torch.int32).to(DEVICE)]
     else:
-        inputs = [torch.zeros(1, 1, args.n_embd).to(models[0].device)]
+        inputs = [torch.zeros(1, 1, args.n_embd).to(DEVICE)]
         if parser_args.chunks > 1:
-            inputs.append(torch.zeros(1, 1, args.n_embd).to(models[0].device))
+            inputs.append(torch.zeros(1, 1, args.n_embd).to(DEVICE))
         return inputs
 
 def build_inputs_prefill(chunk_idx: int = 0):
     if chunk_idx == 0:
-        return [torch.tensor([[0]*PREFILL_SEQ_LENGTH for _ in range(1)], dtype=torch.int32).to(models[0].device)]
+        return [torch.tensor([[0]*PREFILL_SEQ_LENGTH for _ in range(1)], dtype=torch.int32).to(DEVICE)]
     else:
-        inputs = [torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(models[0].device)]
+        inputs = [torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(DEVICE)]
         if parser_args.chunks > 1:
-            inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(models[0].device))
+            inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(DEVICE))
         return inputs
 
 num_samples = 64
@@ -81,7 +90,7 @@ palettization_config_dict["module_name_configs"]["blocks.*.ffn.value"] = lut4_co
 
 palettization_config = SKMPalettizerConfig.from_dict(palettization_config_dict)
 
-with open("../../calibration_data_v5_rc.txt", "r", encoding="utf-8") as f:
+with open("../../assets/calibration_data_v5_rc.txt", "r", encoding="utf-8") as f:
     calibration_data = f.readlines()
     calibration_data = "\n".join(calibration_data)
     calibration_data = tokenizer.encode(calibration_data)
@@ -116,7 +125,7 @@ def _build_calibration_windows(tokens, seq_len, nsamples):
 def _build_palettization_dataloaders(models, tokens, seq_len, nsamples):
     token_windows = _build_calibration_windows(tokens, seq_len, nsamples)
     dataloaders = [[] for _ in range(len(models))]
-    device = models[0].device
+    device = DEVICE
     for model in models:
         model.eval()
 
