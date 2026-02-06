@@ -10,11 +10,6 @@ import numpy as np
 parser = argparse.ArgumentParser(description='Export coreml model')
 parser.add_argument('model', type=Path, help='Path to RWKV pth file')
 parser.add_argument('--chunks', type=int, default=1, help='Number of chunks')
-parser.add_argument('--int8', action='store_true', help='Use int8 quantization')
-parser.add_argument('--int4', action='store_true', help='Use int4 quantization')
-parser.add_argument('--lut8', action='store_true', help='Use lut8 palettization')
-parser.add_argument('--lut6', action='store_true', help='Use lut6 palettization')
-parser.add_argument('--lut4', action='store_true', help='Use lut4 palettization')
 parser_args = parser.parse_args()
 
 model_args = types.SimpleNamespace()
@@ -65,74 +60,29 @@ def build_inputs_prefill(chunk_idx: int = 0):
             inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(models[0].device))
         return inputs
 
-use_int = False
-use_lut = False
-if parser_args.int4:
-    config = PostTrainingQuantizerConfig.from_dict(
-        {
-            "global_config": {
-                "weight_dtype": "int4",
-                "granularity": "per_block",
-                "block_size": 128,
-            },
-            "module_type_configs": {
-            }
-        }
-    )
-    use_int = True
-elif parser_args.int8:
-    config = PostTrainingQuantizerConfig.from_dict(
-        {
-            "global_config": {
-                "weight_dtype": "int8",
-                "granularity": "per_channel",
-            },
-            "module_type_configs": {
-            }
-        }
-    )
-    use_int = True
-elif parser_args.lut8:
-    palettization_config_dict = {
-        "global_config": {"n_bits": 8, "granularity": "per_grouped_channel", "group_size": 128},
-    }
-    palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
-    use_lut = True
-elif parser_args.lut6:
-    palettization_config_dict = {
-        "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 16},
-    }
-    palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
-    use_lut = True
-elif parser_args.lut4:
-    palettization_config_dict = {
-        "global_config": {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 32},
-    }
-    palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
-    use_lut = True
+palettization_config_dict = {
+    "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 32},
+    "module_name_configs": {}
+}
+lut4_config = {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 16}
+for i in range(base_layers):
+    palettization_config_dict["module_name_configs"][f"blocks.{i}.att.key.weight"] = lut4_config
+    palettization_config_dict["module_name_configs"][f"blocks.{i}.att.value.weight"] = lut4_config
+    palettization_config_dict["module_name_configs"][f"blocks.{i}.att.receptance.weight"] = lut4_config
+    palettization_config_dict["module_name_configs"][f"blocks.{i}.att.gate.weight"] = lut4_config
+    palettization_config_dict["module_name_configs"][f"blocks.{i}.ffn.key.weight"] = lut4_config
+    palettization_config_dict["module_name_configs"][f"blocks.{i}.ffn.value.weight"] = lut4_config
 
-if use_lut:
-    for i in range(len(models)):
-        palettizer = PostTrainingPalettizer(models[i], palettization_config)
-        models[i] = palettizer.compress()
-elif use_int:
-    for i in range(len(models)):
-        quantizer = PostTrainingQuantizer(models[i], config)
-        models[i] = quantizer.compress()
+palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+
+for i in range(len(models)):
+    palettizer = PostTrainingPalettizer(models[i], palettization_config)
+    models[i] = palettizer.compress()
 
 def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
     output_name += f'-{mode_tag}'
-    if parser_args.int4:
-        output_name += '-int4'
-    elif parser_args.int8:
-        output_name += '-int8'
-    elif parser_args.lut8:
-        output_name += '-lut8'
-    elif parser_args.lut6:
-        output_name += '-lut6'
-    elif parser_args.lut4:
-        output_name += '-lut4'
+    output_name += '-lut4'
     # Add chunk suffix
     chunk_suffix = f'_chunk{chunk_idx + 1}of{parser_args.chunks}'
     output_name += chunk_suffix
@@ -141,26 +91,8 @@ def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
 def _build_combined_base_name() -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
     output_name += '-coreml'
-    if parser_args.int4:
-        output_name += '-int4'
-    elif parser_args.int8:
-        output_name += '-int8'
-    elif parser_args.lut8:
-        output_name += '-lut8'
-    elif parser_args.lut6:
-        output_name += '-lut6'
-    elif parser_args.lut4:
-        output_name += '-lut4'
+    output_name += '-lut4'
     return output_name
-
-def _build_output_name_lmhead() -> str:
-    return _build_combined_base_name() + "_lmhead"
-
-def _build_coreml_io_lmhead(inputs):
-    dtype = np.float16
-    ct_inputs = [ct.TensorType('in0', inputs[0].shape, dtype=dtype)]
-    ct_outputs = [ct.TensorType(name='out0', dtype=dtype)]
-    return ct_inputs, ct_outputs
 
 def _build_coreml_io(inputs, chunk_idx: int = 0, num_chunks: int = 1):
     dtype = np.float16
