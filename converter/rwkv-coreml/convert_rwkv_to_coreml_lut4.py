@@ -65,13 +65,12 @@ palettization_config_dict = {
     "module_name_configs": {}
 }
 lut4_config = {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 16}
-for i in range(base_layers):
-    palettization_config_dict["module_name_configs"][f"blocks.{i}.att.key.weight"] = lut4_config
-    palettization_config_dict["module_name_configs"][f"blocks.{i}.att.value.weight"] = lut4_config
-    palettization_config_dict["module_name_configs"][f"blocks.{i}.att.receptance.weight"] = lut4_config
-    palettization_config_dict["module_name_configs"][f"blocks.{i}.att.gate.weight"] = lut4_config
-    palettization_config_dict["module_name_configs"][f"blocks.{i}.ffn.key.weight"] = lut4_config
-    palettization_config_dict["module_name_configs"][f"blocks.{i}.ffn.value.weight"] = lut4_config
+palettization_config_dict["module_name_configs"]["blocks.*.att.key"] = lut4_config
+palettization_config_dict["module_name_configs"]["blocks.*.att.value"] = lut4_config
+palettization_config_dict["module_name_configs"]["blocks.*.att.receptance"] = lut4_config
+palettization_config_dict["module_name_configs"]["blocks.*.att.gate"] = lut4_config
+palettization_config_dict["module_name_configs"]["blocks.*.ffn.key"] = lut4_config
+palettization_config_dict["module_name_configs"]["blocks.*.ffn.value"] = lut4_config
 
 palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
 

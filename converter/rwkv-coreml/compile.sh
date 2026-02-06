@@ -31,16 +31,6 @@ if ! [[ "$num_chunks" =~ ^[0-9]+$ ]] || [[ "$num_chunks" -lt 1 ]]; then
   exit 1
 fi
 
-lmhead_name="${base_name}_lmhead.mlpackage"
-lmhead_path="${model_dir}/${lmhead_name}"
-
-if [[ -d "$lmhead_path" ]]; then
-  xcrun coremlc compile "$lmhead_path" "$model_dir"
-  rm -rf "$lmhead_path"
-else
-  echo "Warning: lmhead not found, skip: $lmhead_path" >&2
-fi
-
 for ((i=1; i<=num_chunks; i++)); do
   chunk_name="${base_name}_chunk${i}of${num_chunks}.mlpackage"
   chunk_path="${model_dir}/${chunk_name}"
