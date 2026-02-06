@@ -166,6 +166,7 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
         int prefill_seq_length = 0;
         int vocab_size = 0;
 
+        auto total_start = std::chrono::steady_clock::now();
         for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
             NSString *model_name = nil;
             model_name = [NSString stringWithFormat:@"%@_chunk%dof%d.mlmodelc", basename, chunk_idx + 1, num_chunks];
@@ -277,6 +278,10 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
         ctx->head_dim = head_dim;
         ctx->embd_dim = ctx->head_dim * ctx->num_heads;
         ctx->vocab_size = vocab_size;
+
+        auto total_end = std::chrono::steady_clock::now();
+        double total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
+        NSLog(@"Total model load time: %.2f ms", total_ms);
 
         ctx->state_wkv_bytes = 0;
         ctx->state_tokenshift_bytes = 0;
