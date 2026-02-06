@@ -1,4 +1,4 @@
-from rwkv_src.rwkv_modeling import RWKV_RNN_Stateful, make_chunks_stateful
+from rwkv_src.rwkv_modeling import RWKV_RNN, RWKV_RNN_Stateful, make_chunks_stateful
 from rwkv_src.rwkv_tokenizer import RWKV_TOKENIZER
 import coremltools as ct
 from coremltools.optimize.torch.palettization import PostTrainingPalettizer, PostTrainingPalettizerConfig
@@ -27,15 +27,9 @@ else:
     DEVICE = torch.device("mps")
 
 model_args.MODEL_NAME = str(parser_args.model).replace('.pth', '')
-if parser_args.chunks > 1:
-    models = make_chunks_stateful(parser_args.chunks, model_args)
-else:
-    models = [RWKV_RNN_Stateful(model_args)]
-args = models[0].args
-
-for i in range(len(models)):
-    models[i] = models[i].to(DEVICE)
-    models[i].device = DEVICE
+full_stateful = RWKV_RNN_Stateful(model_args, chunks=1, chunk_idx=0).to(DEVICE)
+full_stateful.device = DEVICE
+args = full_stateful.args
 
 tokenizer = RWKV_TOKENIZER("../../assets/rwkv_vocab_v20230424.txt")
 
@@ -74,7 +68,7 @@ def build_inputs_prefill(chunk_idx: int = 0):
             inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(DEVICE))
         return inputs
 
-num_samples = 20
+num_samples = 1
 palettization_config_dict = {
     "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 32},
     "module_name_configs": {},
@@ -126,57 +120,34 @@ def _build_calibration_windows(tokens, seq_len, nsamples):
         start += stride
     return windows
 
-def _build_palettization_dataloaders(models, tokens, seq_len, nsamples):
+def _build_palettization_dataloader(tokens, seq_len, nsamples, reference_model):
     token_windows = _build_calibration_windows(tokens, seq_len, nsamples)
-    dataloaders = [[] for _ in range(len(models))]
+    dataloader = []
     device = DEVICE
-    for model in models:
-        model.eval()
-
+    reference_model.eval()
     for window in token_windows:
         input_ids = torch.tensor([window[:-1]], dtype=torch.int32, device=device)
-        target_ids = torch.tensor([window[1:]], dtype=torch.int64, device=device)
-
-        for model in models:
-            _reset_state(model)
-
-        if len(models) == 1:
-            dataloaders[0].append((input_ids, target_ids))
-            continue
-
         with torch.no_grad():
-            out0, v_first = models[0](input_ids)
-
-        dataloaders[0].append((input_ids, out0.detach()))
-        prev = out0.detach()
-        v_first_detached = v_first.detach()
-
-        for chunk_idx in range(1, len(models)):
-            with torch.no_grad():
-                out = models[chunk_idx](prev, v_first_detached)
-
-            if chunk_idx == len(models) - 1:
-                dataloaders[chunk_idx].append(((prev, v_first_detached), target_ids))
-            else:
-                dataloaders[chunk_idx].append(((prev, v_first_detached), out.detach()))
-                prev = out.detach()
-
-    return dataloaders
+            _reset_state(reference_model)
+            target_logits = _unwrap_output(_run_model(reference_model, input_ids))
+        dataloader.append((input_ids, target_logits.detach()))
+    return dataloader
 
 mse_loss_fn = lambda model, dat: F.mse_loss(_unwrap_output(_run_model(model, dat[0])), dat[1])
-nll_loss_fn = lambda model, dat: F.nll_loss(_unwrap_output(_run_model(model, dat[0])), dat[1])
 
-dataloaders = _build_palettization_dataloaders(
-    models,
+dataloader = _build_palettization_dataloader(
     calibration_data,
     CALIB_SEQ_LENGTH,
     palettization_config_dict["calibration_nsamples"],
+    full_stateful,
 )
 
-for i in range(len(models)):
-    palettizer = SKMPalettizer(models[i], palettization_config)
-    loss_fn = nll_loss_fn if i == (len(models) - 1) else mse_loss_fn
-    models[i] = palettizer.compress(dataloader=dataloaders[i], loss_fn=loss_fn)
+palettizer = SKMPalettizer(full_stateful, palettization_config)
+full_stateful = palettizer.compress(dataloader=dataloader, loss_fn=mse_loss_fn)
+
+models = make_chunks_stateful(parser_args.chunks, model_args, full_model=full_stateful)
+for model in models:
+    model.device = DEVICE
 
 
 def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:

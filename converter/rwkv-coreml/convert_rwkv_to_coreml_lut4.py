@@ -1,4 +1,4 @@
-from rwkv_src.rwkv_modeling import RWKV_RNN_Stateful, RWKV_LMHead, make_chunks_stateful
+from rwkv_src.rwkv_modeling import RWKV_RNN, RWKV_RNN_Stateful, RWKV_LMHead, make_chunks_stateful
 import coremltools as ct
 from coremltools.optimize.torch.quantization import PostTrainingQuantizer, PostTrainingQuantizerConfig
 from coremltools.optimize.torch.palettization import PostTrainingPalettizer, PostTrainingPalettizerConfig
@@ -20,11 +20,9 @@ model_args.SKIP_LMHEAD = False
 # model_args.SKIP_LMHEAD = True
 
 model_args.MODEL_NAME = str(parser_args.model).replace('.pth', '')
-if parser_args.chunks > 1:
-    models = make_chunks_stateful(parser_args.chunks, model_args)
-else:
-    models = [RWKV_RNN_Stateful(model_args)]
-args = models[0].args
+full_model = RWKV_RNN(model_args)
+MODEL_DEVICE = full_model.device
+args = full_model.args
 
 layers_for_chunk = []
 assert parser_args.chunks > 0, "chunks must be >= 1"
@@ -44,20 +42,20 @@ PREFILL_SEQ_LENGTH = 32
 
 def build_inputs_decode(chunk_idx: int = 0):
     if chunk_idx == 0:
-        return [torch.tensor([[0]*1 for _ in range(1)], dtype=torch.int32).to(models[0].device)]
+        return [torch.tensor([[0]*1 for _ in range(1)], dtype=torch.int32).to(MODEL_DEVICE)]
     else:
-        inputs = [torch.zeros(1, 1, args.n_embd).to(models[0].device)]
+        inputs = [torch.zeros(1, 1, args.n_embd).to(MODEL_DEVICE)]
         if parser_args.chunks > 1:
-            inputs.append(torch.zeros(1, 1, args.n_embd).to(models[0].device))
+            inputs.append(torch.zeros(1, 1, args.n_embd).to(MODEL_DEVICE))
         return inputs
 
 def build_inputs_prefill(chunk_idx: int = 0):
     if chunk_idx == 0:
-        return [torch.tensor([[0]*PREFILL_SEQ_LENGTH for _ in range(1)], dtype=torch.int32).to(models[0].device)]
+        return [torch.tensor([[0]*PREFILL_SEQ_LENGTH for _ in range(1)], dtype=torch.int32).to(MODEL_DEVICE)]
     else:
-        inputs = [torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(models[0].device)]
+        inputs = [torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(MODEL_DEVICE)]
         if parser_args.chunks > 1:
-            inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(models[0].device))
+            inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(MODEL_DEVICE))
         return inputs
 
 palettization_config_dict = {
@@ -75,9 +73,10 @@ palettization_config_dict["module_name_configs"]["blocks.*.ffn.value"] = lut4_co
 
 palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
 
-for i in range(len(models)):
-    palettizer = PostTrainingPalettizer(models[i], palettization_config)
-    models[i] = palettizer.compress()
+palettizer = PostTrainingPalettizer(full_model, palettization_config)
+full_model = palettizer.compress()
+
+models = make_chunks_stateful(parser_args.chunks, model_args, full_model=full_model)
 
 def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')

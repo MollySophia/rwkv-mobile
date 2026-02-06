@@ -195,6 +195,11 @@ class Rwkv7FeedForward(nn.Module):
         self.pow                    = op.Pow()
         self.add_feed_forward       = op.Add()
 
+        self.full_output = False
+
+    def set_full_output(self, enabled: bool = True):
+        self.full_output = enabled
+
     def forward(self, x, state):
         last_x = x
         x = self.ln_2(x)
@@ -206,9 +211,8 @@ class Rwkv7FeedForward(nn.Module):
         else:
             past = torch.cat([state, x[:, :-1, :]], dim=1)
             sx = self.sub_shifted(past, x)
-            # mystery trick for coreml
             state_out = x[:, -1, :]
-            if self.layer_id == self.num_layers - 1:
+            if not self.full_output and self.layer_id == self.num_layers - 1:
                 sx = sx[:, -1, :]
                 x = x[:, -1, :]
                 last_x = last_x[:, -1, :]

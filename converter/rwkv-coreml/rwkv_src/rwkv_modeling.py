@@ -29,6 +29,32 @@ def check_rwkv_info(state_dict):
             n_head = state_dict[k].shape[0]
     return version, n_layer, n_head
 
+def _compute_chunk_boundaries(n_layer, chunks):
+    assert chunks > 0, "chunks must be >= 1"
+    base_layers = n_layer // chunks
+    extra_layers = n_layer % chunks
+    boundaries = []
+    for i in range(chunks):
+        if i < extra_layers:
+            layers_in_chunk = base_layers + 1
+            layer_begin = i * layers_in_chunk
+        else:
+            layers_in_chunk = base_layers
+            layer_begin = extra_layers * (base_layers + 1) + (i - extra_layers) * base_layers
+        layer_end = min(n_layer, layer_begin + layers_in_chunk)
+        boundaries.append((layer_begin, layer_end))
+    return boundaries
+
+def _clone_block_with_offset(block, layer_offset):
+    new_block = RWKV_Block.__new__(RWKV_Block)
+    nn.Module.__init__(new_block)
+    new_block.version = block.version
+    new_block.layer_offset = layer_offset
+    new_block.model_args = block.model_args
+    new_block.att = block.att
+    new_block.ffn = block.ffn
+    return new_block
+
 class RWKV_Block(nn.Module):
     def __init__(self, state_dict, n_embd, head_size, n_ffn, layer_id, layer_begin, num_layers, version=6.0, model_args=None):
         super().__init__()
@@ -79,16 +105,8 @@ class RWKV_RNN(torch.nn.Module):
 
         assert self.args.version == 7, "Only version 7 is supported"
 
-        assert chunks > 0, "chunks must be >= 1"
-        base_layers = self.args.n_layer // chunks
-        extra_layers = self.args.n_layer % chunks
-        if chunk_idx < extra_layers:
-            layers_in_chunk = base_layers + 1
-            self.layer_begin = chunk_idx * layers_in_chunk
-        else:
-            layers_in_chunk = base_layers
-            self.layer_begin = extra_layers * (base_layers + 1) + (chunk_idx - extra_layers) * base_layers
-        self.layer_end = min(self.args.n_layer, self.layer_begin + layers_in_chunk)
+        boundaries = _compute_chunk_boundaries(self.args.n_layer, chunks)
+        self.layer_begin, self.layer_end = boundaries[chunk_idx]
         self.chunk_idx = chunk_idx
         self.chunks = chunks
         print(f"Chunk {chunk_idx}: layers {self.layer_begin} to {self.layer_end}")
@@ -191,6 +209,47 @@ class RWKV_RNN_Stateful(RWKV_RNN):
         else:
             return x
 
+    @classmethod
+    def from_full_model(cls, full_model, chunks=1, chunk_idx=0):
+        obj = cls.__new__(cls)
+        nn.Module.__init__(obj)
+        obj.args = full_model.args
+        obj.eval()
+
+        boundaries = _compute_chunk_boundaries(obj.args.n_layer, chunks)
+        obj.layer_begin, obj.layer_end = boundaries[chunk_idx]
+        obj.layers_this_chunk = obj.layer_end - obj.layer_begin
+        obj.chunk_idx = chunk_idx
+        obj.chunks = chunks
+
+        obj.device = getattr(full_model, "device", torch.device("cpu"))
+        obj.gpu = getattr(full_model, "gpu", obj.device is not torch.device("cpu"))
+
+        if chunk_idx == 0:
+            if obj.args.USE_EMBEDDING and hasattr(full_model, "embedding"):
+                obj.embedding = full_model.embedding
+            elif hasattr(full_model, "emb_weight"):
+                obj.emb_weight = full_model.emb_weight
+
+        blocks = []
+        for i in range(obj.layer_begin, obj.layer_end):
+            blocks.append(_clone_block_with_offset(full_model.blocks[i], i - obj.layer_begin))
+        obj.blocks = nn.ModuleList(blocks)
+
+        if chunk_idx == chunks - 1 and not obj.args.SKIP_LMHEAD:
+            obj.ln_out = full_model.ln_out
+            obj.head = full_model.head
+
+        obj.register_buffer(
+            'state_tokenshift',
+            torch.zeros(2, obj.layers_this_chunk, obj.args.n_embd, device=obj.device),
+        )
+        obj.register_buffer(
+            'state_wkv',
+            torch.zeros(obj.layers_this_chunk, obj.args.n_head, obj.args.head_size, obj.args.head_size, device=obj.device),
+        )
+        return obj
+
 class RWKV_LMHead(torch.nn.Module):
     def __init__(self, args):
         super().__init__()
@@ -227,5 +286,7 @@ class RWKV_LMHead(torch.nn.Module):
 def make_chunks(chunks, args):
     return [RWKV_RNN(args, chunks=chunks, chunk_idx=i) for i in range(chunks)]
 
-def make_chunks_stateful(chunks, args):
-    return [RWKV_RNN_Stateful(args, chunks=chunks, chunk_idx=i) for i in range(chunks)]
+def make_chunks_stateful(chunks, args, full_model=None):
+    if full_model is None:
+        return [RWKV_RNN_Stateful(args, chunks=chunks, chunk_idx=i) for i in range(chunks)]
+    return [RWKV_RNN_Stateful.from_full_model(full_model, chunks=chunks, chunk_idx=i) for i in range(chunks)]
