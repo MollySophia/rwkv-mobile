@@ -21,15 +21,15 @@ model_args = types.SimpleNamespace()
 model_args.USE_CUDA = False
 model_args.fp16 = False
 model_args.USE_EMBEDDING = True
-# model_args.SKIP_LMHEAD = False
-model_args.SKIP_LMHEAD = True
+model_args.SKIP_LMHEAD = False
+# model_args.SKIP_LMHEAD = True
 
 model_args.MODEL_NAME = str(parser_args.model).replace('.pth', '')
 if parser_args.chunks > 1:
     models = make_chunks_stateful(parser_args.chunks, model_args)
 else:
     models = [RWKV_RNN_Stateful(model_args)]
-lmhead = RWKV_LMHead(model_args)
+# lmhead = RWKV_LMHead(model_args)
 args = models[0].args
 
 layers_for_chunk = []
@@ -133,14 +133,14 @@ elif use_int:
 # lmhead_palettizer = PostTrainingPalettizer(lmhead, lmhead_palettization_config)
 # lmhead = lmhead_palettizer.compress()
 
-use_int_lmhead = True
-use_lut_lmhead = False
-lmhead_quantization_config_dict = {
-    "global_config": {"weight_dtype": "int8", "granularity": "per_channel"},
-}
-lmhead_quantization_config = PostTrainingQuantizerConfig.from_dict(lmhead_quantization_config_dict)
-lmhead_quantizer = PostTrainingQuantizer(lmhead, lmhead_quantization_config)
-lmhead = lmhead_quantizer.compress()
+# use_int_lmhead = True
+# use_lut_lmhead = False
+# lmhead_quantization_config_dict = {
+#     "global_config": {"weight_dtype": "int8", "granularity": "per_channel"},
+# }
+# lmhead_quantization_config = PostTrainingQuantizerConfig.from_dict(lmhead_quantization_config_dict)
+# lmhead_quantizer = PostTrainingQuantizer(lmhead, lmhead_quantization_config)
+# lmhead = lmhead_quantizer.compress()
 
 def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
@@ -233,21 +233,21 @@ def convert_and_save_coreml(jit_model, inputs, mode_tag: str, chunk_idx: int = 0
     mlmodel.save(output_path)
     return output_name
 
-def convert_and_save_coreml_lmhead(output_dir: Path | None = None):
-    ct_inputs, ct_outputs = _build_coreml_io_lmhead(build_inputs_lmhead())
-    output_name = _build_output_name_lmhead()
-    mlmodel_lmhead = ct.convert(
-        torch.jit.trace(lmhead, example_inputs=build_inputs_lmhead()),
-        inputs=ct_inputs,
-        outputs=ct_outputs,
-        minimum_deployment_target=ct.target.iOS18,
-        compute_units=ct.ComputeUnit.CPU_AND_NE,
-    )
-    output_path = f'{output_name}.mlpackage'
-    if output_dir is not None:
-        output_path = str(output_dir / output_path)
-    mlmodel_lmhead.save(output_path)
-    return output_name
+# def convert_and_save_coreml_lmhead(output_dir: Path | None = None):
+#     ct_inputs, ct_outputs = _build_coreml_io_lmhead(build_inputs_lmhead())
+#     output_name = _build_output_name_lmhead()
+#     mlmodel_lmhead = ct.convert(
+#         torch.jit.trace(lmhead, example_inputs=build_inputs_lmhead()),
+#         inputs=ct_inputs,
+#         outputs=ct_outputs,
+#         minimum_deployment_target=ct.target.iOS18,
+#         compute_units=ct.ComputeUnit.CPU_AND_NE,
+#     )
+#     output_path = f'{output_name}.mlpackage'
+#     if output_dir is not None:
+#         output_path = str(output_dir / output_path)
+#     mlmodel_lmhead.save(output_path)
+#     return output_name
 
 combined_base_name = _build_combined_base_name()
 output_dir = Path(combined_base_name)
@@ -256,8 +256,8 @@ with open(output_dir / 'config.yaml', 'w', encoding='utf-8') as f:
     f.write(f'basename: {combined_base_name}\n')
     f.write(f'num_chunks: {parser_args.chunks}\n')
 
-print("Converting LMHead")
-convert_and_save_coreml_lmhead(output_dir=output_dir)
+# print("Converting LMHead")
+# convert_and_save_coreml_lmhead(output_dir=output_dir)
 
 # Export combined models for each chunk (each containing decode and prefill functions).
 for chunk_idx, model in enumerate(models):
