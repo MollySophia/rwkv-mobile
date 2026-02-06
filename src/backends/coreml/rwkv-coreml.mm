@@ -15,6 +15,7 @@
 #include <cstring>
 #include <algorithm>
 #include <vector>
+#include <chrono>
 #include "half.hpp"
 
 struct rwkv_coreml_context {
@@ -172,8 +173,19 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
             NSURL *url_model = [NSURL fileURLWithPath:model_path];
 
             error = nil;
+            auto decode_start = std::chrono::steady_clock::now();
             MLModel *mlmodel_decode = [MLModel modelWithContentsOfURL:url_model configuration:config_decode error:&error];
+            auto decode_end = std::chrono::steady_clock::now();
+            double decode_ms = std::chrono::duration<double, std::milli>(decode_end - decode_start).count();
+            NSLog(@"Loaded chunk %d/%d (%@) decode: %.2f ms",
+                  chunk_idx + 1, num_chunks, model_name, decode_ms);
+
+            auto prefill_start = std::chrono::steady_clock::now();
             MLModel *mlmodel_prefill = [MLModel modelWithContentsOfURL:url_model configuration:config_prefill error:&error];
+            auto prefill_end = std::chrono::steady_clock::now();
+            double prefill_ms = std::chrono::duration<double, std::milli>(prefill_end - prefill_start).count();
+            NSLog(@"Loaded chunk %d/%d (%@) prefill: %.2f ms",
+                  chunk_idx + 1, num_chunks, model_name, prefill_ms);
             if (error || !mlmodel_decode || !mlmodel_prefill) {
                 NSLog(@"Error loading model %@: %@", model_name, error);
                 rwkv_coreml_free(ctx);
