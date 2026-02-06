@@ -409,6 +409,8 @@ if (ENABLE_COREML_BACKEND)
         src/backends/coreml/rwkv_coreml_impl.m
         src/backends/coreml/rwkv_coreml_singlechunk_impl.h
         src/backends/coreml/rwkv_coreml_singlechunk_impl.m
+        src/backends/coreml/lmhead.h
+        src/backends/coreml/lmhead.m
     )
 
     target_include_directories(rwkv_coreml PUBLIC src)
