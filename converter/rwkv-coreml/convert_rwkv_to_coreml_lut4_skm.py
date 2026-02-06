@@ -1,10 +1,12 @@
-from rwkv_src.rwkv_modeling import RWKV_RNN_Stateful, RWKV_LMHead, make_chunks_stateful
+from rwkv_src.rwkv_modeling import RWKV_RNN_Stateful, make_chunks_stateful
+from rwkv_src.rwkv_tokenizer import RWKV_TOKENIZER
 import coremltools as ct
-from coremltools.optimize.torch.quantization import PostTrainingQuantizer, PostTrainingQuantizerConfig
 from coremltools.optimize.torch.palettization import PostTrainingPalettizer, PostTrainingPalettizerConfig
+from coremltools.optimize.torch.palettization import SKMPalettizer, SKMPalettizerConfig
 from pathlib import Path
 import argparse, types, os, shutil
 import torch
+import torch.nn.functional as F
 import numpy as np
 
 parser = argparse.ArgumentParser(description='Export coreml model')
@@ -17,7 +19,6 @@ model_args.USE_CUDA = False
 model_args.fp16 = False
 model_args.USE_EMBEDDING = True
 model_args.SKIP_LMHEAD = False
-# model_args.SKIP_LMHEAD = True
 
 model_args.MODEL_NAME = str(parser_args.model).replace('.pth', '')
 if parser_args.chunks > 1:
@@ -25,6 +26,8 @@ if parser_args.chunks > 1:
 else:
     models = [RWKV_RNN_Stateful(model_args)]
 args = models[0].args
+
+tokenizer = RWKV_TOKENIZER("../../assets/rwkv_vocab_v20230424.txt")
 
 layers_for_chunk = []
 assert parser_args.chunks > 0, "chunks must be >= 1"
@@ -41,6 +44,7 @@ for i in range(parser_args.chunks):
     layers_for_chunk.append(layer_end - layer_start)
 
 PREFILL_SEQ_LENGTH = 32
+CALIB_SEQ_LENGTH = 4096
 
 def build_inputs_decode(chunk_idx: int = 0):
     if chunk_idx == 0:
@@ -60,9 +64,11 @@ def build_inputs_prefill(chunk_idx: int = 0):
             inputs.append(torch.zeros(1, PREFILL_SEQ_LENGTH, args.n_embd).to(models[0].device))
         return inputs
 
+num_samples = 64
 palettization_config_dict = {
     "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 32},
-    "module_name_configs": {}
+    "module_name_configs": {},
+    "calibration_nsamples": num_samples,
 }
 lut4_config = {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 16}
 palettization_config_dict["module_name_configs"]["blocks.*.att.key"] = lut4_config
@@ -73,11 +79,92 @@ palettization_config_dict["module_name_configs"]["blocks.*.att.output"] = lut4_c
 palettization_config_dict["module_name_configs"]["blocks.*.ffn.key"] = lut4_config
 palettization_config_dict["module_name_configs"]["blocks.*.ffn.value"] = lut4_config
 
-palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+palettization_config = SKMPalettizerConfig.from_dict(palettization_config_dict)
+
+with open("../../calibration_data_v5_rc.txt", "r", encoding="utf-8") as f:
+    calibration_data = f.readlines()
+    calibration_data = "\n".join(calibration_data)
+    calibration_data = tokenizer.encode(calibration_data)
+
+def _reset_state(model):
+    if hasattr(model, "state_tokenshift"):
+        model.state_tokenshift.zero_()
+    if hasattr(model, "state_wkv"):
+        model.state_wkv.zero_()
+
+def _run_model(model, inputs):
+    if isinstance(inputs, (tuple, list)):
+        return model(*inputs)
+    return model(inputs)
+
+def _unwrap_output(output):
+    if isinstance(output, (tuple, list)):
+        return output[0]
+    return output
+
+def _build_calibration_windows(tokens, seq_len, nsamples):
+    if len(tokens) < seq_len + 1:
+        raise ValueError(f"calibration_data too short for seq_len={seq_len}")
+    windows = []
+    stride = seq_len
+    start = 0
+    while start + seq_len + 1 <= len(tokens) and len(windows) < nsamples:
+        windows.append(tokens[start:start + seq_len + 1])
+        start += stride
+    return windows
+
+def _build_palettization_dataloaders(models, tokens, seq_len, nsamples):
+    token_windows = _build_calibration_windows(tokens, seq_len, nsamples)
+    dataloaders = [[] for _ in range(len(models))]
+    device = models[0].device
+    for model in models:
+        model.eval()
+
+    for window in token_windows:
+        input_ids = torch.tensor([window[:-1]], dtype=torch.int32, device=device)
+        target_ids = torch.tensor([window[1:]], dtype=torch.int64, device=device)
+
+        for model in models:
+            _reset_state(model)
+
+        if len(models) == 1:
+            dataloaders[0].append((input_ids, target_ids))
+            continue
+
+        with torch.no_grad():
+            out0, v_first = models[0](input_ids)
+
+        dataloaders[0].append((input_ids, out0.detach()))
+        prev = out0.detach()
+        v_first_detached = v_first.detach()
+
+        for chunk_idx in range(1, len(models)):
+            with torch.no_grad():
+                out = models[chunk_idx](prev, v_first_detached)
+
+            if chunk_idx == len(models) - 1:
+                dataloaders[chunk_idx].append(((prev, v_first_detached), target_ids))
+            else:
+                dataloaders[chunk_idx].append(((prev, v_first_detached), out.detach()))
+                prev = out.detach()
+
+    return dataloaders
+
+mse_loss_fn = lambda model, dat: F.mse_loss(_unwrap_output(_run_model(model, dat[0])), dat[1])
+nll_loss_fn = lambda model, dat: F.nll_loss(_unwrap_output(_run_model(model, dat[0])), dat[1])
+
+dataloaders = _build_palettization_dataloaders(
+    models,
+    calibration_data,
+    CALIB_SEQ_LENGTH,
+    palettization_config_dict["calibration_nsamples"],
+)
 
 for i in range(len(models)):
-    palettizer = PostTrainingPalettizer(models[i], palettization_config)
-    models[i] = palettizer.compress()
+    palettizer = SKMPalettizer(models[i], palettization_config)
+    loss_fn = nll_loss_fn if i == (len(models) - 1) else mse_loss_fn
+    models[i] = palettizer.compress(dataloader=dataloaders[i], loss_fn=loss_fn)
+
 
 def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
