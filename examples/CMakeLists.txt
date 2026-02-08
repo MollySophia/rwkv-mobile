@@ -75,9 +75,6 @@ endif()
 add_executable(test_soc_detect test_soc_detect.cpp ../src/c_api.cpp)
 target_link_libraries(test_soc_detect PUBLIC rwkv_mobile_internal)
 
-add_executable(test_vocab_loading test_vocab_loading.cpp)
-target_link_libraries(test_vocab_loading PUBLIC rwkv_mobile_internal)
-
 add_executable(simple_benchmark simple_benchmark.cpp)
 target_link_libraries(simple_benchmark PUBLIC rwkv_mobile_internal)
 
