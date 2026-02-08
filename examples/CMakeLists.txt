@@ -94,3 +94,8 @@ target_link_libraries(test_state_loading PUBLIC rwkv_mobile_internal)
 
 add_executable(test_multiple_models test_multiple_models.cpp ../src/c_api.cpp)
 target_link_libraries(test_multiple_models PUBLIC rwkv_mobile_internal)
+
+if (ENABLE_SERVER)
+    add_executable(rwkv_server rwkv_server.cpp ../src/c_api.cpp)
+    target_link_libraries(rwkv_server PUBLIC rwkv_mobile_internal)
+endif()

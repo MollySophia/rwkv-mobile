@@ -12,8 +12,8 @@ NucleusSampler::NucleusSampler() {
     _temperature = std::vector<float>(_max_batch_size, 1.0f);
     _top_k = std::vector<int>(_max_batch_size, 128);
     _top_p = std::vector<float>(_max_batch_size, 0.5f);
-    _presence_penalty = std::vector<float>(_max_batch_size, 0.5f);
-    _frequency_penalty = std::vector<float>(_max_batch_size, 0.5f);
+    _presence_penalty = std::vector<float>(_max_batch_size, 2.0f);
+    _frequency_penalty = std::vector<float>(_max_batch_size, 0.2f);
     _penalty_decay = std::vector<float>(_max_batch_size, 0.996f);
 }
 

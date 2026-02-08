@@ -2,6 +2,7 @@
 #define C_API_H
 
 typedef void * rwkvmobile_runtime_t;
+typedef void * rwkvmobile_server_t;
 
 struct sampler_params {
     float temperature;
@@ -18,6 +19,26 @@ struct penalty_params {
 struct token_ids {
     int * ids;
     int len;
+};
+
+struct rwkvmobile_server_config {
+    const char * host;
+    int port;
+    int threads;
+    const char * model_name;
+    int default_max_tokens;
+    float temperature;
+    int top_k;
+    float top_p;
+    float presence_penalty;
+    float frequency_penalty;
+    float penalty_decay;
+    int has_temperature;
+    int has_top_k;
+    int has_top_p;
+    int has_presence_penalty;
+    int has_frequency_penalty;
+    int has_penalty_decay;
 };
 
 struct response_buffer {
@@ -88,6 +109,16 @@ int rwkvmobile_runtime_get_available_backend_names(char * backend_names_buffer, 
 rwkvmobile_runtime_t rwkvmobile_runtime_init();
 
 int rwkvmobile_runtime_release(rwkvmobile_runtime_t runtime);
+
+struct rwkvmobile_server_config rwkvmobile_server_config_default();
+
+rwkvmobile_server_t rwkvmobile_server_start(rwkvmobile_runtime_t runtime, int model_id, const struct rwkvmobile_server_config * config);
+
+int rwkvmobile_server_stop(rwkvmobile_server_t server);
+
+int rwkvmobile_server_wait(rwkvmobile_server_t server);
+
+int rwkvmobile_server_release(rwkvmobile_server_t server);
 
 int rwkvmobile_runtime_load_model(rwkvmobile_runtime_t runtime, const char * model_path, const char * backend_name, const char * tokenizer_path);
 

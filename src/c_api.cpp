@@ -3,6 +3,10 @@
 #include "c_api.h"
 #include "logger.h"
 #include "soc_detect.h"
+#ifdef ENABLE_SERVER
+#include "rwkv_http_server.h"
+#endif
+#include <memory>
 #include <cstring>
 #include <cstdlib>
 #include <thread>
@@ -14,6 +18,60 @@
 namespace rwkvmobile {
 
 extern "C" {
+
+struct rwkvmobile_server_config rwkvmobile_server_config_default() {
+    struct rwkvmobile_server_config cfg;
+    cfg.host = "0.0.0.0";
+    cfg.port = 8000;
+    cfg.threads = 0;
+    cfg.model_name = "rwkv";
+    cfg.default_max_tokens = 256;
+    cfg.temperature = 1.0f;
+    cfg.top_k = 1;
+    cfg.top_p = 1.0f;
+    cfg.presence_penalty = 0.0f;
+    cfg.frequency_penalty = 0.0f;
+    cfg.penalty_decay = 0.0f;
+    cfg.has_temperature = 0;
+    cfg.has_top_k = 0;
+    cfg.has_top_p = 0;
+    cfg.has_presence_penalty = 0;
+    cfg.has_frequency_penalty = 0;
+    cfg.has_penalty_decay = 0;
+    return cfg;
+}
+
+#ifdef ENABLE_SERVER
+struct RwkvServerHandle {
+    std::unique_ptr<rwkvmobile::RwkvHttpServer> server;
+};
+
+static rwkvmobile::HttpServerConfig convert_server_config(const struct rwkvmobile_server_config * config) {
+    struct rwkvmobile_server_config cfg = rwkvmobile_server_config_default();
+    if (config != nullptr) {
+        cfg = *config;
+    }
+    rwkvmobile::HttpServerConfig out;
+    out.host = cfg.host != nullptr ? cfg.host : "0.0.0.0";
+    out.port = cfg.port;
+    out.threads = cfg.threads;
+    out.model_name = cfg.model_name != nullptr ? cfg.model_name : "rwkv";
+    out.default_max_tokens = cfg.default_max_tokens;
+    out.temperature = cfg.temperature;
+    out.top_k = cfg.top_k;
+    out.top_p = cfg.top_p;
+    out.presence_penalty = cfg.presence_penalty;
+    out.frequency_penalty = cfg.frequency_penalty;
+    out.penalty_decay = cfg.penalty_decay;
+    out.has_temperature = cfg.has_temperature != 0;
+    out.has_top_k = cfg.has_top_k != 0;
+    out.has_top_p = cfg.has_top_p != 0;
+    out.has_presence_penalty = cfg.has_presence_penalty != 0;
+    out.has_frequency_penalty = cfg.has_frequency_penalty != 0;
+    out.has_penalty_decay = cfg.has_penalty_decay != 0;
+    return out;
+}
+#endif
 
 rwkvmobile_runtime_t rwkvmobile_runtime_init() {
     Runtime * rt = new Runtime();
@@ -28,6 +86,67 @@ int rwkvmobile_runtime_release(rwkvmobile_runtime_t handle) {
     int ret = rt->release();
     delete rt;
     return ret;
+}
+
+rwkvmobile_server_t rwkvmobile_server_start(rwkvmobile_runtime_t runtime, int model_id, const struct rwkvmobile_server_config * config) {
+    if (runtime == nullptr || model_id < 0) {
+        return nullptr;
+    }
+#ifdef ENABLE_SERVER
+    auto rt = static_cast<class Runtime *>(runtime);
+    auto cfg = convert_server_config(config);
+    auto handle = std::make_unique<RwkvServerHandle>();
+    handle->server = std::make_unique<rwkvmobile::RwkvHttpServer>(rt, model_id, cfg);
+    int ret = handle->server->start();
+    if (ret != RWKV_SUCCESS) {
+        return nullptr;
+    }
+    return handle.release();
+#else
+    (void)runtime;
+    (void)model_id;
+    (void)config;
+    return nullptr;
+#endif
+}
+
+int rwkvmobile_server_stop(rwkvmobile_server_t server) {
+    if (server == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+#ifdef ENABLE_SERVER
+    auto handle = static_cast<RwkvServerHandle *>(server);
+    return handle->server->stop();
+#else
+    return RWKV_ERROR_UNSUPPORTED;
+#endif
+}
+
+int rwkvmobile_server_wait(rwkvmobile_server_t server) {
+    if (server == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+#ifdef ENABLE_SERVER
+    auto handle = static_cast<RwkvServerHandle *>(server);
+    return handle->server->wait();
+#else
+    return RWKV_ERROR_UNSUPPORTED;
+#endif
+}
+
+int rwkvmobile_server_release(rwkvmobile_server_t server) {
+    if (server == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+#ifdef ENABLE_SERVER
+    auto handle = static_cast<RwkvServerHandle *>(server);
+    handle->server->stop();
+    handle->server->wait();
+    delete handle;
+    return RWKV_SUCCESS;
+#else
+    return RWKV_ERROR_UNSUPPORTED;
+#endif
 }
 
 int rwkvmobile_runtime_load_model(rwkvmobile_runtime_t handle, const char * model_path, const char * backend_name, const char * tokenizer_path) {
