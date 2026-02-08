@@ -60,6 +60,7 @@ struct ModelInstance {
     // Add other per-model states here, e.g., chat templates, stop codes etc.
     std::string user_role = "User";
     std::string response_role = "Assistant";
+    std::string system_role = "System";
     std::string bos_token = "";
     std::string eos_token = "\n\n";
     std::vector<std::string> stop_codes = {"\n\n", "\nUser", "User"};
@@ -120,8 +121,8 @@ public:
     int eval_logits_batch_decode(int model_id, std::vector<int> ids, Tensor1D & logits);
 
     // with history
-    int chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *) = nullptr, bool enable_reasoning = false, bool force_reasoning = false, int force_lang = 0);
-    int chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **) = nullptr, bool enable_reasoning = false, bool force_reasoning = false, int force_lang = 0);
+    int chat(int model_id, std::vector<std::string> inputs, const int max_length, void (*callback)(const char *, const int, const char *) = nullptr, bool enable_reasoning = false, bool force_reasoning = false, int force_lang = 0, std::vector<std::string> roles_map = {});
+    int chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size, void (*callback_batch)(const int, const char **, const int*, const char **) = nullptr, bool enable_reasoning = false, bool force_reasoning = false, int force_lang = 0, std::vector<std::vector<std::string>> roles_map = {});
     int gen_completion(int model_id, std::string prompt, int max_length, int stop_code, void (*callback)(const char *, const int, const char *));
     int gen_completion_batch(int model_id, std::vector<std::string> prompts, int batch_size, int max_length, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **));
     int gen_completion_singletoken_topk(int model_id, std::string prompt, int top_k, std::vector<std::string> &candidate_output_texts, void (*callback)(const char *, const int, const char *));
@@ -243,7 +244,7 @@ public:
     std::string get_eos_token(int model_id);
     bool get_space_after_roles(int model_id);
 
-    std::string apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning = false);
+    std::string apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning = false, std::vector<std::string> roles_map = {});
 
     struct TokenChunk {
         std::vector<int> tokens;

@@ -108,7 +108,8 @@ int rwkvmobile_runtime_eval_chat_with_history_async(
             callback,
             enable_reasoning != 0,
             force_reasoning != 0,
-            force_lang);
+            force_lang,
+            {});
         return ret;
     });
 
@@ -152,7 +153,8 @@ int rwkvmobile_runtime_eval_chat_batch_with_history_async(
             callback_batch,
             enable_reasoning != 0,
             force_reasoning != 0,
-            force_lang);
+            force_lang,
+            {});
         return ret;
     });
 

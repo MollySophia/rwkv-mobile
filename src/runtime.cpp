@@ -616,7 +616,7 @@ std::vector<int> Runtime::get_supported_batch_sizes(int model_id) {
     return model->backend->supported_batch_sizes;
 }
 
-std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning) {
+std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning, std::vector<std::string> roles_map) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -633,27 +633,51 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
     };
 
     auto space_after_roles = get_space_after_roles(model_id);
-    std::string text = model->prompt;
-    for (int i = 0; i < inputs.size(); i++) {
-        if (i % 2 == 0) {
-            auto user_text = inputs[i];
-            user_text = replace_text(user_text, "\r\n", "\n");
-            user_text = replace_text(user_text, "\n\n", "\n");
-
-            text += model->bos_token + model->user_role + ":" + (space_after_roles ? " " : "") + inputs[i] + model->eos_token;
-        } else {
-            if (i == inputs.size() - 1) {
-                text += model->bos_token + model->response_role + ":" + (space_after_roles ? " " : "") + inputs[i];
-            } else {
-                text += model->bos_token + model->response_role + ":" + (space_after_roles ? " " : "") + inputs[i] + model->eos_token;
-            }
+    auto normalize_role = [&](const std::string &role) -> std::string {
+        if (role == "user") {
+            return model->user_role;
+        }
+        if (role == "assistant") {
+            return model->response_role;
+        }
+        if (role == "system") {
+            return model->system_role;
+        }
+        return role;
+    };
+    std::vector<std::string> resolved_roles;
+    if (roles_map.size() == inputs.size()) {
+        resolved_roles = roles_map;
+    } else {
+        resolved_roles.resize(inputs.size());
+        for (size_t i = 0; i < inputs.size(); i++) {
+            resolved_roles[i] = (i % 2 == 0) ? "user" : "assistant";
         }
     }
 
-    if (inputs.size() % 2 != 0) {
-        text += model->bos_token + model->response_role + ":";
-        if (enable_reasoning) {
-            text += (space_after_roles ? " " : "") + model->thinking_token;
+    std::string text = model->prompt;
+    for (size_t i = 0; i < inputs.size(); i++) {
+        std::string content = inputs[i];
+
+        std::string role = normalize_role(resolved_roles[i]);
+        if (role == model->user_role || role == "User" || role == model->system_role || role == "System") {
+            content = replace_text(content, "\r\n", "\n");
+            content = replace_text(content, "\n\n", "\n");
+        }
+
+        text += model->bos_token + role + ":" + (space_after_roles ? " " : "") + content;
+        if (!(i == inputs.size() - 1 && role == model->response_role)) {
+            text += model->eos_token;
+        }
+    }
+
+    if (!inputs.empty()) {
+        std::string last_role = normalize_role(resolved_roles.back());
+        if (last_role != model->response_role) {
+            text += model->bos_token + model->response_role + ":";
+            if (enable_reasoning) {
+                text += (space_after_roles ? " " : "") + model->thinking_token;
+            }
         }
     }
     return text;
@@ -1000,7 +1024,7 @@ std::string Runtime::get_state_cache_info(int model_id) {
 
 int Runtime::chat(int model_id, std::vector<std::string> inputs,
     const int max_length, void (*callback)(const char *, const int, const char *),
-    bool enable_reasoning, bool force_reasoning, int force_lang) {
+    bool enable_reasoning, bool force_reasoning, int force_lang, std::vector<std::string> roles_map) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1021,7 +1045,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
         LOGI("forcing output language to Chinese\n");
     }
 
-    auto input_text = apply_chat_template(model_id, inputs, enable_reasoning);
+    auto input_text = apply_chat_template(model_id, inputs, enable_reasoning, roles_map);
     LOGD("Applied chat template: \"%s\"\n", input_text.c_str());
     std::vector<int> text_ids = model->tokenizer->encode(input_text);
     std::string debug_msg = "text_ids: ";
@@ -1105,10 +1129,34 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     int ret;
 
     model->sampler->clear_occurences();
-    if (inputs.size() % 2 == 0) {
-        std::vector<int> ids = model->tokenizer->encode(" " + inputs[inputs.size() - 1]);
-        for (auto id: ids) {
-            model->sampler->update_occurences(id);
+    if (!inputs.empty()) {
+        auto normalize_role = [&](const std::string &role) -> std::string {
+            if (role == "user") {
+                return model->user_role;
+            }
+            if (role == "assistant") {
+                return model->response_role;
+            }
+            if (role == "system") {
+                return model->system_role;
+            }
+            return role;
+        };
+        std::vector<std::string> resolved_roles;
+        if (roles_map.size() == inputs.size()) {
+            resolved_roles = roles_map;
+        } else {
+            resolved_roles.resize(inputs.size());
+            for (size_t i = 0; i < inputs.size(); i++) {
+                resolved_roles[i] = (i % 2 == 0) ? "user" : "assistant";
+            }
+        }
+        std::string last_role = normalize_role(resolved_roles.back());
+        if (last_role == model->response_role) {
+            std::vector<int> ids = model->tokenizer->encode(" " + inputs[inputs.size() - 1]);
+            for (auto id: ids) {
+                model->sampler->update_occurences(id);
+            }
         }
     }
 
@@ -1213,7 +1261,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
 int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inputs,
     const int max_length, const int batch_size,
     void (*callback_batch)(const int, const char **, const int*, const char **),
-    bool enable_reasoning, bool force_reasoning, int force_lang) {
+    bool enable_reasoning, bool force_reasoning, int force_lang, std::vector<std::vector<std::string>> roles_map) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -1294,9 +1342,26 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     auto num_vocab = model->backend->get_num_vocab();
 
     // prefill for each batch
+    auto normalize_role = [&](const std::string &role) -> std::string {
+        if (role == "user") {
+            return model->user_role;
+        }
+        if (role == "assistant") {
+            return model->response_role;
+        }
+        if (role == "system") {
+            return model->system_role;
+        }
+        return role;
+    };
+
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
         auto &input = inputs[batch_idx];
-        input_texts[batch_idx] = apply_chat_template(model_id, input, enable_reasoning);
+        std::vector<std::string> batch_roles;
+        if (roles_map.size() == inputs.size() && roles_map[batch_idx].size() == input.size()) {
+            batch_roles = roles_map[batch_idx];
+        }
+        input_texts[batch_idx] = apply_chat_template(model_id, input, enable_reasoning, batch_roles);
         LOGD("Applied chat template for batch %d: \"%s\"\n", batch_idx, input_texts[batch_idx].c_str());
         text_ids_batch[batch_idx] = model->tokenizer->encode(input_texts[batch_idx]);
 
@@ -1347,6 +1412,25 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
             model->is_generating = false;
             LOGE("failed to snapshot prefill logits for batch %d\n", batch_idx);
             return ret;
+        }
+
+        if (!input.empty()) {
+            std::vector<std::string> resolved_roles;
+            if (!batch_roles.empty()) {
+                resolved_roles = batch_roles;
+            } else {
+                resolved_roles.resize(input.size());
+                for (size_t i = 0; i < input.size(); i++) {
+                    resolved_roles[i] = (i % 2 == 0) ? "user" : "assistant";
+                }
+            }
+            std::string last_role = normalize_role(resolved_roles.back());
+            if (last_role == model->response_role) {
+                std::vector<int> ids = model->tokenizer->encode(" " + input.back());
+                for (auto id: ids) {
+                    occurences_batch[batch_idx][id]++;
+                }
+            }
         }
 
         is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
