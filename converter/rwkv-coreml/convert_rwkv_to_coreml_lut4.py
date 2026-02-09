@@ -38,7 +38,7 @@ for i in range(parser_args.chunks):
     layer_end = min(args.n_layer, layer_start + layers_in_chunk)
     layers_for_chunk.append(layer_end - layer_start)
 
-PREFILL_SEQ_LENGTH = 32
+PREFILL_SEQ_LENGTH = 16
 
 def build_inputs_decode(chunk_idx: int = 0):
     if chunk_idx == 0:
@@ -62,14 +62,15 @@ palettization_config_dict = {
     "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 32},
     "module_name_configs": {}
 }
-lut4_config = {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 16}
-palettization_config_dict["module_name_configs"]["blocks.*.att.key"] = lut4_config
-palettization_config_dict["module_name_configs"]["blocks.*.att.value"] = lut4_config
-palettization_config_dict["module_name_configs"]["blocks.*.att.receptance"] = lut4_config
-palettization_config_dict["module_name_configs"]["blocks.*.att.gate"] = lut4_config
-palettization_config_dict["module_name_configs"]["blocks.*.att.output"] = lut4_config
-palettization_config_dict["module_name_configs"]["blocks.*.ffn.key"] = lut4_config
-palettization_config_dict["module_name_configs"]["blocks.*.ffn.value"] = lut4_config
+lut4_group8_config = {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 8}
+lut4_group4_config = {"n_bits": 4, "granularity": "per_grouped_channel", "group_size": 4}
+palettization_config_dict["module_name_configs"]["blocks.*.att.key"] = lut4_group8_config
+palettization_config_dict["module_name_configs"]["blocks.*.att.value"] = lut4_group8_config
+# palettization_config_dict["module_name_configs"]["blocks.*.att.receptance"] = lut4_group8_config
+palettization_config_dict["module_name_configs"]["blocks.*.att.gate"] = lut4_group8_config
+# palettization_config_dict["module_name_configs"]["blocks.*.att.output"] = lut4_group8_config
+palettization_config_dict["module_name_configs"]["blocks.*.ffn.key"] = lut4_group8_config
+# palettization_config_dict["module_name_configs"]["blocks.*.ffn.value"] = lut4_group4_config
 
 palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
 
