@@ -161,6 +161,63 @@ int rwkvmobile_runtime_load_model_with_extra(rwkvmobile_runtime_t handle, const 
     return rt->load_model(model_path, backend_name, tokenizer_path, extra);
 }
 
+int rwkvmobile_runtime_load_model_async(rwkvmobile_runtime_t handle, const char * model_path, const char * backend_name, const char * tokenizer_path) {
+    return rwkvmobile_runtime_load_model_with_extra_async(handle, model_path, backend_name, tokenizer_path, nullptr);
+}
+
+int rwkvmobile_runtime_load_model_with_extra_async(rwkvmobile_runtime_t handle, const char * model_path, const char * backend_name, const char * tokenizer_path, void * extra) {
+    if (handle == nullptr || model_path == nullptr || backend_name == nullptr || tokenizer_path == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto rt = static_cast<class Runtime *>(handle);
+    if (rt->is_loading_model()) {
+        LOGE("Model is already loading");
+        return RWKV_ERROR_RUNTIME;
+    }
+    std::string path(model_path);
+    std::string backend(backend_name);
+    std::string tokenizer(tokenizer_path);
+    rt->start_load_model_async();
+    std::thread load_thread([rt, path, backend, tokenizer, extra]() {
+        int ret = rt->load_model(path, backend, tokenizer, extra);
+        int result_code = (ret >= 0) ? RWKV_SUCCESS : ret;
+        int model_id = (ret >= 0) ? ret : -1;
+        rt->set_load_model_result(result_code, model_id);
+    });
+    load_thread.detach();
+    return RWKV_SUCCESS;
+}
+
+int rwkvmobile_runtime_is_loading_model(rwkvmobile_runtime_t runtime) {
+    if (runtime == nullptr) {
+        return 0;
+    }
+    auto rt = static_cast<class Runtime *>(runtime);
+    return rt->is_loading_model() ? 1 : 0;
+}
+
+void rwkvmobile_runtime_get_load_model_status(rwkvmobile_runtime_t runtime, int * result_code, int * model_id) {
+    if (runtime == nullptr || result_code == nullptr || model_id == nullptr) {
+        return;
+    }
+    auto rt = static_cast<class Runtime *>(runtime);
+    if (rt->is_loading_model()) {
+        return;
+    }
+    int code = 0, id = -1;
+    rt->get_load_model_result(code, id);
+    *result_code = code;
+    *model_id = id;
+}
+
+float rwkvmobile_runtime_get_load_model_progress(rwkvmobile_runtime_t runtime) {
+    if (runtime == nullptr) {
+        return -1.f;
+    }
+    auto rt = static_cast<class Runtime *>(runtime);
+    return rt->get_load_model_progress();
+}
+
 int rwkvmobile_runtime_release_model(rwkvmobile_runtime_t handle, int model_id) {
     if (handle == nullptr || model_id < 0) {
         return RWKV_ERROR_INVALID_PARAMETERS;

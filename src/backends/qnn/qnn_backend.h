@@ -6,6 +6,7 @@
 #include "rwkv-qualcomm/Utils/IOTensor.hpp"
 #include "rmpack.h"
 
+#include <atomic>
 #include <mutex>
 
 #ifdef ENABLE_MNN
@@ -53,6 +54,7 @@ public:
 
     int init(void * extra) override;
     int load_model(std::string model_path, void * extra = nullptr) override;
+    float get_load_progress() const override;
     int eval(int id, Tensor1D & logits) override;
     int eval(std::vector<int> ids, Tensor1D & logits) override;
     int eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) override;
@@ -212,6 +214,10 @@ private:
 #endif
 
     RMPackReader *rmpack = nullptr;
+
+    // load progress (chunk-based)
+    std::atomic<int> _load_total_chunks{0};
+    std::atomic<int> _load_done_chunks{0};
 
     // Helpers for dynamic batch decode processing
     static int parse_bsz_from_graph_name(const std::string &graphName);

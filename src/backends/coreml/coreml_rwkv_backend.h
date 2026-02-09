@@ -14,6 +14,7 @@ public:
     }
     int init(void * extra) override;
     int load_model(std::string model_path, void * extra) override;
+    float get_load_progress() const override;
     int eval(int id, Tensor1D & logits) override;
     int eval(std::vector<int> ids, Tensor1D & logits) override;
     bool is_available() override;

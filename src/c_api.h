@@ -124,6 +124,16 @@ int rwkvmobile_runtime_load_model(rwkvmobile_runtime_t runtime, const char * mod
 
 int rwkvmobile_runtime_load_model_with_extra(rwkvmobile_runtime_t runtime, const char * model_path, const char * backend_name, const char * tokenizer_path, void * extra);
 
+int rwkvmobile_runtime_load_model_async(rwkvmobile_runtime_t runtime, const char * model_path, const char * backend_name, const char * tokenizer_path);
+
+int rwkvmobile_runtime_load_model_with_extra_async(rwkvmobile_runtime_t runtime, const char * model_path, const char * backend_name, const char * tokenizer_path, void * extra);
+
+int rwkvmobile_runtime_is_loading_model(rwkvmobile_runtime_t runtime);
+
+void rwkvmobile_runtime_get_load_model_status(rwkvmobile_runtime_t runtime, int * result_code, int * model_id);
+
+float rwkvmobile_runtime_get_load_model_progress(rwkvmobile_runtime_t runtime);
+
 int rwkvmobile_runtime_release_model(rwkvmobile_runtime_t runtime, int model_id);
 
 int rwkvmobile_runtime_eval_logits(rwkvmobile_runtime_t runtime, int model_id, const int *ids, int ids_len, float * logits, int logits_len);

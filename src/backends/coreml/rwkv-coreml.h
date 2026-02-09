@@ -7,6 +7,8 @@ struct rwkv_coreml_context;
 struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model);
 void rwkv_coreml_free(struct rwkv_coreml_context * ctx);
 
+float rwkv_coreml_get_load_progress(struct rwkv_coreml_context * ctx);
+
 void* rwkv_coreml_decode(
         struct rwkv_coreml_context * ctx,
         int token);

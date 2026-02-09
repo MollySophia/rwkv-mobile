@@ -281,8 +281,16 @@ int Runtime::load_model(std::string model_path, std::string backend_name, std::s
         return ret_model_id;
     }
 
-    // 2. Load model
+    // 2. Load model (expose backend for progress polling during async load)
+    {
+        std::lock_guard<std::mutex> lock(_loading_backend_mutex);
+        _loading_backend = model_instance->backend.get();
+    }
     ret = model_instance->backend->load_model(model_path, extra);
+    {
+        std::lock_guard<std::mutex> lock(_loading_backend_mutex);
+        _loading_backend = nullptr;
+    }
     if (ret) {
         LOGE("Failed to load model from: %s, errno = %d\n", model_path.c_str(), ret);
         return ret_model_id;
@@ -346,6 +354,42 @@ int Runtime::release_model(int model_id) {
     }
     _models.erase(model_id);
     return RWKV_SUCCESS;
+}
+
+void Runtime::start_load_model_async() {
+    _load_model_in_progress.store(true);
+}
+
+void Runtime::set_load_model_result(int result_code, int model_id) {
+    std::lock_guard<std::mutex> lock(_load_model_result_mutex);
+    _load_model_result_code = result_code;
+    _load_model_result_id = model_id;
+    _load_model_in_progress.store(false);
+}
+
+void Runtime::get_load_model_result(int& result_code, int& model_id) const {
+    std::lock_guard<std::mutex> lock(_load_model_result_mutex);
+    result_code = _load_model_result_code;
+    model_id = _load_model_result_id;
+}
+
+float Runtime::get_load_model_progress() const {
+    execution_provider* ep = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(_loading_backend_mutex);
+        ep = _loading_backend;
+    }
+    if (ep) {
+        float p = ep->get_load_progress();
+        if (p >= 0.f) {
+            return std::max(0.f, std::min(1.f, p));
+        }
+        return 0.1f;
+    }
+    if (_load_model_in_progress.load()) {
+        return 0.1f;
+    }
+    return 1.0f;
 }
 
 #ifdef ENABLE_VISION
@@ -3218,6 +3262,20 @@ void Runtime::set_response_role(int model_id, std::string role) {
     }
     auto &model = _models.at(model_id);
     model->response_role = role;
+}
+
+std::string Runtime::get_user_role(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return "";
+    }
+    return _models.at(model_id)->user_role;
+}
+
+std::string Runtime::get_response_role(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return "";
+    }
+    return _models.at(model_id)->response_role;
 }
 
 void Runtime::set_bos_token(int model_id, std::string token) {

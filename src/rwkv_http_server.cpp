@@ -271,6 +271,37 @@ int RwkvHttpServer::start() {
         res.set_content(response.dump(), "application/json; charset=utf-8");
     });
 
+    impl_->server.Get("/v1/chat/roles", [this](const httplib::Request &, httplib::Response & res) {
+        json response = {
+            {"user_role", impl_->runtime->get_user_role(impl_->model_id)},
+            {"assistant_role", impl_->runtime->get_response_role(impl_->model_id)},
+            {"model", impl_->config.model_name}
+        };
+        res.set_content(response.dump(), "application/json; charset=utf-8");
+    });
+
+    impl_->server.Post("/v1/chat/roles", [this](const httplib::Request & req, httplib::Response & res) {
+        json body;
+        try {
+            body = json::parse(req.body);
+        } catch (const std::exception & e) {
+            set_error_response(res, 400, std::string("invalid JSON: ") + e.what(), "invalid_request_error");
+            return;
+        }
+        if (body.contains("user_role") && body["user_role"].is_string()) {
+            impl_->runtime->set_user_role(impl_->model_id, body["user_role"].get<std::string>());
+        }
+        if (body.contains("assistant_role") && body["assistant_role"].is_string()) {
+            impl_->runtime->set_response_role(impl_->model_id, body["assistant_role"].get<std::string>());
+        }
+        json response = {
+            {"user_role", impl_->runtime->get_user_role(impl_->model_id)},
+            {"assistant_role", impl_->runtime->get_response_role(impl_->model_id)},
+            {"model", impl_->config.model_name}
+        };
+        res.set_content(response.dump(), "application/json; charset=utf-8");
+    });
+
     impl_->server.Post("/v1/completions", [this](const httplib::Request & req, httplib::Response & res) {
         auto lock = std::make_shared<std::unique_lock<std::mutex>>(impl_->generation_mutex);
         json body;

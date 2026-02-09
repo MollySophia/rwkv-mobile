@@ -10,6 +10,7 @@
 #include <any>
 #include <thread>
 #include <mutex>
+#include <atomic>
 #include <cstdint>
 #include "backend.h"
 #include "tokenizer.h"
@@ -381,11 +382,26 @@ public:
     std::map<int, std::map<std::string, std::string>> get_loaded_models_info();
     std::string& get_model_path_by_id(int model_id);
 
+    // async load model status (for rwkvmobile_runtime_load_model_async)
+    bool is_loading_model() const { return _load_model_in_progress.load(); }
+    void start_load_model_async();
+    void set_load_model_result(int result_code, int model_id);
+    void get_load_model_result(int& result_code, int& model_id) const;
+    float get_load_model_progress() const;
+
     // misc
     inline void set_cache_dir(std::string cache_dir) { _cache_dir = cache_dir; }
 
 private:
     std::map<int, std::unique_ptr<ModelInstance>> _models;
+
+    // async load model state
+    std::atomic<bool> _load_model_in_progress{false};
+    mutable std::mutex _load_model_result_mutex;
+    int _load_model_result_code = 0;
+    int _load_model_result_id = -1;
+    execution_provider* _loading_backend = nullptr;
+    mutable std::mutex _loading_backend_mutex;
 
 #ifdef ENABLE_LLAMACPP
     std::unique_ptr<rwkv_embedding> _embedding;

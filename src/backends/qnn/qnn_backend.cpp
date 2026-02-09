@@ -542,6 +542,8 @@ int qnn_backend::init(void * extra) {
 }
 
 int qnn_backend::load_model(std::string model_path, void * extra) {
+    _load_total_chunks = 0;
+    _load_done_chunks = 0;
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
@@ -595,6 +597,8 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
         buffer.resize(n_chunks);
         bufferSizes.resize(n_chunks);
         qnnContextHandles.resize(n_chunks);
+        _load_total_chunks = n_chunks;
+        _load_done_chunks = 0;
 
         int returnStatus = RWKV_SUCCESS;
         std::vector<GraphInfo_t **> graphInfos(n_chunks);
@@ -784,6 +788,7 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
             if (RWKV_SUCCESS == returnStatus && i == 0) {
                 first_contextHandle = qnnContextHandles[i];
             }
+            _load_done_chunks = i + 1;
         }
 
         buffer.clear();
@@ -1186,6 +1191,13 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
         }
     }
     return RWKV_SUCCESS;
+}
+
+float qnn_backend::get_load_progress() const {
+    int total = _load_total_chunks.load();
+    if (total <= 0) return -1.f;
+    int done = _load_done_chunks.load();
+    return std::max(0.f, std::min(1.f, static_cast<float>(done) / static_cast<float>(total)));
 }
 
 void qnn_backend::fill_quantized_tensor(float value, Qnn_Tensor_t *tensor) {

@@ -25,6 +25,11 @@ int coreml_rwkv_backend::load_model(std::string model_path, void * extra) {
     return RWKV_SUCCESS;
 }
 
+float coreml_rwkv_backend::get_load_progress() const {
+    if (!ctx) return -1.f;
+    return rwkv_coreml_get_load_progress(ctx);
+}
+
 int coreml_rwkv_backend::eval(int id, Tensor1D & logits) {
     void* logits_ptr = rwkv_coreml_decode(ctx, id);
     logits = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
