@@ -26,6 +26,7 @@ option(ENABLE_TTS "Enable TTS" OFF)
 
 option(BUILD_EXAMPLES "Build examples" ON)
 option(BUILD_STATIC_LIB "Build static library" OFF)
+option(ENABLE_SERVER "Enable built-in HTTP server" ON)
 
 if (ENABLE_TTS AND NOT ENABLE_MNN_BACKEND)
     message(FATAL_ERROR "TTS requires MNN backend")
@@ -54,6 +55,10 @@ set(RWKV_MOBILE_SRCS
     src/rmpack.cpp
     src/backend.cpp
 )
+
+if (ENABLE_SERVER)
+    set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS} src/rwkv_http_server.cpp)
+endif()
 
 if (WIN32)
     set(CMAKE_LINK_LIBRARY_USING_WHOLE_ARCHIVE "/WHOLEARCHIVE:<LIBRARY>")
@@ -584,6 +589,26 @@ endif()
 
 if (BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if (ENABLE_SERVER)
+    FetchContent_Declare(
+        cpp_httplib
+        GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+        GIT_TAG master
+    )
+    option(HTTPLIB_USE_ZSTD_IF_AVAILABLE "" OFF)
+    FetchContent_MakeAvailable(cpp_httplib)
+
+    target_compile_definitions(rwkv_mobile_internal PUBLIC ENABLE_SERVER)
+    if (TARGET httplib::httplib)
+        target_link_libraries(rwkv_mobile_internal PUBLIC httplib::httplib)
+    else()
+        target_link_libraries(rwkv_mobile_internal PUBLIC httplib)
+    endif()
+    if (WIN32)
+        target_link_libraries(rwkv_mobile_internal PUBLIC ws2_32)
+    endif()
 endif()
 
 if (DEFINED ANDROID_NDK)
