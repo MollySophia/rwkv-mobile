@@ -64,7 +64,7 @@ struct ModelInstance {
     std::string system_role = "System";
     std::string bos_token = "";
     std::string eos_token = "\n\n";
-    std::vector<std::string> stop_codes = {"\n\n", "\nUser", "User"};
+    std::vector<std::string> stop_codes = {"\n\n", "\nUser"};
     std::string thinking_token = "<think";
     bool space_after_roles = true;
 
