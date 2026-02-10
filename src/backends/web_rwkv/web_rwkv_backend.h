@@ -82,6 +82,7 @@ private:
     std::atomic<float> _load_progress_real{-1.f};
     mutable std::mutex _load_progress_mutex;
     mutable float _load_progress_reported = 0.f;
+    mutable float _load_progress_step = 0.1f;  // >=0.5 时使用的步长，从 0.1 逐渐减小
 };
 
 }

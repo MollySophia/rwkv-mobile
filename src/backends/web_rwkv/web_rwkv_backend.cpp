@@ -73,6 +73,7 @@ int web_rwkv_backend::load_model(std::string model_path, void * extra) {
         {
             std::lock_guard<std::mutex> lock(_load_progress_mutex);
             _load_progress_reported = 0.f;
+            _load_progress_step = 0.1f;
         }
         g_loading_web_rwkv_backend = this;
         ret = load_pth(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size, web_rwkv_load_progress_callback);
@@ -121,12 +122,13 @@ float web_rwkv_backend::get_load_progress() const {
     if (real < 0.5f) {
         return real;
     }
-    const float step = 0.02f;
     std::lock_guard<std::mutex> lock(_load_progress_mutex);
     if (_load_progress_reported < real) {
         _load_progress_reported = real;
+        _load_progress_step = 0.05f;
     }
-    _load_progress_reported = _load_progress_reported + step;
+    _load_progress_reported = _load_progress_reported + _load_progress_step;
+    _load_progress_step = std::max(0.001f, _load_progress_step * 0.9f);
     return std::max(0.f, std::min(1.f, _load_progress_reported));
 }
 
