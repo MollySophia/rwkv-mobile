@@ -47,7 +47,7 @@ for i in range(parser_args.chunks):
     layer_end = min(args.n_layer, layer_start + layers_in_chunk)
     layers_for_chunk.append(layer_end - layer_start)
 
-PREFILL_SEQ_LENGTH = 32
+PREFILL_SEQ_LENGTH = 16
 CALIB_SEQ_LENGTH = 4096
 
 def build_inputs_decode(chunk_idx: int = 0):
