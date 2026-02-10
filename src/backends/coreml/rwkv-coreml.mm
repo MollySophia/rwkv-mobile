@@ -24,6 +24,7 @@ struct rwkv_coreml_context {
     std::vector<const void *> states;
     int num_chunks = 0;
     int load_done_chunks = 0;
+    float load_progress_reported = 0.f;
     int n_layers;
     int num_heads;
     int head_dim;
@@ -169,6 +170,7 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
 
         auto total_start = std::chrono::steady_clock::now();
         ctx->load_done_chunks = 0;
+        ctx->load_progress_reported = 0.f;
         for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
             NSString *model_name = nil;
             model_name = [NSString stringWithFormat:@"%@_chunk%dof%d.mlmodelc", basename, chunk_idx + 1, num_chunks];
@@ -320,7 +322,10 @@ void rwkv_coreml_free(struct rwkv_coreml_context * ctx) {
 
 float rwkv_coreml_get_load_progress(struct rwkv_coreml_context * ctx) {
     if (!ctx || ctx->num_chunks <= 0) return -1.f;
-    return (float)ctx->load_done_chunks / (float)ctx->num_chunks;
+    float real = (float)ctx->load_done_chunks / (float)ctx->num_chunks;
+    const float step = 0.02f;
+    ctx->load_progress_reported = std::min(real, ctx->load_progress_reported + step);
+    return std::max(0.f, std::min(1.f, ctx->load_progress_reported));
 }
 
 void* rwkv_coreml_decode(struct rwkv_coreml_context * ctx, int token) {

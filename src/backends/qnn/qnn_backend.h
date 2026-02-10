@@ -215,9 +215,11 @@ private:
 
     RMPackReader *rmpack = nullptr;
 
-    // load progress (chunk-based)
+    // load progress (chunk-based, smoothed on each query)
     std::atomic<int> _load_total_chunks{0};
     std::atomic<int> _load_done_chunks{0};
+    mutable std::mutex _load_progress_mutex;
+    mutable float _load_progress_reported = 0.f;
 
     // Helpers for dynamic batch decode processing
     static int parse_bsz_from_graph_name(const std::string &graphName);

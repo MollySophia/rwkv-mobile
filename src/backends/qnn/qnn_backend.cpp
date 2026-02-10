@@ -544,6 +544,10 @@ int qnn_backend::init(void * extra) {
 int qnn_backend::load_model(std::string model_path, void * extra) {
     _load_total_chunks = 0;
     _load_done_chunks = 0;
+    {
+        std::lock_guard<std::mutex> lock(_load_progress_mutex);
+        _load_progress_reported = 0.f;
+    }
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
@@ -1197,7 +1201,11 @@ float qnn_backend::get_load_progress() const {
     int total = _load_total_chunks.load();
     if (total <= 0) return -1.f;
     int done = _load_done_chunks.load();
-    return std::max(0.f, std::min(1.f, static_cast<float>(done) / static_cast<float>(total)));
+    float real = static_cast<float>(done) / static_cast<float>(total);
+    const float step = 0.02f;
+    std::lock_guard<std::mutex> lock(_load_progress_mutex);
+    _load_progress_reported = std::min(real, _load_progress_reported + step);
+    return std::max(0.f, std::min(1.f, _load_progress_reported));
 }
 
 void qnn_backend::fill_quantized_tensor(float value, Qnn_Tensor_t *tensor) {
