@@ -48,7 +48,9 @@ void seed(uint64_t seed);
 /// The caller must ensure that `model` is valid.
 int load(const char *model, uintptr_t quant, uintptr_t quant_nf4, uintptr_t quant_sf4, bool fp16, uintptr_t batch);
 
-int load_pth(const char *model, uintptr_t quant, uintptr_t quant_nf4, uintptr_t quant_sf4, bool fp16, uintptr_t batch);
+typedef void (*load_pth_progress_callback)(float progress);
+
+int load_pth(const char *model, uintptr_t quant, uintptr_t quant_nf4, uintptr_t quant_sf4, bool fp16, uintptr_t batch, load_pth_progress_callback callback);
 
 int load_prefab(const char *model, bool fp16, uintptr_t batch);
 

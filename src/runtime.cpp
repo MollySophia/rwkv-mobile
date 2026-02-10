@@ -358,6 +358,11 @@ int Runtime::release_model(int model_id) {
 
 void Runtime::start_load_model_async() {
     _load_model_in_progress.store(true);
+    {
+        std::lock_guard<std::mutex> lock(_load_progress_fallback_mutex);
+        _load_progress_fallback = 0.f;
+        _load_progress_fallback_step = 0.1f;
+    }
 }
 
 void Runtime::set_load_model_result(int result_code, int model_id) {
@@ -384,10 +389,18 @@ float Runtime::get_load_model_progress() const {
         if (p >= 0.f) {
             return std::max(0.f, std::min(1.f, p));
         }
-        return 0.1f;
+        if (_load_model_in_progress.load()) {
+            std::lock_guard<std::mutex> lock(_load_progress_fallback_mutex);
+            _load_progress_fallback = std::min(0.999f, _load_progress_fallback + _load_progress_fallback_step);
+            _load_progress_fallback_step = std::max(0.001f, _load_progress_fallback_step * 0.9f);
+            return _load_progress_fallback;
+        }
     }
     if (_load_model_in_progress.load()) {
-        return 0.1f;
+        std::lock_guard<std::mutex> lock(_load_progress_fallback_mutex);
+        _load_progress_fallback = std::min(0.999f, _load_progress_fallback + _load_progress_fallback_step);
+        _load_progress_fallback_step = std::max(0.001f, _load_progress_fallback_step * 0.9f);
+        return _load_progress_fallback;
     }
     return 1.0f;
 }

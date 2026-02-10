@@ -3,7 +3,9 @@
 
 #include "backend.h"
 #include "web_rwkv_ffi.h"
+#include <atomic>
 #include <memory>
+#include <mutex>
 
 namespace rwkvmobile {
 
@@ -51,6 +53,7 @@ public:
     }
     int init(void * extra) override;
     int load_model(std::string model_path, void * extra = nullptr) override;
+    float get_load_progress() const override;
     int eval(int id, Tensor1D & logits) override;
     int eval(std::vector<int> ids, Tensor1D & logits) override;
     int eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) override;
@@ -70,8 +73,15 @@ public:
 
     int release_model() override;
     int release() override;
+
+    void set_load_progress_real(float p) { _load_progress_real = p; }
 private:
     std::vector<float> logits_buffer;
+
+    std::atomic<bool> _load_is_pth{false};
+    std::atomic<float> _load_progress_real{-1.f};
+    mutable std::mutex _load_progress_mutex;
+    mutable float _load_progress_reported = 0.f;
 };
 
 }

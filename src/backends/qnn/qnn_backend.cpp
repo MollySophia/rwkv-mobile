@@ -1202,9 +1202,12 @@ float qnn_backend::get_load_progress() const {
     if (total <= 0) return -1.f;
     int done = _load_done_chunks.load();
     float real = static_cast<float>(done) / static_cast<float>(total);
+    float ceiling = (done + 1 <= total) ? static_cast<float>(done + 1) / static_cast<float>(total) : 1.f;
     const float step = 0.02f;
     std::lock_guard<std::mutex> lock(_load_progress_mutex);
-    _load_progress_reported = std::min(real, _load_progress_reported + step);
+    if (_load_progress_reported < real)
+        _load_progress_reported = real;
+    _load_progress_reported = std::min(ceiling, _load_progress_reported + step);
     return std::max(0.f, std::min(1.f, _load_progress_reported));
 }
 

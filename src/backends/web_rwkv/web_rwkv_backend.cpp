@@ -1,5 +1,7 @@
 #include <fstream>
 #include <filesystem>
+#include <cstring>
+#include <algorithm>
 
 #include "backend.h"
 #include "web_rwkv_backend.h"
@@ -8,6 +10,14 @@
 #include <memory>
 
 namespace rwkvmobile {
+
+static thread_local web_rwkv_backend* g_loading_web_rwkv_backend = nullptr;
+
+static void web_rwkv_load_progress_callback(float progress) {
+    if (g_loading_web_rwkv_backend) {
+        g_loading_web_rwkv_backend->set_load_progress_real(progress);
+    }
+}
 
 struct web_rwkv_args {
     int quant_type;    // 0: fp, 1: int8, 2: nf4
@@ -21,6 +31,8 @@ int web_rwkv_backend::init(void * extra) {
 
 int web_rwkv_backend::load_model(std::string model_path, void * extra) {
     const int batch_size = 12;
+    _load_is_pth = false;
+    _load_progress_real = -1.f;
 
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
@@ -56,7 +68,16 @@ int web_rwkv_backend::load_model(std::string model_path, void * extra) {
 
     int ret = 0;
     if (model_path.find(".pth") != std::string::npos) {
-        ret = load_pth(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size);
+        _load_is_pth = true;
+        _load_progress_real = 0.f;
+        {
+            std::lock_guard<std::mutex> lock(_load_progress_mutex);
+            _load_progress_reported = 0.f;
+        }
+        g_loading_web_rwkv_backend = this;
+        ret = load_pth(model_path.c_str(), quant, quant_nf4, quant_sf4, use_fp16, batch_size, web_rwkv_load_progress_callback);
+        g_loading_web_rwkv_backend = nullptr;
+        _load_is_pth = false;
     } else if (model_path.find("prefab") != std::string::npos) {
         ret = load_prefab(model_path.c_str(), use_fp16, batch_size);
     } else if (model_path.find("ABC") != std::string::npos
@@ -87,6 +108,26 @@ int web_rwkv_backend::load_model(std::string model_path, void * extra) {
     }
 
     return RWKV_SUCCESS;
+}
+
+float web_rwkv_backend::get_load_progress() const {
+    if (!_load_is_pth.load()) {
+        return -1.f;
+    }
+    float real = _load_progress_real.load();
+    if (real < 0.f) {
+        return -1.f;
+    }
+    if (real < 0.5f) {
+        return real;
+    }
+    const float step = 0.02f;
+    std::lock_guard<std::mutex> lock(_load_progress_mutex);
+    if (_load_progress_reported < real) {
+        _load_progress_reported = real;
+    }
+    _load_progress_reported = _load_progress_reported + step;
+    return std::max(0.f, std::min(1.f, _load_progress_reported));
 }
 
 int web_rwkv_backend::eval(int id, Tensor1D & logits) {

@@ -323,8 +323,13 @@ void rwkv_coreml_free(struct rwkv_coreml_context * ctx) {
 float rwkv_coreml_get_load_progress(struct rwkv_coreml_context * ctx) {
     if (!ctx || ctx->num_chunks <= 0) return -1.f;
     float real = (float)ctx->load_done_chunks / (float)ctx->num_chunks;
+    float ceiling = (ctx->load_done_chunks + 1 <= ctx->num_chunks)
+        ? (float)(ctx->load_done_chunks + 1) / (float)ctx->num_chunks
+        : 1.f;
     const float step = 0.02f;
-    ctx->load_progress_reported = std::min(real, ctx->load_progress_reported + step);
+    if (ctx->load_progress_reported < real)
+        ctx->load_progress_reported = real;
+    ctx->load_progress_reported = std::min(ceiling, ctx->load_progress_reported + step);
     return std::max(0.f, std::min(1.f, ctx->load_progress_reported));
 }
 
