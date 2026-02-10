@@ -25,7 +25,6 @@ struct rwkv_coreml_context {
     std::vector<const void *> states;
     int num_chunks = 0;
     int load_done_chunks = 0;
-    int load_done_steps = 0;
     float load_progress_reported = 0.f;
     int n_layers;
     int num_heads;
@@ -172,7 +171,6 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
 
         auto total_start = std::chrono::steady_clock::now();
         ctx->load_done_chunks = 0;
-        ctx->load_done_steps = 0;
         ctx->load_progress_reported = 0.f;
         for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
             NSString *model_name = nil;
@@ -187,22 +185,26 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
             double decode_ms = std::chrono::duration<double, std::milli>(decode_end - decode_start).count();
             NSLog(@"Loaded chunk %d/%d (%@) decode: %.2f ms",
                   chunk_idx + 1, num_chunks, model_name, decode_ms);
-            ctx->load_done_steps = chunk_idx * 2 + 1;
+            if (error || !mlmodel_decode) {
+                NSLog(@"Error loading decode model %@: %@", model_name, error);
+                rwkv_coreml_free(ctx);
+                return NULL;
+            }
+            ctx->load_done_chunks = chunk_idx * 2 + 1;
 
+            error = nil;
             auto prefill_start = std::chrono::steady_clock::now();
             MLModel *mlmodel_prefill = [MLModel modelWithContentsOfURL:url_model configuration:config_prefill error:&error];
             auto prefill_end = std::chrono::steady_clock::now();
             double prefill_ms = std::chrono::duration<double, std::milli>(prefill_end - prefill_start).count();
             NSLog(@"Loaded chunk %d/%d (%@) prefill: %.2f ms",
                   chunk_idx + 1, num_chunks, model_name, prefill_ms);
-            if (error || !mlmodel_decode || !mlmodel_prefill) {
-                NSLog(@"Error loading model %@: %@", model_name, error);
+            if (error || !mlmodel_prefill) {
+                NSLog(@"Error loading prefill model %@: %@", model_name, error);
                 rwkv_coreml_free(ctx);
                 return NULL;
             }
-
-            ctx->load_done_steps = chunk_idx * 2 + 2;
-            ctx->load_done_chunks = chunk_idx + 1;
+            ctx->load_done_chunks = chunk_idx * 2 + 2;
             if (num_chunks == 1) {
                 rwkv_coreml_singlechunk_impl *model_decode = [[rwkv_coreml_singlechunk_impl alloc] initWithMLModel:mlmodel_decode];
                 rwkv_coreml_singlechunk_impl *model_prefill = [[rwkv_coreml_singlechunk_impl alloc] initWithMLModel:mlmodel_prefill];
@@ -327,18 +329,16 @@ void rwkv_coreml_free(struct rwkv_coreml_context * ctx) {
 
 float rwkv_coreml_get_load_progress(struct rwkv_coreml_context * ctx) {
     if (!ctx || ctx->num_chunks <= 0) return -1.f;
-    const int total_steps = ctx->num_chunks * 2;
-    float real = (float)ctx->load_done_steps / (float)total_steps;
-    float ceiling = (ctx->load_done_steps + 1 <= total_steps)
-        ? (float)(ctx->load_done_steps + 1) / (float)total_steps
+    int total_steps = std::max(1, ctx->num_chunks * 2);
+    int done_steps = std::max(0, std::min(total_steps, ctx->load_done_chunks));
+    float real = (float)done_steps / (float)total_steps;
+    float ceiling = (done_steps + 1 <= total_steps)
+        ? (float)(done_steps + 1) / (float)total_steps
         : 1.f;
     const float step = 0.02f;
-    if (ctx->load_progress_reported < real) {
-        step = 0.02f;
+    if (ctx->load_progress_reported < real)
         ctx->load_progress_reported = real;
-    }
     ctx->load_progress_reported = std::min(ceiling, ctx->load_progress_reported + step);
-    step = std::max(0.001f, step * 0.9f);
     return std::max(0.f, std::min(1.f, ctx->load_progress_reported));
 }
 
