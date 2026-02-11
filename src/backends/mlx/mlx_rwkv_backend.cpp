@@ -148,10 +148,6 @@ int mlx_rwkv_backend::release_model() {
 }
 
 int mlx_rwkv_backend::release() {
-    if (model_handle) {
-        mlx_model_release(model_handle);
-        model_handle = NULL;
-    }
     return RWKV_SUCCESS;
 }
 
