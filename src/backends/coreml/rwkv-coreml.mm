@@ -355,22 +355,23 @@ void rwkv_coreml_free(struct rwkv_coreml_context * ctx) {
 }
 
 float rwkv_coreml_get_load_progress(struct rwkv_coreml_context * ctx) {
-    if (!ctx || ctx->num_chunks <= 0) return -1.f;
+    if (!ctx || ctx->num_chunks <= 0) return 1.0f;
     int total_steps = std::max(1, ctx->num_chunks * 2);
     int done_steps = std::max(0, std::min(total_steps, ctx->load_done_chunks));
     float real = (float)done_steps / (float)total_steps;
     float ceiling = (done_steps + 1 <= total_steps)
         ? (float)(done_steps + 1) / (float)total_steps
         : 1.f;
-    if (ctx->load_progress_reported < real)
+    if (ctx->load_progress_reported < real) {
         ctx->load_progress_reported = real;
-    float gap_to_next_phase = std::max(0.f, ceiling - ctx->load_progress_reported);
-    float phase_span = std::max(1e-6f, ceiling - real);
-    float normalized_gap = std::min(1.f, gap_to_next_phase / phase_span);
-    float min_step = std::max(0.0005f, phase_span * 0.02f);
-    float step = std::max(min_step, gap_to_next_phase * normalized_gap * normalized_gap * 0.50f);
-    step = std::min(step, gap_to_next_phase);
-    ctx->load_progress_reported = std::min(ceiling, ctx->load_progress_reported + step);
+    }
+
+    const float min_step = 0.0005f;
+    float ret = ctx->load_progress_reported;
+    float remaining = std::max(1e-5f, ceiling - ctx->load_progress_reported);
+    float step = remaining * 0.01f;
+    step = std::max(min_step, step);
+    ctx->load_progress_reported = std::min(ceiling - 0.01f, ctx->load_progress_reported + step);
     return std::max(0.f, std::min(1.f, ctx->load_progress_reported));
 }
 

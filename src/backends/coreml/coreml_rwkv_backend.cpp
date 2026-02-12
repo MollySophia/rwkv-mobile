@@ -36,7 +36,7 @@ int coreml_rwkv_backend::load_model(std::string model_path, void * extra) {
 
 float coreml_rwkv_backend::get_load_progress() const {
     if (!ctx) {
-        return 0.01f;
+        return 1.0f;
     }
     return rwkv_coreml_get_load_progress(ctx);
 }
