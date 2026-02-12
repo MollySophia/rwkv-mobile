@@ -402,7 +402,6 @@ private:
     int _load_model_result_id = -1;
     execution_provider* _loading_backend = nullptr;
     mutable std::mutex _loading_backend_mutex;
-    // 当后端返回 -1（不支持进度）时的模拟进度：从 0 累加 step，step 逐步变小，逼近但不达到 1
     mutable std::mutex _load_progress_fallback_mutex;
     mutable float _load_progress_fallback = 0.f;
     mutable float _load_progress_fallback_step = 0.1f;

@@ -29,7 +29,7 @@ public:
     int deserialize_runtime_state(std::vector<uint8_t> &data, std::any &state) override;
 
 private:
-    rwkv_coreml_context * ctx;
+    rwkv_coreml_context * ctx = nullptr;
     int prefill_seq_length;
 };
 

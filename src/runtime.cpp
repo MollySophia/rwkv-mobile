@@ -391,16 +391,18 @@ float Runtime::get_load_model_progress() const {
         }
         if (_load_model_in_progress.load()) {
             std::lock_guard<std::mutex> lock(_load_progress_fallback_mutex);
+            auto progress_old = _load_progress_fallback;
             _load_progress_fallback = std::min(0.999f, _load_progress_fallback + _load_progress_fallback_step);
             _load_progress_fallback_step = std::max(0.001f, _load_progress_fallback_step * 0.9f);
-            return _load_progress_fallback;
+            return progress_old;
         }
     }
     if (_load_model_in_progress.load()) {
         std::lock_guard<std::mutex> lock(_load_progress_fallback_mutex);
+        auto progress_old = _load_progress_fallback;
         _load_progress_fallback = std::min(0.999f, _load_progress_fallback + _load_progress_fallback_step);
         _load_progress_fallback_step = std::max(0.001f, _load_progress_fallback_step * 0.9f);
-        return _load_progress_fallback;
+        return progress_old;
     }
     return 1.0f;
 }

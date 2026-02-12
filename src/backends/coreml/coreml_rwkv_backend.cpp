@@ -1,7 +1,7 @@
 #include "backend.h"
 #include "coreml_rwkv_backend.h"
 #include "commondef.h"
-
+#include "logger.h"
 #include "rwkv-coreml.h"
 
 namespace rwkvmobile {
@@ -11,8 +11,17 @@ int coreml_rwkv_backend::init(void * extra) {
 }
 
 int coreml_rwkv_backend::load_model(std::string model_path, void * extra) {
-    ctx = rwkv_coreml_init(model_path.c_str());
-    if (ctx == NULL) {
+    if (ctx) {
+        rwkv_coreml_free(ctx);
+        ctx = nullptr;
+    }
+    ctx = rwkv_coreml_new_context();
+    if (ctx == nullptr) {
+        return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
+    }
+    if (rwkv_coreml_init(ctx, model_path.c_str()) != 0) {
+        rwkv_coreml_free(ctx);
+        ctx = nullptr;
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
 
@@ -26,7 +35,9 @@ int coreml_rwkv_backend::load_model(std::string model_path, void * extra) {
 }
 
 float coreml_rwkv_backend::get_load_progress() const {
-    if (!ctx) return -1.f;
+    if (!ctx) {
+        return 0.01f;
+    }
     return rwkv_coreml_get_load_progress(ctx);
 }
 

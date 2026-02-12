@@ -46,6 +46,38 @@ struct rwkv_coreml_context {
     size_t state_tokenshift_bytes = 0;
 };
 
+static void rwkv_coreml_release_resources(struct rwkv_coreml_context * ctx) {
+    if (!ctx) return;
+    for (size_t i = 0; i < ctx->model_decode.size(); ++i) {
+        if (ctx->model_decode[i]) CFRelease(ctx->model_decode[i]);
+    }
+    for (size_t i = 0; i < ctx->model_prefill.size(); ++i) {
+        if (ctx->model_prefill[i]) CFRelease(ctx->model_prefill[i]);
+    }
+    for (size_t i = 0; i < ctx->states.size(); ++i) {
+        if (ctx->states[i]) CFRelease(ctx->states[i]);
+    }
+    ctx->model_decode.clear();
+    ctx->model_prefill.clear();
+    ctx->states.clear();
+    ctx->state_wkv_bytes_per_chunk.clear();
+    ctx->state_tokenshift_bytes_per_chunk.clear();
+    ctx->state_wkv_bytes = 0;
+    ctx->state_tokenshift_bytes = 0;
+    ctx->num_chunks = 0;
+    ctx->load_done_chunks = 0;
+    ctx->load_progress_reported = 0.f;
+    ctx->n_layers = 0;
+    ctx->num_heads = 0;
+    ctx->head_dim = 0;
+    ctx->embd_dim = 0;
+    ctx->vocab_size = 0;
+    ctx->prefill_seq_length = 0;
+    // Release retained Objective-C objects eagerly (they are __strong).
+    ctx->out_decode = nil;
+    ctx->out_prefill = nil;
+}
+
 NSArray<NSNumber *> * get_shape_by_name(NSDictionary *model_inputs, NSString *name) {
     MLFeatureDescription *desc = model_inputs[name];
     if (desc.type == MLFeatureTypeMultiArray) {
@@ -133,15 +165,23 @@ static void with_state_tokenshift(struct rwkv_coreml_context *ctx, int chunk_idx
     [state getMultiArrayForState:rwkv_coreml_implStateNameState_tokenshift handler:handler];
 }
 
-struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
+struct rwkv_coreml_context * rwkv_coreml_new_context(void) {
+    return new rwkv_coreml_context;
+}
+
+int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) {
     @autoreleasepool {
+        if (!ctx || !path_model) {
+            return -1;
+        }
+        rwkv_coreml_release_resources(ctx);
         NSString * path_model_str = [[NSString alloc] initWithUTF8String:path_model];
 
         NSString *config_path = [path_model_str stringByAppendingPathComponent:@"config.yaml"];
         NSString *basename = nil;
         int num_chunks = 0;
         if (!parse_coreml_config(config_path, &basename, &num_chunks)) {
-            return NULL;
+            return -1;
         }
 
         // select which device to run the Core ML model on
@@ -155,7 +195,6 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
 
         NSError *error = nil;
 
-        rwkv_coreml_context * ctx = new rwkv_coreml_context;
         ctx->num_chunks = num_chunks;
         ctx->model_decode.reserve((size_t)num_chunks);
         ctx->model_prefill.reserve((size_t)num_chunks);
@@ -187,8 +226,8 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
                   chunk_idx + 1, num_chunks, model_name, decode_ms);
             if (error || !mlmodel_decode) {
                 NSLog(@"Error loading decode model %@: %@", model_name, error);
-                rwkv_coreml_free(ctx);
-                return NULL;
+                rwkv_coreml_release_resources(ctx);
+                return -1;
             }
             ctx->load_done_chunks = chunk_idx * 2 + 1;
 
@@ -201,8 +240,8 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
                   chunk_idx + 1, num_chunks, model_name, prefill_ms);
             if (error || !mlmodel_prefill) {
                 NSLog(@"Error loading prefill model %@: %@", model_name, error);
-                rwkv_coreml_free(ctx);
-                return NULL;
+                rwkv_coreml_release_resources(ctx);
+                return -1;
             }
             ctx->load_done_chunks = chunk_idx * 2 + 2;
             if (num_chunks == 1) {
@@ -233,8 +272,8 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
                 NSArray<NSNumber *> *in_prefill_shape = get_shape_by_name(model_inputs_prefill, @"in0");
                 if (in_prefill_shape == nil) {
                     NSLog(@"Error getting in_prefill shape");
-                    rwkv_coreml_free(ctx);
-                    return NULL;
+                    rwkv_coreml_release_resources(ctx);
+                    return -1;
                 }
                 prefill_seq_length = [in_prefill_shape[1] intValue];
             }
@@ -244,8 +283,8 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
                 NSArray<NSNumber *> *logits_out_shape = get_shape_by_name(model_outputs, @"out0");
                 if (logits_out_shape == nil) {
                     NSLog(@"Error getting out0 shape");
-                    rwkv_coreml_free(ctx);
-                    return NULL;
+                    rwkv_coreml_release_resources(ctx);
+                    return -1;
                 }
                 vocab_size = [logits_out_shape[2] intValue];
             }
@@ -257,8 +296,8 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
             NSArray<NSNumber *> *state_wkv_shape = state_wkv.shape;
             if (state_wkv_shape == nil) {
                 NSLog(@"Error getting state_wkv shape");
-                rwkv_coreml_free(ctx);
-                return NULL;
+                rwkv_coreml_release_resources(ctx);
+                return -1;
             }
             total_layers += [state_wkv_shape[0] intValue];
             int chunk_num_heads = [state_wkv_shape[1] intValue];
@@ -304,25 +343,13 @@ struct rwkv_coreml_context * rwkv_coreml_init(const char * path_model) {
 
         NSLog(@"num_chunks: %d, num_heads: %d, head_dim: %d, vocab_size: %d, n_layers: %d, prefill_seq_length: %d, state_wkv_bytes: %zu, state_tokenshift_bytes: %zu\n",
             ctx->num_chunks, ctx->num_heads, ctx->head_dim, ctx->vocab_size, ctx->n_layers, ctx->prefill_seq_length, ctx->state_wkv_bytes, ctx->state_tokenshift_bytes);
-
-        return ctx;
+        return 0;
     }
 }
 
 void rwkv_coreml_free(struct rwkv_coreml_context * ctx) {
     if (ctx) {
-        for (size_t i = 0; i < ctx->model_decode.size(); ++i) {
-            if (ctx->model_decode[i]) CFRelease(ctx->model_decode[i]);
-        }
-        for (size_t i = 0; i < ctx->model_prefill.size(); ++i) {
-            if (ctx->model_prefill[i]) CFRelease(ctx->model_prefill[i]);
-        }
-        for (size_t i = 0; i < ctx->states.size(); ++i) {
-            if (ctx->states[i]) CFRelease(ctx->states[i]);
-        }
-        // Release retained Objective-C objects eagerly (they are __strong).
-        ctx->out_decode = nil;
-        ctx->out_prefill = nil;
+        rwkv_coreml_release_resources(ctx);
         delete ctx;
     }
 }
