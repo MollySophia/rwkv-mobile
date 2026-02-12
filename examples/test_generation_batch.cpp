@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
         prompts.push_back(prompt.c_str());
     }
     std::cout << prompt;
-    ENSURE_SUCCESS_OR_LOG_EXIT(rwkvmobile_runtime_gen_completion_batch_async(runtime, model_id, (const char **)prompts.data(), batch_size, 50, 261, nullptr), "\nFailed to generate chat message");
+    ENSURE_SUCCESS_OR_LOG_EXIT(rwkvmobile_runtime_gen_completion_batch_async(runtime, model_id, (const char **)prompts.data(), batch_size, 50, 261, nullptr, false), "\nFailed to generate chat message");
 
     std::cout << "Waiting for generation to finish...";
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {

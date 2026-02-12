@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
 
     std::cout << std::endl;
 
-    rwkvmobile_runtime_gen_completion(runtime, model_id, prompt.c_str(), 64000, 0, callback);
+    rwkvmobile_runtime_gen_completion(runtime, model_id, prompt.c_str(), 64000, 0, callback, true);
 
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         custom_sleep(1);

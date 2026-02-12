@@ -369,7 +369,8 @@ int rwkvmobile_runtime_gen_completion_async(
     const char * prompt,
     const int max_tokens,
     const int stop_code,
-    void (*callback)(const char *, const int, const char *)) {
+    void (*callback)(const char *, const int, const char *),
+    int disable_cache) {
     if (handle == nullptr || prompt == nullptr || max_tokens <= 0) {
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -384,7 +385,8 @@ int rwkvmobile_runtime_gen_completion_async(
             std::string(prompt),
             max_tokens,
             stop_code,
-            callback);
+            callback,
+            disable_cache);
         return ret;
     });
 
@@ -428,7 +430,8 @@ int rwkvmobile_runtime_gen_completion_batch_async(
     const int batch_size,
     const int max_tokens,
     const int stop_code,
-    void (*callback_batch)(const int, const char **, const int*, const char **)) {
+    void (*callback_batch)(const int, const char **, const int*, const char **),
+    int disable_cache) {
     if (handle == nullptr || prompts == nullptr || batch_size <= 0 || max_tokens <= 0) {
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -449,7 +452,8 @@ int rwkvmobile_runtime_gen_completion_batch_async(
             batch_size,
             max_tokens,
             stop_code,
-            callback_batch);
+            callback_batch,
+            disable_cache);
         return ret;
     });
 
@@ -464,7 +468,8 @@ int rwkvmobile_runtime_gen_completion(
     const char * prompt,
     const int max_tokens,
     const int stop_code,
-    void (*callback)(const char *, const int, const char *)) {
+    void (*callback)(const char *, const int, const char *),
+    int disable_cache) {
     if (handle == nullptr || prompt == nullptr || max_tokens <= 0 || callback == nullptr) {
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -476,7 +481,8 @@ int rwkvmobile_runtime_gen_completion(
         std::string(prompt),
         max_tokens,
         stop_code,
-        callback);
+        callback,
+        disable_cache);
 }
 
 int rwkvmobile_runtime_stop_generation(rwkvmobile_runtime_t runtime, int model_id) {

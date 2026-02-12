@@ -2620,7 +2620,7 @@ int Runtime::clear_state(int model_id) {
     return RWKV_SUCCESS;
 }
 
-int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts, int batch_size, int max_length, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **)) {
+int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts, int batch_size, int max_length, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **), bool disable_cache) {
     if (_models.find(model_id) == _models.end()) {
         LOGE("gen_completion_batch: Model ID %d not found", model_id);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -2670,7 +2670,12 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
 
         std::vector<int> ids = model->tokenizer->encode(prompts[batch_idx]);
         std::vector<int> tokens_to_prefill;
-        nodes_batch[batch_idx] = model->backend->match_and_load_state(ids, tokens_to_prefill);
+        if (!disable_cache) {
+            nodes_batch[batch_idx] = model->backend->match_and_load_state(ids, tokens_to_prefill);
+        } else {
+            nodes_batch[batch_idx] = model->backend->state_root.get();
+            tokens_to_prefill = ids;
+        }
         _prefill_progress_start(model_id, tokens_to_prefill.size());
 
         // save a state checkpoint every about 256 tokens
@@ -2683,13 +2688,15 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
                 model->is_generating = false;
                 return ret;
             }
-            ret = model->backend->register_state_checkpoint(nodes_batch[batch_idx], tokens_to_prefill_chunk, logits);
-            if (ret) {
-                LOGE("gen_completion_batch: Error registering state checkpoint");
-                model->is_generating = false;
-                return ret;
+            if (!disable_cache) {
+                ret = model->backend->register_state_checkpoint(nodes_batch[batch_idx], tokens_to_prefill_chunk, logits);
+                if (ret) {
+                    LOGE("gen_completion_batch: Error registering state checkpoint");
+                    model->is_generating = false;
+                    return ret;
+                }
+                LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
             }
-            LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
         }
         _prefill_progress_finish(model_id);
 
@@ -2701,6 +2708,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
                 logits = Tensor1D::make(nodes_batch[batch_idx]->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
             } else {
                 LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
+                model->is_generating = false;
                 return RWKV_ERROR_RUNTIME;
             }
         }
@@ -2759,7 +2767,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     return RWKV_SUCCESS;
 }
 
-int Runtime::gen_completion(int model_id, std::string prompt, int max_length, int stop_code, void (*callback)(const char *, const int, const char *)) {
+int Runtime::gen_completion(int model_id, std::string prompt, int max_length, int stop_code, void (*callback)(const char *, const int, const char *), bool disable_cache) {
     if (_models.find(model_id) == _models.end()) {
         LOGE("gen_completion: Model ID %d not found", model_id);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -2780,7 +2788,13 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
 
     std::vector<int> ids = model->tokenizer->encode(prompt);
     std::vector<int> tokens_to_prefill;
-    state_node* node = model->backend->match_and_load_state(ids, tokens_to_prefill);
+    state_node* node = nullptr;
+    if (!disable_cache) {
+        node = model->backend->match_and_load_state(ids, tokens_to_prefill);
+    } else {
+        tokens_to_prefill = ids;
+        node = model->backend->state_root.get();
+    }
     _prefill_progress_start(model_id, tokens_to_prefill.size());
 
     Tensor1D logits;
@@ -2794,13 +2808,15 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
             model->is_generating = false;
             return ret;
         }
-        ret = model->backend->register_state_checkpoint(node, tokens_to_prefill_chunk, logits);
-        if (ret) {
-            LOGE("gen_completion: Error registering state checkpoint");
-            model->is_generating = false;
-            return ret;
+        if (!disable_cache) {
+            ret = model->backend->register_state_checkpoint(node, tokens_to_prefill_chunk, logits);
+            if (ret) {
+                LOGE("gen_completion: Error registering state checkpoint");
+                model->is_generating = false;
+                return ret;
+            }
+            LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
         }
-        LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
     }
     _prefill_progress_finish(model_id);
 

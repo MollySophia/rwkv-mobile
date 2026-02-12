@@ -148,9 +148,9 @@ int rwkvmobile_runtime_set_prompt(rwkvmobile_runtime_t runtime, int model_id, co
 
 int rwkvmobile_runtime_get_prompt(rwkvmobile_runtime_t runtime, int model_id, char * prompt, const int buf_len);
 
-int rwkvmobile_runtime_gen_completion_async(rwkvmobile_runtime_t runtime, int model_id, const char * prompt, const int max_tokens, const int stop_code, void (*callback)(const char *, const int, const char *));
+int rwkvmobile_runtime_gen_completion_async(rwkvmobile_runtime_t runtime, int model_id, const char * prompt, const int max_tokens, const int stop_code, void (*callback)(const char *, const int, const char *), int disable_cache);
 
-int rwkvmobile_runtime_gen_completion_batch_async(rwkvmobile_runtime_t runtime, int model_id, const char ** prompts, const int batch_size, const int max_tokens, const int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **));
+int rwkvmobile_runtime_gen_completion_batch_async(rwkvmobile_runtime_t runtime, int model_id, const char ** prompts, const int batch_size, const int max_tokens, const int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **), int disable_cache);
 
 int rwkvmobile_runtime_eval_chat_batch_with_history_async(rwkvmobile_runtime_t handle, int model_id, const char *** inputs, const int * num_inputs, const int batch_size, const int max_tokens, void (*callback_batch)(const int, const char **, const int*, const char **), int enable_reasoning, int force_reasoning, int force_lang);
 
@@ -158,7 +158,7 @@ struct supported_batch_sizes rwkvmobile_runtime_get_supported_batch_sizes(rwkvmo
 
 void rwkvmobile_runtime_free_supported_batch_sizes(struct supported_batch_sizes sizes);
 
-int rwkvmobile_runtime_gen_completion(rwkvmobile_runtime_t runtime, int model_id, const char * prompt, const int max_tokens, const int stop_code, void (*callback)(const char *, const int, const char *));
+int rwkvmobile_runtime_gen_completion(rwkvmobile_runtime_t runtime, int model_id, const char * prompt, const int max_tokens, const int stop_code, void (*callback)(const char *, const int, const char *), int disable_cache);
 
 const char ** rwkvmobile_runtime_gen_completion_singletoken_topk(rwkvmobile_runtime_t handle, int model_id, const char * prompt, const int top_k);
 
