@@ -1117,6 +1117,8 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
                 deep_embeddings_elembytes = 2;
             } else if (deep_embedding_dtype == "fp32" || deep_embedding_dtype == "uint32") {
                 deep_embeddings_elembytes = 4;
+            } else if (deep_embedding_dtype == "uint8") {
+                deep_embeddings_elembytes = 1;
             } else {
                 LOGE("Unsupported deep embedding dtype: %s", deep_embedding_dtype.c_str());
                 return RWKV_ERROR_MODEL;
