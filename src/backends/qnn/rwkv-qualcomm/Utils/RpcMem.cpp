@@ -164,7 +164,7 @@ bool RpcMem::allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tensorDataSize) {
       status = false;
     }
     QNN_TENSOR_SET_MEM_HANDLE(tensor, memHandle);
-    rwkvmobile::LOGI("RpcMem :: allocateTensorBuffer %s mem_handle=%p", QNN_TENSOR_GET_NAME(tensor), memHandle);
+    rwkvmobile::LOGD("RpcMem :: allocateTensorBuffer %s mem_handle=%p", QNN_TENSOR_GET_NAME(tensor), memHandle);
     m_memHandleToRpcMem.insert({memHandle, RpcMemTensorData(memfd, memPointer, tensorDataSize)});
   }
   if (status == true) {

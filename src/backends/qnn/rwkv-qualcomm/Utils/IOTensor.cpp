@@ -92,13 +92,13 @@ bool IOTensor::setupTensors(Qnn_Tensor_t** tensors,
       auto wrapperTensorName = std::string(GET_TENSOR_WRAPPER_NAME(tensorWrappers[tensorIdx]));
       totalBufferSize += tensorsSize[wrapperTensorName];
     }
-    rwkvmobile::LOGI("Calculated total size %lu", totalBufferSize);
+    rwkvmobile::LOGD("Calculated total size %lu", totalBufferSize);
 
     if (!skipBufferAllocation) {
       // Allocate the buffer of this size
       memPointer = m_bufferManager->allocateTensorFusedBuffer(totalBufferSize, &fd);
       if (memPointer) {
-        rwkvmobile::LOGI("Successfully allocated a buffer of size %lu, pointer %p, fd %d",
+        rwkvmobile::LOGD("Successfully allocated a buffer of size %lu, pointer %p, fd %d",
                   (unsigned long)totalBufferSize,
                   memPointer,
                   fd);

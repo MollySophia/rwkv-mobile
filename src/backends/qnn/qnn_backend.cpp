@@ -1583,7 +1583,7 @@ int qnn_backend::qnn_initialize_tensors() {
                 std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
                 auto graphInfo     = (*qnnEmbdPrefillGraphsInfo)[graph_id];
                 LOGI("Graph %d : %s", graph_id, graphInfo.graphName);
-                
+
                 // Populate output tensor name to size map for embedding prefill graphs
                 auto result = populate_tensor_name_to_size_map(graphInfo, embdPrefillGraphsTensorNameToSize[graph_id], false);
                 if (result != RWKV_SUCCESS) {
@@ -1593,7 +1593,6 @@ int qnn_backend::qnn_initialize_tensors() {
                 // Special handling for embedding prefill graphs - log tensor info
                 for (size_t i = 0; i < graphInfo.numOutputTensors; i++) {
                     auto tensorName = std::string(QNN_TENSOR_GET_NAME(graphInfo.outputTensors[i]));
-                    LOGI("Output Tensor %zu : %s Type: %d Size: %zu", i, tensorName.c_str(), QNN_TENSOR_GET_DATA_TYPE(graphInfo.outputTensors[i]), embdPrefillGraphsTensorNameToSize[graph_id][tensorName]);
 
                     if (tensorName.find("v_first") != std::string::npos && vFirstTensorPrefill != nullptr) {
                         sharedTensorMap[tensorName] = vFirstTensorPrefill;
@@ -1620,7 +1619,7 @@ int qnn_backend::qnn_initialize_tensors() {
                     if (tensorName.find("v_first") != std::string::npos && vFirstTensorPrefill == nullptr) {
                         vFirstTensorPrefill = (Qnn_Tensor_t*)embdPrefillGraphsTensorNameToTensorPointer[graph_id][tensorName];
                     } else if (tensorName.find("state") == std::string::npos && tensorName.find("out") != std::string::npos) {
-                        if (graph_id != qnnPrefillGraphsCount - 1 && hiddenStateTensorPrefill == nullptr) {
+                        if (graph_id != qnnEmbdPrefillGraphsCount - 1 && hiddenStateTensorPrefill == nullptr) {
                             hiddenStateTensorPrefill = (Qnn_Tensor_t*)embdPrefillGraphsTensorNameToTensorPointer[graph_id][tensorName];
                         }
                     }
@@ -2232,11 +2231,11 @@ int qnn_backend::free_state(std::any state) {
 }
 
 int qnn_backend::get_state_on_batch_slot(int slot, std::any &state) {
-    if (supported_batch_sizes.size() == 0) {
-        return RWKV_ERROR_IO;
+    int max_supported_bsz = 1;
+    if (!supported_batch_sizes.empty()) {
+        int max_supported_bsz_index = std::max_element(supported_batch_sizes.begin(), supported_batch_sizes.end()) - supported_batch_sizes.begin();
+        max_supported_bsz = supported_batch_sizes[max_supported_bsz_index];
     }
-    int max_supported_bsz_index = std::max_element(supported_batch_sizes.begin(), supported_batch_sizes.end()) - supported_batch_sizes.begin();
-    int max_supported_bsz = supported_batch_sizes[max_supported_bsz_index];
     if (slot >= max_supported_bsz) {
         return RWKV_ERROR_IO;
     }
@@ -2259,11 +2258,11 @@ int qnn_backend::get_state_on_batch_slot(int slot, std::any &state) {
 
 int qnn_backend::set_state_on_batch_slot(int slot, std::any state) {
     if (!state.has_value()) return RWKV_SUCCESS;
-    if (supported_batch_sizes.size() == 0) {
-        return RWKV_ERROR_IO;
+    int max_supported_bsz = 1;
+    if (!supported_batch_sizes.empty()) {
+        int max_supported_bsz_index = std::max_element(supported_batch_sizes.begin(), supported_batch_sizes.end()) - supported_batch_sizes.begin();
+        max_supported_bsz = supported_batch_sizes[max_supported_bsz_index];
     }
-    int max_supported_bsz_index = std::max_element(supported_batch_sizes.begin(), supported_batch_sizes.end()) - supported_batch_sizes.begin();
-    int max_supported_bsz = supported_batch_sizes[max_supported_bsz_index];
     if (slot >= max_supported_bsz) {
         return RWKV_ERROR_IO;
     }
@@ -2284,11 +2283,11 @@ int qnn_backend::set_state_on_batch_slot(int slot, std::any state) {
 }
 
 int qnn_backend::zero_state_on_batch_slot(int slot) {
-    if (supported_batch_sizes.size() == 0) {
-        return RWKV_ERROR_IO;
+    int max_supported_bsz = 1;
+    if (!supported_batch_sizes.empty()) {
+        int max_supported_bsz_index = std::max_element(supported_batch_sizes.begin(), supported_batch_sizes.end()) - supported_batch_sizes.begin();
+        max_supported_bsz = supported_batch_sizes[max_supported_bsz_index];
     }
-    int max_supported_bsz_index = std::max_element(supported_batch_sizes.begin(), supported_batch_sizes.end()) - supported_batch_sizes.begin();
-    int max_supported_bsz = supported_batch_sizes[max_supported_bsz_index];
     if (slot >= max_supported_bsz) {
         return RWKV_ERROR_IO;
     }
