@@ -1096,6 +1096,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     model->stop_signal = false;
     model->response_buffer.clear();
     model->response_buffer_ids.clear();
+    model->response_buffer_decoded_tokens = 0;
     model->response_buffer_eos_found = false;
 
     _clear_speed_samples(*model);
@@ -1185,6 +1186,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     model->response_buffer = input_text.substr(input_text.rfind(model->response_role + ":") + (model->response_role + ":").size());
     std::vector<int> response_ids_raw;
     model->response_buffer_ids = model->tokenizer->encode(model->response_buffer);
+    model->response_buffer_decoded_tokens = (int)model->response_buffer_ids.size();
     int ret;
 
     model->sampler->clear_occurences();
@@ -1251,22 +1253,32 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
             break;
         }
 
-        std::string decoded = model->tokenizer->decode(decoded_idx);
-        std::string tmp = model->response_buffer + decoded;
-        for (auto &stop_code : model->stop_codes) {
-            if (enable_reasoning && !thinking_end_tag_found && stop_code == "\n\n") {
+        auto compare_token_seq = [&](const std::vector<int> token_seq) -> bool {
+            if (response_ids_raw.size() < token_seq.size()) {
+                return false;
+            }
+            for (size_t i = 0; i < token_seq.size(); i++) {
+                if (response_ids_raw[response_ids_raw.size() - token_seq.size() + i] != token_seq[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        response_ids_raw.emplace_back(decoded_idx);
+        model->response_buffer_ids.emplace_back(decoded_idx);
+        for (auto &stop_code : model->stop_token_seqs) {
+            if (enable_reasoning && !thinking_end_tag_found && stop_code[0] == 261) { // \n\n
                 continue;
             }
-            if (tmp.size() >= stop_code.size() &&
-                tmp.compare(tmp.size() - stop_code.size(), stop_code.size(), stop_code) == 0) {
-                LOGD("stop code found: %s\n", escape_special_chars(stop_code).c_str());
+            if (compare_token_seq(stop_code)) {
+                LOGD("stop code found: %s\n", escape_special_chars(model->tokenizer->decode(stop_code)).c_str());
                 model->response_buffer_eos_found = true;
                 break;
             }
         }
-
         if (enable_reasoning && !thinking_end_tag_found) {
-            if (tmp.find("</think>") != std::string::npos) {
+            if (compare_token_seq({61, 48, 35762, 63})) {
                 thinking_end_tag_found = true;
             }
         }
@@ -1278,17 +1290,19 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
             return ret;
         }
 
-        response_ids_raw.emplace_back(decoded_idx);
-        model->response_buffer += decoded;
-        model->response_buffer_ids.emplace_back(decoded_idx);
-        if (i == 0 && model->response_buffer[0] == ' ') {
+        if (callback) {
+            std::string decoded = model->tokenizer->decode(decoded_idx);
+            model->response_buffer += decoded;
+            model->response_buffer_decoded_tokens = (int)model->response_buffer_ids.size();
+            if (callback) {
+                callback(model->response_buffer.c_str(), decoded_idx, decoded.c_str());
+            }
+        }
+        if (model->response_buffer.size() > 0 && model->response_buffer[0] == ' ') {
             model->response_buffer = model->response_buffer.substr(1);
         }
 
         model->sampler->update_occurences(decoded_idx);
-        if (callback) {
-            callback(model->response_buffer.c_str(), decoded_idx, decoded.c_str());
-        }
 
         if (model->response_buffer_eos_found || model->stop_signal) {
             LOGD("stopping generation, eos_found: %d, stop_signal: %d\n", model->response_buffer_eos_found, model->stop_signal);
@@ -1355,10 +1369,12 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
     model->response_buffer_batch.resize(batch_size);
     model->response_buffer_ids_batch.resize(batch_size);
+    model->response_buffer_decoded_tokens_batch.resize(batch_size);
     model->response_buffer_eos_found_batch.resize(batch_size);
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
         model->response_buffer_batch[batch_idx] = "";
         model->response_buffer_ids_batch[batch_idx].clear();
+        model->response_buffer_decoded_tokens_batch[batch_idx] = 0;
         model->response_buffer_eos_found_batch[batch_idx] = false;
     }
 
@@ -1566,17 +1582,26 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     }
                 }
             }
+            
+            auto compare_token_seq = [&](const std::vector<int> token_seq) -> bool {
+                if (model->response_buffer_decoded_tokens_batch[original_j] < token_seq.size()) {
+                    return false;
+                }
+                for (size_t i = 0; i < token_seq.size(); i++) {
+                    if (model->response_buffer_ids_batch[original_j][model->response_buffer_decoded_tokens_batch[original_j] - token_seq.size() + i] != token_seq[i]) {
+                        return false;
+                    }
+                }
+                return true;
+            };
 
             if (!model->response_buffer_eos_found_batch[original_j]) {
-                std::string decoded = model->tokenizer->decode(decoded_idx[j]);
-                std::string tmp = model->response_buffer_batch[original_j] + decoded;
-                for (auto &stop_code : model->stop_codes) {
-                    if (enable_reasoning && !thinking_end_tag_found_batch[original_j] && stop_code == "\n\n") {
+                for (auto &stop_code : model->stop_token_seqs) {
+                    if (enable_reasoning && !thinking_end_tag_found_batch[original_j] && stop_code[0] == 261) { // \n\n
                         continue;
                     }
-                    if (tmp.size() >= stop_code.size() &&
-                        tmp.compare(tmp.size() - stop_code.size(), stop_code.size(), stop_code) == 0) {
-                        LOGD("stop code found for batch %d: %s\n", original_j, escape_special_chars(stop_code).c_str());
+                    if (compare_token_seq(stop_code)) {
+                        LOGD("stop code found for batch %d: %s\n", original_j, escape_special_chars(model->tokenizer->decode(stop_code)).c_str());
                         model->response_buffer_eos_found_batch[original_j] = true;
                         std::any state_end;
                         model->backend->get_state_on_batch_slot(j, state_end);
@@ -1599,9 +1624,8 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                         break;
                     }
                 }
-
                 if (enable_reasoning && !thinking_end_tag_found_batch[original_j]) {
-                    if (tmp.find("</think>") != std::string::npos) {
+                    if (compare_token_seq({61, 48, 35762, 63})) {
                         thinking_end_tag_found_batch[original_j] = true;
                     }
                 }
@@ -1718,9 +1742,8 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 continue;
             }
             response_ids_raw_batch[original_j].emplace_back(decoded_idx[j]);
-            model->response_buffer_batch[original_j] += model->tokenizer->decode(decoded_idx[j]);
             model->response_buffer_ids_batch[original_j].emplace_back(decoded_idx[j]);
-            if (i == 0 && model->response_buffer_batch[original_j][0] == ' ') {
+            if (model->response_buffer_batch[original_j].size() > 0 && model->response_buffer_batch[original_j][0] == ' ') {
                 model->response_buffer_batch[original_j] = model->response_buffer_batch[original_j].substr(1);
             }
 
@@ -1728,8 +1751,8 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         }
 
         // TODO: callback_batch
-        // if (callback) {
-        //     callback(model->response_buffer.c_str(), decoded_idx, decoded.c_str());
+        // if (callback_batch) {
+        //     callback_batch(...);
         // }
     }
 
@@ -2653,6 +2676,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
 
     model->response_buffer_batch.resize(batch_size);
     model->response_buffer_ids_batch.resize(batch_size);
+    model->response_buffer_decoded_tokens_batch.resize(batch_size);
     model->response_buffer_eos_found_batch.resize(batch_size);
 
     _clear_speed_samples(*model);
@@ -2666,6 +2690,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
         model->response_buffer_batch[batch_idx] = "";
         model->response_buffer_ids_batch[batch_idx].clear();
+        model->response_buffer_decoded_tokens_batch[batch_idx] = 0;
         model->response_buffer_eos_found_batch[batch_idx] = false;
 
         std::vector<int> ids = model->tokenizer->encode(prompts[batch_idx]);
@@ -2702,6 +2727,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
 
         model->response_buffer_batch[batch_idx] = prompts[batch_idx];
         model->response_buffer_ids_batch[batch_idx] = ids;
+        model->response_buffer_decoded_tokens_batch[batch_idx] = (int)ids.size();
 
         if (logits.data_ptr == nullptr) {
             if (!nodes_batch[batch_idx]->logits.empty()) {
@@ -2737,12 +2763,15 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
             if (!model->response_buffer_eos_found_batch[batch_idx]) {
                 model->response_buffer_eos_found_batch[batch_idx] = (decoded_idx_batch[batch_idx] == stop_code);
-                decoded_text_batch[batch_idx] = model->tokenizer->decode(decoded_idx_batch[batch_idx]);
                 if (model->response_buffer_eos_found_batch[batch_idx]) {
                     continue;
                 }
-                model->response_buffer_batch[batch_idx] += decoded_text_batch[batch_idx];
                 model->response_buffer_ids_batch[batch_idx].push_back(decoded_idx_batch[batch_idx]);
+                if (callback_batch) {
+                    decoded_text_batch[batch_idx] = model->tokenizer->decode(decoded_idx_batch[batch_idx]);
+                    model->response_buffer_batch[batch_idx] += decoded_text_batch[batch_idx];
+                    model->response_buffer_decoded_tokens_batch[batch_idx] = (int)model->response_buffer_ids_batch[batch_idx].size();
+                }
             }
         }
 
@@ -2779,6 +2808,7 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     }
     model->response_buffer = "";
     model->response_buffer_ids.clear();
+    model->response_buffer_decoded_tokens = 0;
     model->response_buffer_eos_found = false;
     model->is_generating = true;
     model->stop_signal = false;
@@ -2822,6 +2852,7 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
 
     model->response_buffer = prompt;
     model->response_buffer_ids = ids;
+    model->response_buffer_decoded_tokens = (int)ids.size();
     static int idx = 0;
     if (logits.data_ptr == nullptr) {
         if (!node->logits.empty()) {
@@ -2837,9 +2868,6 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
         idx = model->sampler->sample(logits, model->backend->get_num_vocab());
 
         model->response_buffer_eos_found = (idx == stop_code);
-
-        std::string next = model->tokenizer->decode(idx);
-        model->response_buffer += next;
         model->response_buffer_ids.push_back(idx);
         int ret = eval_logits(model_id, idx, logits);
         if (ret) {
@@ -2848,6 +2876,9 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
             return ret;
         }
         if (callback) {
+            std::string next = model->tokenizer->decode(idx);
+            model->response_buffer += next;
+            model->response_buffer_decoded_tokens = (int)model->response_buffer_ids.size();
             callback(model->response_buffer.c_str(), idx, next.c_str());
         }
 
@@ -3323,8 +3354,8 @@ void Runtime::set_eos_token(int model_id, std::string token) {
     }
     auto &model = _models.at(model_id);
     model->eos_token = token;
-    model->stop_codes.clear();
-    model->stop_codes.push_back(token);
+    model->stop_token_seqs.clear();
+    model->stop_token_seqs.push_back(model->tokenizer->encode(token));
 }
 
 std::string Runtime::get_thinking_token(int model_id) {
@@ -3391,10 +3422,14 @@ void Runtime::clear_response_buffer(int model_id) {
     auto &model = _models.at(model_id);
     model->response_buffer.clear();
     model->response_buffer_ids.clear();
+    model->response_buffer_decoded_tokens = 0;
     model->response_buffer_eos_found = false;
     for (int i = 0; i < model->response_buffer_batch.size(); i++) {
         model->response_buffer_batch[i].clear();
         model->response_buffer_ids_batch[i].clear();
+        if (i < model->response_buffer_decoded_tokens_batch.size()) {
+            model->response_buffer_decoded_tokens_batch[i] = 0;
+        }
         model->response_buffer_eos_found_batch[i] = false;
     }
 }
@@ -3442,6 +3477,11 @@ std::string Runtime::get_response_buffer_content(int model_id) {
         return "";
     }
     auto &model = _models.at(model_id);
+    const int total = (int)model->response_buffer_ids.size();
+    for (int i = model->response_buffer_decoded_tokens; i < total; i++) {
+        model->response_buffer += model->tokenizer->decode(model->response_buffer_ids[i]);
+    }
+    model->response_buffer_decoded_tokens = total;
     return model->response_buffer;
 }
 
@@ -3466,6 +3506,17 @@ std::vector<std::string> Runtime::get_response_buffer_content_batch(int model_id
         return {};
     }
     auto &model = _models.at(model_id);
+    if (model->response_buffer_decoded_tokens_batch.size() < model->response_buffer_ids_batch.size()) {
+        model->response_buffer_decoded_tokens_batch.resize(model->response_buffer_ids_batch.size(), 0);
+    }
+    for (size_t i = 0; i < model->response_buffer_ids_batch.size(); i++) {
+        const int total = (int)model->response_buffer_ids_batch[i].size();
+        int &decoded = model->response_buffer_decoded_tokens_batch[i];
+        for (int j = decoded; j < total; j++) {
+            model->response_buffer_batch[i] += model->tokenizer->decode(model->response_buffer_ids_batch[i][j]);
+        }
+        decoded = total;
+    }
     return model->response_buffer_batch;
 }
 

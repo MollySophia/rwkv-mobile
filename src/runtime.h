@@ -64,17 +64,21 @@ struct ModelInstance {
     std::string system_role = "System";
     std::string bos_token = "";
     std::string eos_token = "\n\n";
-    std::vector<std::string> stop_codes = {"\n\n", "\nUser"};
+    // std::vector<std::string> stop_codes = {"\n\n", "\nUser"};
+    // "\n\n", "。\n\n"，"…\n\n", "，\n\n"
+    std::vector<std::vector<int>> stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}};
     std::string thinking_token = "<think";
     bool space_after_roles = true;
 
     // Response buffer
     std::string response_buffer;
     std::vector<int32_t> response_buffer_ids;
+    int response_buffer_decoded_tokens = 0;
     bool response_buffer_eos_found = false;
 
     std::vector<std::string> response_buffer_batch;
     std::vector<std::vector<int32_t>> response_buffer_ids_batch;
+    std::vector<int> response_buffer_decoded_tokens_batch;
     std::vector<bool> response_buffer_eos_found_batch;
 
     // Generation status
@@ -256,8 +260,6 @@ public:
 
     int get_vocab_size(int model_id);
 
-    std::vector<std::string> get_stop_codes(int model_id);
-    void set_stop_codes(int model_id, std::vector<std::string> stop_codes);
     std::string get_thinking_token(int model_id);
     void set_thinking_token(int model_id, std::string thinking_token);
 

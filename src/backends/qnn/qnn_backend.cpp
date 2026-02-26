@@ -1417,7 +1417,7 @@ int qnn_backend::qnn_initialize_tensors() {
                 outputTensorsBatchDecode[batchSize] = new Qnn_Tensor_t*[count];
             }
         }
-        // 改为从大bsz到小bsz进行初始化
+
         // Collect batch sizes and sort from large to small before initializing
         std::vector<int> batchSizes;
         for (const auto& [batchSize, count] : qnnBatchDecodeGraphsCount) {
