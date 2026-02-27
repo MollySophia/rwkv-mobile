@@ -902,7 +902,7 @@ int rwkvmobile_runtime_get_response_buffer_tokens_count(rwkvmobile_runtime_t run
     return rt->get_response_buffer_tokens_count(model_id);
 }
 
-int rwkvmobile_runtime_calculate_ctx_length(rwkvmobile_runtime_t runtime, int model_id, const char ** inputs, const int num_inputs) {
+int rwkvmobile_runtime_calculate_tokens_count_from_messages(rwkvmobile_runtime_t runtime, int model_id, const char ** inputs, const int num_inputs) {
     if (runtime == nullptr || inputs == nullptr || num_inputs <= 0) {
         return 0;
     }
@@ -911,7 +911,15 @@ int rwkvmobile_runtime_calculate_ctx_length(rwkvmobile_runtime_t runtime, int mo
     for (int i = 0; i < num_inputs; i++) {
         inputs_vec.push_back(std::string(inputs[i]));
     }
-    return rt->calculate_ctx_length(model_id, inputs_vec);
+    return rt->calculate_tokens_count_from_messages(model_id, inputs_vec);
+}
+
+int rwkvmobile_runtime_calculate_tokens_count_from_text(rwkvmobile_runtime_t runtime, int model_id, const char * text) {
+    if (runtime == nullptr || text == nullptr) {
+        return 0;
+    }
+    auto rt = static_cast<class Runtime *>(runtime);
+    return rt->calculate_tokens_count_from_text(model_id, std::string(text));
 }
 
 void rwkvmobile_runtime_free_response_buffer(struct response_buffer buffer) {

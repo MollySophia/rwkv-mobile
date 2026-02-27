@@ -153,7 +153,8 @@ public:
     void clear_response_buffer(int model_id);
     bool get_response_buffer_eos_found(int model_id);
 
-    int calculate_ctx_length(int model_id, std::vector<std::string> inputs, std::vector<std::string> roles_map = {});
+    int calculate_tokens_count_from_text(int model_id, std::string text);
+    int calculate_tokens_count_from_messages(int model_id, std::vector<std::string> inputs, std::vector<std::string> roles_map = {});
 
     std::vector<std::string> get_response_buffer_content_batch(int model_id);
     std::vector<std::vector<int32_t>> get_response_buffer_ids_batch(int model_id);

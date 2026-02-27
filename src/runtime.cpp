@@ -3503,7 +3503,18 @@ int Runtime::get_response_buffer_tokens_count(int model_id) {
     return (int)model->response_buffer_ids.size();
 }
 
-int Runtime::calculate_ctx_length(int model_id, std::vector<std::string> inputs, std::vector<std::string> roles_map) {
+int Runtime::calculate_tokens_count_from_text(int model_id, std::string text) {
+    if (_models.find(model_id) == _models.end()) {
+        return 0;
+    }
+    auto &model = _models.at(model_id);
+    if (model->tokenizer == nullptr || text.empty()) {
+        return 0;
+    }
+    return (int)model->tokenizer->encode(text).size();
+}
+
+int Runtime::calculate_tokens_count_from_messages(int model_id, std::vector<std::string> inputs, std::vector<std::string> roles_map) {
     if (_models.find(model_id) == _models.end()) {
         return 0;
     }

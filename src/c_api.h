@@ -246,7 +246,9 @@ struct token_ids rwkvmobile_runtime_get_response_buffer_ids(rwkvmobile_runtime_t
 
 int rwkvmobile_runtime_get_response_buffer_tokens_count(rwkvmobile_runtime_t runtime, int model_id);
 
-int rwkvmobile_runtime_calculate_ctx_length(rwkvmobile_runtime_t runtime, int model_id, const char ** inputs, const int num_inputs);
+int rwkvmobile_runtime_calculate_tokens_count_from_messages(rwkvmobile_runtime_t runtime, int model_id, const char ** inputs, const int num_inputs);
+
+int rwkvmobile_runtime_calculate_tokens_count_from_text(rwkvmobile_runtime_t runtime, int model_id, const char * text);
 
 void rwkvmobile_runtime_free_token_ids(struct token_ids ids);
 
