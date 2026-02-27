@@ -988,21 +988,35 @@ late final _rwkvmobile_runtime_get_response_buffer_tokens_countPtr = _lookup<
     ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int )>>('rwkvmobile_runtime_get_response_buffer_tokens_count');
 late final _rwkvmobile_runtime_get_response_buffer_tokens_count = _rwkvmobile_runtime_get_response_buffer_tokens_countPtr.asFunction<int Function(rwkvmobile_runtime_t , int )>();
 
-int rwkvmobile_runtime_calculate_ctx_length(rwkvmobile_runtime_t runtime,
+int rwkvmobile_runtime_calculate_tokens_count_from_messages(rwkvmobile_runtime_t runtime,
 int model_id,
 ffi.Pointer<ffi.Pointer<ffi.Char>> inputs,
 int num_inputs,
 ) {
-  return _rwkvmobile_runtime_calculate_ctx_length(runtime,
+  return _rwkvmobile_runtime_calculate_tokens_count_from_messages(runtime,
 model_id,
 inputs,
 num_inputs,
 );
 }
 
-late final _rwkvmobile_runtime_calculate_ctx_lengthPtr = _lookup<
-    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Pointer<ffi.Char>> , ffi.Int )>>('rwkvmobile_runtime_calculate_ctx_length');
-late final _rwkvmobile_runtime_calculate_ctx_length = _rwkvmobile_runtime_calculate_ctx_lengthPtr.asFunction<int Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Pointer<ffi.Char>> , int )>();
+late final _rwkvmobile_runtime_calculate_tokens_count_from_messagesPtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Pointer<ffi.Char>> , ffi.Int )>>('rwkvmobile_runtime_calculate_tokens_count_from_messages');
+late final _rwkvmobile_runtime_calculate_tokens_count_from_messages = _rwkvmobile_runtime_calculate_tokens_count_from_messagesPtr.asFunction<int Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Pointer<ffi.Char>> , int )>();
+
+int rwkvmobile_runtime_calculate_tokens_count_from_text(rwkvmobile_runtime_t runtime,
+int model_id,
+ffi.Pointer<ffi.Char> text,
+) {
+  return _rwkvmobile_runtime_calculate_tokens_count_from_text(runtime,
+model_id,
+text,
+);
+}
+
+late final _rwkvmobile_runtime_calculate_tokens_count_from_textPtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Char> )>>('rwkvmobile_runtime_calculate_tokens_count_from_text');
+late final _rwkvmobile_runtime_calculate_tokens_count_from_text = _rwkvmobile_runtime_calculate_tokens_count_from_textPtr.asFunction<int Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Char> )>();
 
 void rwkvmobile_runtime_free_token_ids(token_ids ids,
 ) {
