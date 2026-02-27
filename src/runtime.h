@@ -149,8 +149,11 @@ public:
 
     std::string get_response_buffer_content(int model_id);
     const std::vector<int32_t> get_response_buffer_ids(int model_id);
+    int get_response_buffer_tokens_count(int model_id);
     void clear_response_buffer(int model_id);
     bool get_response_buffer_eos_found(int model_id);
+
+    int calculate_ctx_length(int model_id, std::vector<std::string> inputs, std::vector<std::string> roles_map = {});
 
     std::vector<std::string> get_response_buffer_content_batch(int model_id);
     std::vector<std::vector<int32_t>> get_response_buffer_ids_batch(int model_id);
@@ -249,7 +252,7 @@ public:
     std::string get_eos_token(int model_id);
     bool get_space_after_roles(int model_id);
 
-    std::string apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning = false, std::vector<std::string> roles_map = {});
+    std::string apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning = false, std::vector<std::string> roles_map = {}, bool append_input_prompt = true);
 
     struct TokenChunk {
         std::vector<int> tokens;

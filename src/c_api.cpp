@@ -894,6 +894,26 @@ struct response_buffer rwkvmobile_runtime_get_response_buffer_content(rwkvmobile
     return buffer;
 }
 
+int rwkvmobile_runtime_get_response_buffer_tokens_count(rwkvmobile_runtime_t runtime, int model_id) {
+    if (runtime == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto rt = static_cast<class Runtime *>(runtime);
+    return rt->get_response_buffer_tokens_count(model_id);
+}
+
+int rwkvmobile_runtime_calculate_ctx_length(rwkvmobile_runtime_t runtime, int model_id, const char ** inputs, const int num_inputs) {
+    if (runtime == nullptr || inputs == nullptr || num_inputs <= 0) {
+        return 0;
+    }
+    auto rt = static_cast<class Runtime *>(runtime);
+    std::vector<std::string> inputs_vec;
+    for (int i = 0; i < num_inputs; i++) {
+        inputs_vec.push_back(std::string(inputs[i]));
+    }
+    return rt->calculate_ctx_length(model_id, inputs_vec);
+}
+
 void rwkvmobile_runtime_free_response_buffer(struct response_buffer buffer) {
     if (buffer.content == nullptr) {
         return;

@@ -244,6 +244,10 @@ void rwkvmobile_runtime_free_response_buffer_batch(struct response_buffer_batch 
 
 struct token_ids rwkvmobile_runtime_get_response_buffer_ids(rwkvmobile_runtime_t runtime, int model_id);
 
+int rwkvmobile_runtime_get_response_buffer_tokens_count(rwkvmobile_runtime_t runtime, int model_id);
+
+int rwkvmobile_runtime_calculate_ctx_length(rwkvmobile_runtime_t runtime, int model_id, const char ** inputs, const int num_inputs);
+
 void rwkvmobile_runtime_free_token_ids(struct token_ids ids);
 
 // sparktts

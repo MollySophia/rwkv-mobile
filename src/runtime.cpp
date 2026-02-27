@@ -675,7 +675,7 @@ std::vector<int> Runtime::get_supported_batch_sizes(int model_id) {
     return model->backend->supported_batch_sizes;
 }
 
-std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning, std::vector<std::string> roles_map) {
+std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning, std::vector<std::string> roles_map, bool append_input_prompt) {
     if (_models.find(model_id) == _models.end()) {
         return "";
     }
@@ -730,13 +730,15 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         }
     }
 
-    if (!inputs.empty()) {
+    if (!inputs.empty() && append_input_prompt) {
         std::string last_role = normalize_role(resolved_roles.back());
-        if (last_role != model->response_role) {
+        if (last_role == model->user_role) {
             text += model->bos_token + model->response_role + ":";
             if (enable_reasoning) {
                 text += (space_after_roles ? " " : "") + model->thinking_token;
             }
+        } else {
+            // TODO
         }
     }
     return text;
@@ -3491,6 +3493,26 @@ const std::vector<int32_t> Runtime::get_response_buffer_ids(int model_id) {
     }
     auto &model = _models.at(model_id);
     return model->response_buffer_ids;
+}
+
+int Runtime::get_response_buffer_tokens_count(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return 0;
+    }
+    auto &model = _models.at(model_id);
+    return (int)model->response_buffer_ids.size();
+}
+
+int Runtime::calculate_ctx_length(int model_id, std::vector<std::string> inputs, std::vector<std::string> roles_map) {
+    if (_models.find(model_id) == _models.end()) {
+        return 0;
+    }
+    auto &model = _models.at(model_id);
+    if (model->tokenizer == nullptr || inputs.empty() || inputs[0].empty()) {
+        return 0;
+    }
+    std::string input_text = apply_chat_template(model_id, inputs, false, roles_map, false);
+    return (int)model->tokenizer->encode(input_text).size();
 }
 
 bool Runtime::get_response_buffer_eos_found(int model_id) {
