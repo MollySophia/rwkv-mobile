@@ -3503,6 +3503,18 @@ int Runtime::get_response_buffer_tokens_count(int model_id) {
     return (int)model->response_buffer_ids.size();
 }
 
+std::vector<int> Runtime::get_response_buffer_tokens_count_batch(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return {};
+    }
+    auto &model = _models.at(model_id);
+    std::vector<int> counts;
+    for (int i = 0; i < model->response_buffer_ids_batch.size(); i++) {
+        counts.push_back(model->response_buffer_ids_batch[i].size());
+    }
+    return counts;
+}
+
 int Runtime::calculate_tokens_count_from_text(int model_id, std::string text) {
     if (_models.find(model_id) == _models.end()) {
         return 0;

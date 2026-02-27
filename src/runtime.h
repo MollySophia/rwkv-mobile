@@ -150,6 +150,7 @@ public:
     std::string get_response_buffer_content(int model_id);
     const std::vector<int32_t> get_response_buffer_ids(int model_id);
     int get_response_buffer_tokens_count(int model_id);
+    std::vector<int> get_response_buffer_tokens_count_batch(int model_id);
     void clear_response_buffer(int model_id);
     bool get_response_buffer_eos_found(int model_id);
 

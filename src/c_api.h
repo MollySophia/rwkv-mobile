@@ -95,6 +95,11 @@ struct web_rwkv_args {
     int quant_layers;
 };
 
+struct batch_tokens_count {
+    int * counts;
+    int batch_size;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -245,6 +250,8 @@ void rwkvmobile_runtime_free_response_buffer_batch(struct response_buffer_batch 
 struct token_ids rwkvmobile_runtime_get_response_buffer_ids(rwkvmobile_runtime_t runtime, int model_id);
 
 int rwkvmobile_runtime_get_response_buffer_tokens_count(rwkvmobile_runtime_t runtime, int model_id);
+
+struct batch_tokens_count rwkvmobile_runtime_get_response_buffer_tokens_count_batch(rwkvmobile_runtime_t runtime, int model_id);
 
 int rwkvmobile_runtime_calculate_tokens_count_from_messages(rwkvmobile_runtime_t runtime, int model_id, const char ** inputs, const int num_inputs);
 

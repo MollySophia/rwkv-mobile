@@ -902,6 +902,26 @@ int rwkvmobile_runtime_get_response_buffer_tokens_count(rwkvmobile_runtime_t run
     return rt->get_response_buffer_tokens_count(model_id);
 }
 
+struct batch_tokens_count rwkvmobile_runtime_get_response_buffer_tokens_count_batch(rwkvmobile_runtime_t runtime, int model_id) {
+    if (runtime == nullptr) {
+        return {nullptr, 0};
+    }
+    auto rt = static_cast<class Runtime *>(runtime);
+    std::vector<int> counts = rt->get_response_buffer_tokens_count_batch(model_id);
+    static int token_counts_static[32];
+    if (counts.size() > 32) {
+        return {nullptr, 0};
+    }
+
+    struct batch_tokens_count count;
+    count.counts = token_counts_static;
+    count.batch_size = counts.size();
+    for (int i = 0; i < counts.size(); i++) {
+        count.counts[i] = counts[i];
+    }
+    return count;
+}
+
 int rwkvmobile_runtime_calculate_tokens_count_from_messages(rwkvmobile_runtime_t runtime, int model_id, const char ** inputs, const int num_inputs) {
     if (runtime == nullptr || inputs == nullptr || num_inputs <= 0) {
         return 0;
