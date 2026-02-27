@@ -976,6 +976,34 @@ late final _rwkvmobile_runtime_get_response_buffer_idsPtr = _lookup<
     ffi.NativeFunction<token_ids Function(rwkvmobile_runtime_t , ffi.Int )>>('rwkvmobile_runtime_get_response_buffer_ids');
 late final _rwkvmobile_runtime_get_response_buffer_ids = _rwkvmobile_runtime_get_response_buffer_idsPtr.asFunction<token_ids Function(rwkvmobile_runtime_t , int )>();
 
+int rwkvmobile_runtime_get_response_buffer_tokens_count(rwkvmobile_runtime_t runtime,
+int model_id,
+) {
+  return _rwkvmobile_runtime_get_response_buffer_tokens_count(runtime,
+model_id,
+);
+}
+
+late final _rwkvmobile_runtime_get_response_buffer_tokens_countPtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int )>>('rwkvmobile_runtime_get_response_buffer_tokens_count');
+late final _rwkvmobile_runtime_get_response_buffer_tokens_count = _rwkvmobile_runtime_get_response_buffer_tokens_countPtr.asFunction<int Function(rwkvmobile_runtime_t , int )>();
+
+int rwkvmobile_runtime_calculate_ctx_length(rwkvmobile_runtime_t runtime,
+int model_id,
+ffi.Pointer<ffi.Pointer<ffi.Char>> inputs,
+int num_inputs,
+) {
+  return _rwkvmobile_runtime_calculate_ctx_length(runtime,
+model_id,
+inputs,
+num_inputs,
+);
+}
+
+late final _rwkvmobile_runtime_calculate_ctx_lengthPtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Pointer<ffi.Char>> , ffi.Int )>>('rwkvmobile_runtime_calculate_ctx_length');
+late final _rwkvmobile_runtime_calculate_ctx_length = _rwkvmobile_runtime_calculate_ctx_lengthPtr.asFunction<int Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Pointer<ffi.Char>> , int )>();
+
 void rwkvmobile_runtime_free_token_ids(token_ids ids,
 ) {
   return _rwkvmobile_runtime_free_token_ids(ids,
