@@ -725,12 +725,13 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         }
 
         text += model->bos_token + role + ":" + (space_after_roles ? " " : "") + content;
-        if (!(i == inputs.size() - 1 && role == model->response_role)) {
+        if (i != inputs.size() - 1) {
             text += model->eos_token;
         }
     }
 
     if (!inputs.empty() && add_generation_prompt) {
+        text += model->eos_token;
         std::string last_role = normalize_role(resolved_roles.back());
         if (last_role == model->user_role) {
             text += model->bos_token + model->response_role + ":";
