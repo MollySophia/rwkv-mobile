@@ -1187,15 +1187,18 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     _prefill_progress_finish(model_id);
 
     std::vector<int> response_ids_raw;
-    if (!add_generation_prompt) { // resuming generation cases, restore response buffer from input text
-        bool history_ends_with_user_message = inputs.size() % 2 != 0;
-        if (roles_map.size() == inputs.size()) {
-            history_ends_with_user_message = roles_map.back() == model->user_role;
-        }
-        auto role_for_parsing = !history_ends_with_user_message ? model->response_role : model->user_role;
-        model->response_buffer = input_text.substr(input_text.rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());
-        model->response_buffer_ids = model->tokenizer->encode(model->response_buffer);
+
+    bool history_ends_with_user_message = inputs.size() % 2 != 0;
+    if (roles_map.size() == inputs.size()) {
+        history_ends_with_user_message = roles_map.back() == model->user_role;
     }
+    std::string role_for_parsing;
+    if (!add_generation_prompt) {
+        role_for_parsing = !history_ends_with_user_message ? model->response_role : model->user_role;
+    } else {
+        role_for_parsing = history_ends_with_user_message ? model->response_role : model->user_role;
+    }
+    model->response_buffer = input_text.substr(input_text.rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());
     model->response_buffer_ids = model->tokenizer->encode(model->response_buffer);
     model->response_buffer_decoded_tokens = (int)model->response_buffer_ids.size();
     int ret;
@@ -1452,14 +1455,17 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         LOGD("Applied chat template for batch %d: \"%s\"\n", batch_idx, input_texts[batch_idx].c_str());
         text_ids_batch[batch_idx] = model->tokenizer->encode(input_texts[batch_idx]);
 
-        if (!add_generation_prompt) { // resuming generation cases, restore response buffer from input text
-            bool history_ends_with_user_message = input.size() % 2 != 0;
-            if (batch_roles.size() == input.size()) {
-                history_ends_with_user_message = batch_roles.back() == model->user_role;
-            }
-            auto role_for_parsing = !history_ends_with_user_message ? model->response_role : model->user_role;
-            model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());;
+        bool history_ends_with_user_message = input.size() % 2 != 0;
+        if (batch_roles.size() == input.size()) {
+            history_ends_with_user_message = batch_roles.back() == model->user_role;
         }
+        std::string role_for_parsing;
+        if (!add_generation_prompt) {
+            role_for_parsing = !history_ends_with_user_message ? model->response_role : model->user_role;
+        } else {
+            role_for_parsing = history_ends_with_user_message ? model->response_role : model->user_role;
+        }
+        model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());;
         model->response_buffer_ids_batch[batch_idx].clear();
         model->response_buffer_eos_found_batch[batch_idx] = false;
         std::vector<int> tokens_to_prefill;
