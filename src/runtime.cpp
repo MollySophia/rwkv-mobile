@@ -3373,8 +3373,14 @@ void Runtime::set_eos_token(int model_id, std::string token) {
     }
     auto &model = _models.at(model_id);
     model->eos_token = token;
-    model->stop_token_seqs.clear();
-    model->stop_token_seqs.push_back(model->tokenizer->encode(token));
+    if (token == "\n\n") {
+        model->stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}};
+    } else if (token == "\n") {
+        model->stop_token_seqs = {{11}, {28329}, {28324}, {28331}};
+    } else {
+        model->stop_token_seqs.clear();
+        model->stop_token_seqs.push_back(model->tokenizer->encode(token));
+    }
 }
 
 std::string Runtime::get_thinking_token(int model_id) {
