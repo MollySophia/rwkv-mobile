@@ -66,7 +66,7 @@ struct ModelInstance {
     std::string eos_token = "\n\n";
     // std::vector<std::string> stop_codes = {"\n\n", "\nUser"};
     // "\n\n", "。\n\n"，"…\n\n", "，\n\n"
-    std::vector<std::vector<int>> stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}};
+    std::vector<std::vector<int>> stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}, {5585, 41693}};
     std::string thinking_token = "<think";
     bool space_after_roles = true;
 
