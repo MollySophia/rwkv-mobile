@@ -1237,7 +1237,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
 
     if (logits.data_ptr == nullptr) {
         if (!node->logits.empty()) {
-            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
+            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab()).copy();
         } else {
             LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
             // this should never happen
@@ -1365,14 +1365,8 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         LOGI("forcing output language to Chinese\n");
     }
 
-    bool supported = false;
-    for (auto size : model->backend->supported_batch_sizes) {
-        if (batch_size == size) {
-            supported = true;
-            break;
-        }
-    }
-    if (!supported) {
+    auto &supported_sizes = model->backend->supported_batch_sizes;
+    if (std::find(supported_sizes.begin(), supported_sizes.end(), batch_size) == supported_sizes.end()) {
         LOGE("chat_batch: batch size %d is not supported\n", batch_size);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_UNSUPPORTED;
     }
@@ -1434,6 +1428,8 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     int ret;
     auto num_vocab = model->backend->get_num_vocab();
 
+    std::vector<float> batched_logits_storage((size_t)num_vocab * batch_size);
+
     // prefill for each batch
     auto normalize_role = [&](const std::string &role) -> std::string {
         if (role == "user") {
@@ -1475,22 +1471,23 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         nodes_batch[batch_idx] = model->backend->match_and_load_state(text_ids_batch[batch_idx], tokens_to_prefill);
         LOGI("batch %d matched state cache for prefix: \"%s\"", batch_idx, escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
 
+        Tensor1D batch_prefill_logits;
+
         // prefill needed tokens
         if (tokens_to_prefill.size() > 0) {
             _prefill_progress_start(model_id, tokens_to_prefill.size());
             LOGI("new text to prefill: \"%s\"", escape_special_chars(model->tokenizer->decode(tokens_to_prefill)).c_str());
 
-            // save a state checkpoint every about 256 tokens
             int checkpoint_interval = 256;
             for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
                 std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
-                int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
+                int ret = eval_logits(model_id, tokens_to_prefill_chunk, batch_prefill_logits);
                 if (ret) {
                     model->is_generating = false;
                     LOGE("failed to eval logits\n");
                     return ret;
                 }
-                ret = model->backend->register_state_checkpoint(nodes_batch[batch_idx], tokens_to_prefill_chunk, logits);
+                ret = model->backend->register_state_checkpoint(nodes_batch[batch_idx], tokens_to_prefill_chunk, batch_prefill_logits);
                 if (ret) {
                     model->is_generating = false;
                     LOGE("failed to register state checkpoint\n");
@@ -1501,55 +1498,31 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         }
         _prefill_progress_finish(model_id);
 
-        if (logits.data_ptr == nullptr) {
-            if (!nodes_batch[batch_idx]->logits.empty()) {
-                logits = Tensor1D::make(nodes_batch[batch_idx]->logits.data(), TensorDType::F32, (size_t)num_vocab);
-            } else {
-                LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
-                return RWKV_ERROR_RUNTIME;
+        float* batch_slot = batched_logits_storage.data() + (size_t)batch_idx * num_vocab;
+        if (batch_prefill_logits.data_ptr != nullptr) {
+            ret = copy_logits_to_f32(batch_prefill_logits, prefill_logits_f32_batch[batch_idx], num_vocab);
+            if (ret) {
+                model->is_generating = false;
+                LOGE("failed to snapshot prefill logits for batch %d\n", batch_idx);
+                return ret;
             }
-        }
-        // save per-batch logits for the prompt/prefill state (needed if a batch ends before first batch-decode eval)
-        ret = copy_logits_to_f32(logits, prefill_logits_f32_batch[batch_idx], num_vocab);
-        if (ret) {
+        } else if (!nodes_batch[batch_idx]->logits.empty()) {
+            prefill_logits_f32_batch[batch_idx].assign(
+                nodes_batch[batch_idx]->logits.data(),
+                nodes_batch[batch_idx]->logits.data() + num_vocab);
+        } else {
+            LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
             model->is_generating = false;
-            LOGE("failed to snapshot prefill logits for batch %d\n", batch_idx);
-            return ret;
+            return RWKV_ERROR_RUNTIME;
         }
-
-        if (!input.empty()) {
-            std::vector<std::string> resolved_roles;
-            if (!batch_roles.empty()) {
-                resolved_roles = batch_roles;
-            } else {
-                resolved_roles.resize(input.size());
-                for (size_t i = 0; i < input.size(); i++) {
-                    resolved_roles[i] = (i % 2 == 0) ? "user" : "assistant";
-                }
-            }
-            std::string last_role = normalize_role(resolved_roles.back());
-            if (last_role == model->response_role) {
-                std::vector<int> ids = model->tokenizer->encode(" " + input.back());
-                for (auto id: ids) {
-                    occurences_batch[batch_idx][id]++;
-                }
-            }
-        }
+        std::copy_n(prefill_logits_f32_batch[batch_idx].data(), num_vocab, batch_slot);
 
         is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
-        model->sampler->apply_penalties(logits, num_vocab);
-        if (is_pseudo_thinking_batch[batch_idx] || force_reasoning) {
-            mask_thinking_tag(logits);
-        }
-
-        if (force_lang == 1) {
-            mask_non_chinese_tokens(logits, num_vocab);
-        }
-
-        decoded_idx[batch_idx] = model->sampler->sample(logits, num_vocab);
 
         model->backend->get_state(state_batch[batch_idx]);
     }
+
+    logits = Tensor1D::make(batched_logits_storage.data(), TensorDType::F32, (size_t)num_vocab * batch_size);
 
     for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
         model->backend->set_state_on_batch_slot(batch_idx, state_batch[batch_idx]);
@@ -1566,25 +1539,23 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     }
 
     for (int i = 0; i < max_length; i++) {
-        if (i != 0) {
-            for (int j = 0; j < current_batch_size; j++) {
-                int original_j = active_batch_indices[j];
-                Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
-                model->sampler->apply_penalties(view, num_vocab, occurences_batch[original_j],
-                    model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
-                    model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
+        for (int j = 0; j < current_batch_size; j++) {
+            int original_j = active_batch_indices[j];
+            Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
+            model->sampler->apply_penalties(view, num_vocab, occurences_batch[original_j],
+                model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
+                model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
 
-                if ((is_pseudo_thinking_batch[original_j] || force_reasoning) && i <= 2) {
-                    mask_thinking_tag(view);
-                }
-
-                if (force_lang == 1 && i <= 2) {
-                    mask_non_chinese_tokens(view, num_vocab);
-                }
+            if ((is_pseudo_thinking_batch[original_j] || force_reasoning) && i <= 2) {
+                mask_thinking_tag(view);
             }
 
-            decoded_idx = model->sampler->sample_batch(logits, model->backend->get_num_vocab(), model->backend->get_num_vocab(), current_batch_size);
+            if (force_lang == 1 && i <= 2) {
+                mask_non_chinese_tokens(view, num_vocab);
+            }
         }
+
+        decoded_idx = model->sampler->sample_batch(logits, model->backend->get_num_vocab(), model->backend->get_num_vocab(), current_batch_size);
 
         for (int j = 0; j < current_batch_size; j++) {
             int original_j = active_batch_indices[j];
@@ -1610,7 +1581,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                     }
                 }
             }
-            
+
             auto tmp_tokens = response_ids_raw_batch[original_j];
             tmp_tokens.emplace_back(decoded_idx[j]);
             auto compare_token_seq = [&](const std::vector<int> token_seq) -> bool {
@@ -1788,7 +1759,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
     // save state for not finished batches
     for (int j = 0; j < batch_size; j++) {
-        if (!model->response_buffer_eos_found_batch[j] && !state_batch[j].has_value()) {
+        if (!model->response_buffer_eos_found_batch[j]) {
             int active_slot = original_to_active_mapping[j];
             if (active_slot >= 0) {
                 model->backend->get_state_on_batch_slot(active_slot, state_batch[j]);
@@ -2761,7 +2732,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
 
         if (logits.data_ptr == nullptr) {
             if (!nodes_batch[batch_idx]->logits.empty()) {
-                logits = Tensor1D::make(nodes_batch[batch_idx]->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
+                logits = Tensor1D::make(nodes_batch[batch_idx]->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab()).copy();
             } else {
                 LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
                 model->is_generating = false;
@@ -2886,7 +2857,7 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     static int idx = 0;
     if (logits.data_ptr == nullptr) {
         if (!node->logits.empty()) {
-            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
+            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab()).copy();
         } else {
             LOGE("gen_completion: no logits available after prefill");
             model->is_generating = false;
@@ -3019,7 +2990,7 @@ int Runtime::gen_completion_singletoken_topk(int model_id, std::string prompt, i
     static int idx = 0;
     if (logits.data_ptr == nullptr) {
         if (!node->logits.empty()) {
-            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab());
+            logits = Tensor1D::make(node->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab()).copy();
         } else {
             LOGE("gen_completion: no logits available after prefill");
             model->is_generating = false;

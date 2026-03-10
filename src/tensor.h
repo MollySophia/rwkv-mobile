@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 #include "half.hpp"
 
@@ -40,24 +41,79 @@ inline constexpr size_t tensor_dtype_bytes(TensorDType dt) {
     }
 }
 
-// A minimal 1D tensor/view.
-// - Does not own memory.
-// - Only stores metadata that you requested (including redundant byte fields).
+// A minimal 1D tensor that can be either a non-owning view or an owning copy.
+// When _owned_storage is non-empty, data_ptr points into it and the tensor
+// owns its memory.  Otherwise it is a lightweight view (the old behaviour).
 struct Tensor1D {
     void* data_ptr = nullptr;
     TensorDType dtype = TensorDType::UNKNOWN;
     size_t count = 0;
 
-    // Redundant but explicitly requested:
     size_t bytes = 0;
     size_t bytes_per_elem = 0;
 
-    // Quantization metadata (optional)
-    // - scale: multiplicative scale applied during dequantization
-    // - offset: additive offset applied during dequantization
     float scale = 1.0f;
     float offset = 0.0f;
 
+    std::vector<uint8_t> _owned_storage;
+
+    Tensor1D() = default;
+    ~Tensor1D() = default;
+
+    Tensor1D(const Tensor1D& o)
+        : dtype(o.dtype), count(o.count), bytes(o.bytes),
+          bytes_per_elem(o.bytes_per_elem), scale(o.scale), offset(o.offset),
+          _owned_storage(o._owned_storage)
+    {
+        data_ptr = _owned_storage.empty() ? o.data_ptr : _owned_storage.data();
+    }
+
+    Tensor1D(Tensor1D&& o) noexcept
+        : data_ptr(o.data_ptr), dtype(o.dtype), count(o.count),
+          bytes(o.bytes), bytes_per_elem(o.bytes_per_elem),
+          scale(o.scale), offset(o.offset),
+          _owned_storage(std::move(o._owned_storage))
+    {
+        if (!_owned_storage.empty()) {
+            data_ptr = _owned_storage.data();
+        }
+        o.data_ptr = nullptr;
+        o.count = 0;
+        o.bytes = 0;
+    }
+
+    Tensor1D& operator=(const Tensor1D& o) {
+        if (this != &o) {
+            dtype = o.dtype;
+            count = o.count;
+            bytes = o.bytes;
+            bytes_per_elem = o.bytes_per_elem;
+            scale = o.scale;
+            offset = o.offset;
+            _owned_storage = o._owned_storage;
+            data_ptr = _owned_storage.empty() ? o.data_ptr : _owned_storage.data();
+        }
+        return *this;
+    }
+
+    Tensor1D& operator=(Tensor1D&& o) noexcept {
+        if (this != &o) {
+            dtype = o.dtype;
+            count = o.count;
+            bytes = o.bytes;
+            bytes_per_elem = o.bytes_per_elem;
+            scale = o.scale;
+            offset = o.offset;
+            _owned_storage = std::move(o._owned_storage);
+            data_ptr = _owned_storage.empty() ? o.data_ptr : _owned_storage.data();
+            o.data_ptr = nullptr;
+            o.count = 0;
+            o.bytes = 0;
+        }
+        return *this;
+    }
+
+    // Create a non-owning view (same as before).
     static inline Tensor1D make(void* ptr, TensorDType dt, size_t n) {
         Tensor1D t;
         t.data_ptr = ptr;
@@ -68,11 +124,36 @@ struct Tensor1D {
         return t;
     }
 
+    // Deep-copy the data into a new owning Tensor1D.
+    Tensor1D copy() const {
+        Tensor1D t;
+        t.dtype = dtype;
+        t.count = count;
+        t.bytes_per_elem = bytes_per_elem;
+        t.bytes = bytes;
+        t.scale = scale;
+        t.offset = offset;
+        if (data_ptr && bytes > 0) {
+            t._owned_storage.resize(bytes);
+            std::memcpy(t._owned_storage.data(), data_ptr, bytes);
+            t.data_ptr = t._owned_storage.data();
+        }
+        return t;
+    }
+
+    bool is_view() const { return _owned_storage.empty() && data_ptr != nullptr; }
+    bool is_owned() const { return !_owned_storage.empty(); }
+
     inline bool valid() const { return data_ptr != nullptr && count > 0 && bytes_per_elem > 0; }
 };
 
+// Always returns a non-owning view into t's data (never copies _owned_storage).
 inline Tensor1D tensor1d_subview(const Tensor1D& t, size_t elem_offset, size_t elem_count) {
-    Tensor1D out = t;
+    Tensor1D out;
+    out.dtype = t.dtype;
+    out.bytes_per_elem = t.bytes_per_elem;
+    out.scale = t.scale;
+    out.offset = t.offset;
     if (!t.valid() || elem_offset >= t.count) {
         out.data_ptr = nullptr;
         out.count = 0;
