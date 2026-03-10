@@ -1267,20 +1267,20 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
             break;
         }
 
+        auto tmp_tokens = response_ids_raw;
+        tmp_tokens.emplace_back(decoded_idx);
         auto compare_token_seq = [&](const std::vector<int> token_seq) -> bool {
-            if (response_ids_raw.size() < token_seq.size()) {
+            if (tmp_tokens.size() < token_seq.size()) {
                 return false;
             }
             for (size_t i = 0; i < token_seq.size(); i++) {
-                if (response_ids_raw[response_ids_raw.size() - token_seq.size() + i] != token_seq[i]) {
+                if (tmp_tokens[tmp_tokens.size() - token_seq.size() + i] != token_seq[i]) {
                     return false;
                 }
             }
             return true;
         };
 
-        response_ids_raw.emplace_back(decoded_idx);
-        model->response_buffer_ids.emplace_back(decoded_idx);
         for (auto &stop_code : model->stop_token_seqs) {
             if (enable_reasoning && !thinking_end_tag_found && stop_code[0] == 261) { // \n\n
                 continue;
@@ -1297,12 +1297,20 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
             }
         }
 
+        if (model->response_buffer_eos_found || model->stop_signal) {
+            LOGD("stopping generation, eos_found: %d, stop_signal: %d\n", model->response_buffer_eos_found, model->stop_signal);
+            break;
+        }
+
         ret = eval_logits(model_id, decoded_idx, logits);
         if (ret) {
             model->is_generating = false;
             LOGE("failed to eval logits\n");
             return ret;
         }
+
+        response_ids_raw.emplace_back(decoded_idx);
+        model->response_buffer_ids.emplace_back(decoded_idx);
 
         if (callback) {
             std::string decoded = model->tokenizer->decode(decoded_idx);
@@ -1317,11 +1325,6 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
         }
 
         model->sampler->update_occurences(decoded_idx);
-
-        if (model->response_buffer_eos_found || model->stop_signal) {
-            LOGD("stopping generation, eos_found: %d, stop_signal: %d\n", model->response_buffer_eos_found, model->stop_signal);
-            break;
-        }
     }
 
     if (response_ids_raw.size() > 0 && max_length > 0) {
@@ -1608,12 +1611,14 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 }
             }
             
+            auto tmp_tokens = response_ids_raw_batch[original_j];
+            tmp_tokens.emplace_back(decoded_idx[j]);
             auto compare_token_seq = [&](const std::vector<int> token_seq) -> bool {
-                if (model->response_buffer_decoded_tokens_batch[original_j] < token_seq.size()) {
+                if (tmp_tokens.size() < token_seq.size()) {
                     return false;
                 }
-                for (size_t i = 0; i < token_seq.size(); i++) {
-                    if (model->response_buffer_ids_batch[original_j][model->response_buffer_decoded_tokens_batch[original_j] - token_seq.size() + i] != token_seq[i]) {
+                for (size_t k = 0; k < token_seq.size(); k++) {
+                    if (tmp_tokens[tmp_tokens.size() - token_seq.size() + k] != token_seq[k]) {
                         return false;
                     }
                 }
@@ -3380,9 +3385,9 @@ void Runtime::set_eos_token(int model_id, std::string token) {
     auto &model = _models.at(model_id);
     model->eos_token = token;
     if (token == "\n\n") {
-        model->stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}};
+        model->stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}, {5585, 41693}};
     } else if (token == "\n") {
-        model->stop_token_seqs = {{11}, {28329}, {28324}, {28331}};
+        model->stop_token_seqs = {{11}, {28329}, {28324}, {28331}, {261}, {5585, 41693}};
     } else {
         model->stop_token_seqs.clear();
         model->stop_token_seqs.push_back(model->tokenizer->encode(token));
