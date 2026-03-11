@@ -100,9 +100,9 @@ public:
 
     state_node* find_deepest_matching_node(const std::vector<int> &ids, bool increment_activation_count = true);
     state_node* match_and_load_state(const std::vector<int> &ids, std::vector<int> &new_ids_to_prefill);
-    int register_state_checkpoint(state_node* &node, const std::vector<int> &ids, const Tensor1D &logits);
-    int register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const Tensor1D &logits, std::any &state);
-    int register_batch_state_checkpoint(std::vector<state_node*> &nodes, std::vector<std::any> &states, const std::vector<std::vector<int>> &ids, const Tensor1D &logits);
+    int register_state_checkpoint(state_node* &node, const std::vector<int> ids, const Tensor1D &logits);
+    int register_state_checkpoint_with_state(state_node* &node, const std::vector<int> ids, const Tensor1D &logits, std::any &state);
+    int register_batch_state_checkpoint(std::vector<state_node*> &nodes, std::vector<std::any> &states, const std::vector<std::vector<int>> ids, const Tensor1D &logits);
 
     void cleanup_state_tree();
 };

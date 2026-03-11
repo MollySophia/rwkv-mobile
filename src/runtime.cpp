@@ -1263,7 +1263,15 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
 
         decoded_idx = model->sampler->sample(logits, model->backend->get_num_vocab());
         if (decoded_idx == 0) {
-            LOGD("sampled token 0, stopping generation\n");
+            LOGD("sampled token 0, stopping generation; eval one more step with EOS for state cache\n");
+            int eos_token_id = model->tokenizer->encode(model->eos_token)[0];
+            ret = eval_logits(model_id, eos_token_id, logits);
+            if (ret) {
+                model->is_generating = false;
+                LOGE("failed to eval logits with EOS\n");
+                return ret;
+            }
+            response_ids_raw.emplace_back(eos_token_id);
             break;
         }
 
@@ -1532,6 +1540,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     int current_batch_size = batch_size;
     std::vector<int> active_batch_indices;
     std::vector<int> original_to_active_mapping(batch_size, -1);
+    int eos_token_id = model->tokenizer->encode(model->eos_token)[0];
 
     for (int j = 0; j < batch_size; j++) {
         active_batch_indices.push_back(j);
@@ -1560,25 +1569,11 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         for (int j = 0; j < current_batch_size; j++) {
             int original_j = active_batch_indices[j];
             if (decoded_idx[j] == 0) {
-                LOGD("sampled token 0 for batch %d\n", original_j);
+                LOGD("sampled token 0 for batch %d; will eval with EOS for state cache\n", original_j);
                 model->response_buffer_eos_found_batch[original_j] = true;
-                std::any state_end;
-                model->backend->get_state_on_batch_slot(j, state_end);
-                state_batch[original_j] = std::move(state_end);
-                if (!logits_final_set[original_j]) {
-                    if (i == 0) {
-                        logits_final_f32_batch[original_j] = prefill_logits_f32_batch[original_j];
-                        logits_final_set[original_j] = true;
-                    } else {
-                        Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
-                        int r = copy_logits_to_f32(view, logits_final_f32_batch[original_j], num_vocab);
-                        if (r) {
-                            model->is_generating = false;
-                            LOGE("failed to snapshot final logits for batch %d\n", original_j);
-                            return r;
-                        }
-                        logits_final_set[original_j] = true;
-                    }
+                if (!logits_final_set[original_j] && i == 0) {
+                    logits_final_f32_batch[original_j] = prefill_logits_f32_batch[original_j];
+                    logits_final_set[original_j] = true;
                 }
             }
 
@@ -1729,7 +1724,10 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
             break;
         }
 
-        std::vector<int> active_decoded_idx(decoded_idx.begin(), decoded_idx.begin() + current_batch_size);
+        std::vector<int> active_decoded_idx(current_batch_size);
+        for (int j = 0; j < current_batch_size; j++) {
+            active_decoded_idx[j] = (decoded_idx[j] == 0) ? eos_token_id : decoded_idx[j];
+        }
         ret = eval_logits_batch_decode(model_id, active_decoded_idx, logits);
         if (ret) {
             model->is_generating = false;
@@ -1739,6 +1737,23 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
         for (int j = 0; j < current_batch_size; j++) {
             int original_j = active_batch_indices[j];
+            if (decoded_idx[j] == 0) {
+                std::any state_end;
+                model->backend->get_state_on_batch_slot(j, state_end);
+                state_batch[original_j] = std::move(state_end);
+                if (!logits_final_set[original_j]) {
+                    Tensor1D view = tensor1d_subview(logits, (size_t)j * (size_t)num_vocab, (size_t)num_vocab);
+                    int r = copy_logits_to_f32(view, logits_final_f32_batch[original_j], num_vocab);
+                    if (r) {
+                        model->is_generating = false;
+                        LOGE("failed to snapshot final logits for batch %d\n", original_j);
+                        return r;
+                    }
+                    logits_final_set[original_j] = true;
+                }
+                response_ids_raw_batch[original_j].emplace_back(eos_token_id);
+                continue;
+            }
             if (model->response_buffer_eos_found_batch[original_j]) {
                 continue;
             }

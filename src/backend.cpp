@@ -3,8 +3,29 @@
 #include "commondef.h"
 #include <cstring>
 #include <functional>
+#include <utility>
 
 namespace rwkvmobile {
+
+static const std::vector<std::pair<std::vector<int>, std::vector<int>>> kStateCacheIdReplacements = {
+    {{10080, 261}, {28329, 11}}, // "。" + "\n\n" -> "。\n" + "\n"
+    {{9830, 261}, {28324, 11}}, // "…" + "\n\n" -> "…\n" + "\n"
+    {{19137, 261}, {28331, 11}}, // "，" + "\n\n" -> "，\n" + "\n"
+};
+
+static void apply_state_cache_id_replacement(std::vector<int> &ids) {
+    if (ids.size() < 2) return;
+    for (const auto &p : kStateCacheIdReplacements) {
+        const auto &from = p.first;
+        const auto &to = p.second;
+        if (from.size() != 2 || to.size() != 2) continue;
+        if (ids[ids.size() - 2] == from[0] && ids[ids.size() - 1] == from[1]) {
+            ids.resize(ids.size() - 2);
+            ids.insert(ids.end(), to.begin(), to.end());
+            return;
+        }
+    }
+}
 
 state_node* execution_provider::find_deepest_matching_node(const std::vector<int> &ids, bool increment_activation_count) {
     auto node = state_root.get();
@@ -37,13 +58,13 @@ state_node* execution_provider::match_and_load_state(const std::vector<int> &ids
     return node;
 }
 
-int execution_provider::register_state_checkpoint(state_node* &node, const std::vector<int> &ids, const Tensor1D &logits) {
+int execution_provider::register_state_checkpoint(state_node* &node, const std::vector<int> ids, const Tensor1D &logits) {
     std::any new_state;
     get_state(new_state);
     return register_state_checkpoint_with_state(node, ids, logits, new_state);
 }
 
-int execution_provider::register_state_checkpoint_with_state(state_node* &node, const std::vector<int> &ids, const Tensor1D &logits, std::any &state) {
+int execution_provider::register_state_checkpoint_with_state(state_node* &node, const std::vector<int> ids, const Tensor1D &logits, std::any &state) {
     if (logits.data_ptr == nullptr || logits.count < (size_t)vocab_size) {
         LOGE("register_state_checkpoint_with_state: invalid logits tensor");
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
@@ -51,6 +72,7 @@ int execution_provider::register_state_checkpoint_with_state(state_node* &node, 
 
     auto new_ids = node->ids;
     new_ids.insert(new_ids.end(), ids.begin(), ids.end());
+    apply_state_cache_id_replacement(new_ids);
     auto tmp_node = find_deepest_matching_node(new_ids, false);
     if (tmp_node->ids.size() == new_ids.size() && std::equal(tmp_node->ids.begin(), tmp_node->ids.end(), new_ids.begin())) {
         // avoid duplicate node
@@ -64,9 +86,8 @@ int execution_provider::register_state_checkpoint_with_state(state_node* &node, 
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_ALLOC;
     }
     // new_node->ids = std::vector<int>(ids);
-    // each node cumulates the ids from the root to the node
-    new_node->ids = node->ids;
-    new_node->ids.insert(new_node->ids.end(), ids.begin(), ids.end());
+    // each node cumulates the ids from the root to the node (after 2-token replacement)
+    new_node->ids = new_ids;
     new_node->logits.resize(vocab_size);
     if (logits.dtype == TensorDType::F32) {
         memcpy(new_node->logits.data(), logits.data_ptr, (size_t)vocab_size * sizeof(float));
@@ -91,7 +112,7 @@ int execution_provider::register_state_checkpoint_with_state(state_node* &node, 
     return RWKV_SUCCESS;
 }
 
-int execution_provider::register_batch_state_checkpoint(std::vector<state_node*> &nodes, std::vector<std::any> &states, const std::vector<std::vector<int>> &ids, const Tensor1D &logits) {
+int execution_provider::register_batch_state_checkpoint(std::vector<state_node*> &nodes, std::vector<std::any> &states, const std::vector<std::vector<int>> ids, const Tensor1D &logits) {
     auto batch_size = states.size();
     if (ids.size() != batch_size) {
         LOGE("register_batch_state_checkpoint: ids size %d != batch size %d\n", ids.size(), batch_size);
@@ -103,16 +124,22 @@ int execution_provider::register_batch_state_checkpoint(std::vector<state_node*>
     }
 
     for (size_t i = 0; i < batch_size; i++) {
+        std::vector<int> full_ids = nodes[i]->ids;
+        full_ids.insert(full_ids.end(), ids[i].begin(), ids[i].end());
+        apply_state_cache_id_replacement(full_ids);
+
+        bool duplicate = false;
         for (auto &child : nodes[i]->children) {
-            if (child->ids.size() == ids[i].size() && std::equal(child->ids.begin(), child->ids.end(), ids[i].begin())) {
+            if (child->ids.size() == full_ids.size() && std::equal(child->ids.begin(), child->ids.end(), full_ids.begin())) {
                 child->activation_count++;
-                continue;
+                duplicate = true;
+                break;
             }
         }
+        if (duplicate) continue;
+
         auto new_node = std::make_unique<state_node>();
-        // new_node->ids = std::vector<int>(ids[i]);
-        new_node->ids = nodes[i]->ids;
-        new_node->ids.insert(new_node->ids.end(), ids[i].begin(), ids[i].end());
+        new_node->ids = std::move(full_ids);
         new_node->state = std::move(states[i]);
         new_node->logits.resize(vocab_size);
         if (logits.dtype == TensorDType::F32) {
