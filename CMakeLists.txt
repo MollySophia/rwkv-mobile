@@ -199,7 +199,7 @@ if (ENABLE_LLAMACPP_BACKEND)
     FetchContent_Declare(
         llama_cpp
         GIT_REPOSITORY https://github.com/ggml-org/llama.cpp
-        GIT_TAG 5d804a4938d896f9089687a8b99911cdb43b0b94
+        GIT_TAG 29771a0a4c16e82a3e32974fddcb3e7b85359f53
     )
 
     option(LLAMA_STANDALONE "" OFF)
@@ -216,7 +216,12 @@ if (ENABLE_LLAMACPP_BACKEND)
         option(GGML_CPU_ARM_ARCH "" "armv8.6-a")
     endif()
     if ((WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux") AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND ENABLE_LLAMACPP_VULKAN)
-        option(GGML_VULKAN "" ON)
+        find_package(Vulkan QUIET COMPONENTS glslc)
+        if (Vulkan_FOUND AND Vulkan_LIBRARY AND Vulkan_INCLUDE_DIR AND Vulkan_GLSLC_EXECUTABLE)
+            option(GGML_VULKAN "" ON)
+        else()
+            message(FATAL_ERROR "ENABLE_LLAMACPP_VULKAN=ON requires complete Vulkan SDK (Vulkan_LIBRARY, Vulkan_INCLUDE_DIR, glslc)")
+        endif()
     endif()
 
     FetchContent_MakeAvailable(llama_cpp)
