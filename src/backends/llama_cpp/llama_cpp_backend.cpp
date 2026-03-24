@@ -45,7 +45,7 @@ int llama_cpp_backend::init(void * extra) {
 int llama_cpp_backend::load_model(std::string model_path, void * extra) {
     llama_model_params model_params = llama_model_default_params();
 
-#if defined(__APPLE__) || defined(__MACH__)
+#if defined(__APPLE__) || defined(__MACH__) || defined(GGML_USE_VULKAN)
     model_params.n_gpu_layers = 99;
 #else
     model_params.n_gpu_layers = 0;
