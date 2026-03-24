@@ -5,6 +5,10 @@
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
 
+#ifndef GGML_KQ_MASK_PAD
+#define GGML_KQ_MASK_PAD 64
+#endif
+
 #ifdef WHISPER_USE_COREML
 #include "coreml/whisper-encoder.h"
 #endif

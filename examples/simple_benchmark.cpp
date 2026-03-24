@@ -22,12 +22,25 @@ int main(int argc, char **argv) {
     if (model_id < 0) return 1;
 
     int vocab_size = runtime.get_vocab_size(model_id);
-
     std::vector<int> prompt_ids(512);
+    rwkvmobile::Tensor1D logits;
+
     for (int i = 0; i < 512; i++) {
         prompt_ids[i] = rand() % vocab_size;
     }
-    rwkvmobile::Tensor1D logits;
+
+    runtime.clear_state(model_id);
+    runtime.reset_inference_speed_stats(model_id);
+
+    // Warm up kernels and graph compilation on the same runtime instance.
+    runtime.eval_logits(model_id, prompt_ids, logits);
+    for (int i = 0; i < 128; i++) {
+        runtime.eval_logits(model_id, rand() % vocab_size, logits);
+    }
+
+    runtime.clear_state(model_id);
+    runtime.reset_inference_speed_stats(model_id);
+
     runtime.eval_logits(model_id, prompt_ids, logits);
 
     std::cout << "Prefill speed: " << runtime.get_avg_prefill_speed(model_id) << " tokens/s" << std::endl;

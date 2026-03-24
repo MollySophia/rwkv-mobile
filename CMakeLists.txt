@@ -199,7 +199,7 @@ if (ENABLE_LLAMACPP_BACKEND)
     FetchContent_Declare(
         llama_cpp
         GIT_REPOSITORY https://github.com/ggml-org/llama.cpp
-        GIT_TAG 5d804a4938d896f9089687a8b99911cdb43b0b94
+        GIT_TAG 29771a0a4c16e82a3e32974fddcb3e7b85359f53
     )
 
     option(LLAMA_STANDALONE "" OFF)

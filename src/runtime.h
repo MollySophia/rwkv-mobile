@@ -12,6 +12,7 @@
 #include <mutex>
 #include <atomic>
 #include <cstdint>
+#include <chrono>
 #include "backend.h"
 #include "tokenizer.h"
 #include "sampler.h"
@@ -95,9 +96,12 @@ struct ModelInstance {
     std::deque<SpeedSample> prefill_samples_us;
 
     // Prefill progress
+    mutable std::mutex prefill_progress_mutex;
     int current_prefill_total_tokens = -1;
     int current_prefill_finished_tokens = 0;
     double prefill_progress = 0.0;
+    std::chrono::steady_clock::time_point prefill_progress_started_at;
+    int64_t prefill_estimated_total_us = 0;
 
 #if defined(ENABLE_VISION) || defined(ENABLE_WHISPER)
     std::unique_ptr<MultimodalEncoder> multimodal_encoder;
@@ -309,6 +313,7 @@ public:
     double get_avg_decode_speed(int model_id);
     double get_avg_prefill_speed(int model_id);
     double get_prefill_progress(int model_id);
+    void reset_inference_speed_stats(int model_id);
 
     std::string get_state_cache_info(int model_id);
 
@@ -437,27 +442,12 @@ private:
         double trim_ratio_total
     );
     void _clear_speed_samples(ModelInstance& model);
+    int _get_prefill_checkpoint_interval(int total_tokens) const;
 
-    const int _prefill_chunk_size = 64;
+    const int _prefill_chunk_size = 2048;
 
-    void _prefill_progress_start(int model_id, int total_tokens) {
-        if (_models.find(model_id) == _models.end()) {
-            return;
-        }
-        auto &model = _models.at(model_id);
-        model->current_prefill_total_tokens = total_tokens;
-        model->current_prefill_finished_tokens = 0;
-        model->prefill_progress = 0;
-    }
-
-    void _prefill_progress_finish(int model_id) {
-        if (_models.find(model_id) == _models.end()) {
-            return;
-        }
-        auto &model = _models.at(model_id);
-        model->current_prefill_total_tokens = -1;
-        model->prefill_progress = 1.0;
-    }
+    void _prefill_progress_start(int model_id, int total_tokens);
+    void _prefill_progress_finish(int model_id);
 
     std::string _cache_dir = "";
 

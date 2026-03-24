@@ -191,6 +191,68 @@ int backend_str_to_enum(std::string backend) {
     return -1;
 }
 
+void Runtime::_prefill_progress_start(int model_id, int total_tokens) {
+    if (_models.find(model_id) == _models.end()) {
+        return;
+    }
+
+    auto &model = _models.at(model_id);
+    double estimated_speed = model->backend ? model->backend->get_prefill_speed() : -1.0;
+    if (estimated_speed <= 0.0) {
+        std::lock_guard<std::mutex> speed_lock(model->speed_samples_mutex);
+        estimated_speed = _compute_trimmed_mean_speed_tokens_per_s(model->prefill_samples_us, _speed_trim_ratio_total);
+    }
+    if (estimated_speed <= 0.0 && _prefill_speed > 0.0) {
+        estimated_speed = _prefill_speed;
+    }
+    if (estimated_speed <= 0.0) {
+        // Conservative fallback so the UI still shows progress on first use.
+        estimated_speed = 512.0;
+    }
+
+    std::lock_guard<std::mutex> progress_lock(model->prefill_progress_mutex);
+    model->current_prefill_total_tokens = total_tokens;
+    model->current_prefill_finished_tokens = 0;
+    model->prefill_progress = total_tokens > 0 ? 0.01 : 0.0;
+    model->prefill_progress_started_at = std::chrono::steady_clock::now();
+    model->prefill_estimated_total_us = std::max<int64_t>(
+        50 * 1000,
+        (int64_t) ((double) total_tokens * 1000000.0 / estimated_speed)
+    );
+}
+
+void Runtime::_prefill_progress_finish(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return;
+    }
+
+    auto &model = _models.at(model_id);
+    std::lock_guard<std::mutex> progress_lock(model->prefill_progress_mutex);
+    model->current_prefill_finished_tokens = std::max(0, model->current_prefill_total_tokens);
+    model->current_prefill_total_tokens = -1;
+    model->prefill_estimated_total_us = 0;
+    model->prefill_progress = 1.0;
+}
+
+int Runtime::_get_prefill_checkpoint_interval(int total_tokens) const {
+    if (total_tokens <= 0) {
+        return _prefill_chunk_size;
+    }
+    if (total_tokens <= 512) {
+        return total_tokens;
+    }
+    if (total_tokens <= 2048) {
+        return 512;
+    }
+    if (total_tokens <= 8192) {
+        return 1024;
+    }
+    if (total_tokens <= 32768) {
+        return 2048;
+    }
+    return 4096;
+}
+
 int Runtime::load_model(std::string model_path, std::string backend_name, std::string tokenizer_path, void * extra) {
     int ret_model_id = -1;
     int backend_id = backend_str_to_enum(backend_name);
@@ -609,6 +671,7 @@ int Runtime::eval_logits(int model_id, std::vector<int> ids, Tensor1D & logits) 
         ret = model->backend->eval(ids_chunk, logits);
         if (ret != RWKV_SUCCESS) return ret;
         if (model->current_prefill_total_tokens > 0) {
+            std::lock_guard<std::mutex> progress_lock(model->prefill_progress_mutex);
             model->current_prefill_finished_tokens += _prefill_chunk_size;
             model->prefill_progress = (double)model->current_prefill_finished_tokens / model->current_prefill_total_tokens;
             LOGD("Update prefill_progress = %f", model->prefill_progress);
@@ -618,6 +681,7 @@ int Runtime::eval_logits(int model_id, std::vector<int> ids, Tensor1D & logits) 
         auto ids_left = std::vector<int>(ids.begin() + i, ids.end());
         ret = model->backend->eval(ids_left, logits);
         if (model->current_prefill_total_tokens > 0) {
+            std::lock_guard<std::mutex> progress_lock(model->prefill_progress_mutex);
             model->current_prefill_finished_tokens += ids_left.size();
             model->prefill_progress = (double)model->current_prefill_finished_tokens / model->current_prefill_total_tokens;
             LOGD("Update prefill_progress = %f", model->prefill_progress);
@@ -1128,7 +1192,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
         LOGI("new text to prefill: \"%s\"", escape_special_chars(text_to_prefill).c_str());
 
         // Split text by image tags and token count, then process each chunk
-        int checkpoint_interval = 256;
+        int checkpoint_interval = _get_prefill_checkpoint_interval((int) tokens_to_prefill.size());
         auto token_chunks = split_text_by_image_and_token_num(text_to_prefill, checkpoint_interval, model_id);
 
         for (const auto& chunk : token_chunks) {
@@ -1486,7 +1550,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
             _prefill_progress_start(model_id, tokens_to_prefill.size());
             LOGI("new text to prefill: \"%s\"", escape_special_chars(model->tokenizer->decode(tokens_to_prefill)).c_str());
 
-            int checkpoint_interval = 256;
+            int checkpoint_interval = _get_prefill_checkpoint_interval((int) tokens_to_prefill.size());
             for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
                 std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
                 int ret = eval_logits(model_id, tokens_to_prefill_chunk, batch_prefill_logits);
@@ -2719,8 +2783,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         }
         _prefill_progress_start(model_id, tokens_to_prefill.size());
 
-        // save a state checkpoint every about 256 tokens
-        int checkpoint_interval = 256;
+        int checkpoint_interval = _get_prefill_checkpoint_interval((int) tokens_to_prefill.size());
         for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
             std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
             int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
@@ -2844,8 +2907,7 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     _prefill_progress_start(model_id, tokens_to_prefill.size());
 
     Tensor1D logits;
-    // save a state checkpoint every about 256 tokens
-    int checkpoint_interval = 256;
+    int checkpoint_interval = _get_prefill_checkpoint_interval((int) tokens_to_prefill.size());
     for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
         std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
         int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
@@ -3148,6 +3210,17 @@ double Runtime::get_avg_prefill_speed(int model_id) {
         return speed;
     }
     return (_prefill_speed < 0) ? 0.0 : _prefill_speed;
+}
+
+void Runtime::reset_inference_speed_stats(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return;
+    }
+
+    auto &model = _models.at(model_id);
+    _clear_speed_samples(*model);
+    _decode_speed = -1;
+    _prefill_speed = -1;
 }
 
 void Runtime::set_sampler_params(int model_id, float temperature, int top_k, float top_p) {
@@ -3606,6 +3679,22 @@ double Runtime::get_prefill_progress(int model_id) {
         return 0.0;
     }
     auto &model = _models.at(model_id);
+    std::lock_guard<std::mutex> progress_lock(model->prefill_progress_mutex);
+
+    if (model->current_prefill_total_tokens > 0 && model->prefill_estimated_total_us > 0) {
+        const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - model->prefill_progress_started_at
+        ).count();
+        const double estimated_progress = std::min(
+            0.97,
+            std::max(
+                model->prefill_progress,
+                (double) elapsed_us / (double) model->prefill_estimated_total_us * 0.97
+            )
+        );
+        model->prefill_progress = estimated_progress;
+    }
+
     return model->prefill_progress;
 }
 
