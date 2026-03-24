@@ -21,6 +21,17 @@ jobs:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-x64
     steps:
     - uses: actions/checkout@v4
+    - name: setup-vulkan-sdk
+      shell: powershell
+      run: |
+        $ErrorActionPreference = "Stop"
+        winget install -e --id KhronosGroup.VulkanSDK --accept-package-agreements --accept-source-agreements
+        $sdk = Get-ChildItem "C:\VulkanSDK" -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+        if ($null -eq $sdk) {
+          throw "Vulkan SDK not found under C:\VulkanSDK after installation."
+        }
+        "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "$($sdk.FullName)\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
     - name: build
       run: |
         mkdir build && cd build
@@ -225,6 +236,17 @@ jobs:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-x86_64
     steps:
     - uses: actions/checkout@v4
+    - name: setup-vulkan-sdk
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libvulkan-dev glslang-tools
+        if ! command -v glslc >/dev/null 2>&1; then
+          sudo apt-get install -y glslc
+        fi
+        if ! command -v glslc >/dev/null 2>&1; then
+          sudo apt-get install -y shaderc
+        fi
+        command -v glslc >/dev/null 2>&1 || { echo "glslc is required but not found"; exit 1; }
     - name: build
       run: |
         rm -rf build
