@@ -2380,57 +2380,59 @@ int qnn_backend::deserialize_runtime_state(std::vector<uint8_t> &data, std::any 
 int qnn_backend::release_model() {
     LOGI("[QNN] release_model");
     // free graphs
+    {
+        std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);  
+        if (qnnPrefillGraphsCount > 0) {
+            for (int i = 0; i < qnnPrefillGraphsCount; i++) {
+                auto graphInfo     = (*qnnPrefillGraphsInfo)[i];
+                qnnIOTensorUtils->tearDownTensors(inputTensorsPrefill[i], graphInfo.numInputTensors);
+                qnnIOTensorUtils->tearDownTensors(outputTensorsPrefill[i], graphInfo.numOutputTensors);
+                inputTensorsPrefill[i]  = nullptr;
+                outputTensorsPrefill[i] = nullptr;
+            }
 
-    if (qnnPrefillGraphsCount > 0) {
-        for (int i = 0; i < qnnPrefillGraphsCount; i++) {
-            auto graphInfo     = (*qnnPrefillGraphsInfo)[i];
-            qnnIOTensorUtils->tearDownTensors(inputTensorsPrefill[i], graphInfo.numInputTensors);
-            qnnIOTensorUtils->tearDownTensors(outputTensorsPrefill[i], graphInfo.numOutputTensors);
-            inputTensorsPrefill[i]  = nullptr;
-            outputTensorsPrefill[i] = nullptr;
+            freeGraphsInfo(&qnnPrefillGraphsInfo, qnnPrefillGraphsCount);
+            qnnPrefillGraphsInfo = nullptr;
         }
 
-        freeGraphsInfo(&qnnPrefillGraphsInfo, qnnPrefillGraphsCount);
-        qnnPrefillGraphsInfo = nullptr;
-    }
+        if (qnnEmbdGraphsCount > 0) {
+            for (int i = 0; i < qnnEmbdGraphsCount; i++) {
+                auto graphInfo     = (*qnnEmbdGraphsInfo)[i];
+                qnnIOTensorUtils->tearDownTensors(inputTensorsEmbd[i], graphInfo.numInputTensors);
+                qnnIOTensorUtils->tearDownTensors(outputTensorsEmbd[i], graphInfo.numOutputTensors);
+                inputTensorsEmbd[i]  = nullptr;
+                outputTensorsEmbd[i] = nullptr;
+            }
 
-    if (qnnEmbdGraphsCount > 0) {
-        for (int i = 0; i < qnnEmbdGraphsCount; i++) {
-            auto graphInfo     = (*qnnEmbdGraphsInfo)[i];
-            qnnIOTensorUtils->tearDownTensors(inputTensorsEmbd[i], graphInfo.numInputTensors);
-            qnnIOTensorUtils->tearDownTensors(outputTensorsEmbd[i], graphInfo.numOutputTensors);
-            inputTensorsEmbd[i]  = nullptr;
-            outputTensorsEmbd[i] = nullptr;
+            freeGraphsInfo(&qnnEmbdGraphsInfo, qnnEmbdGraphsCount);
+            qnnEmbdGraphsInfo = nullptr;
         }
 
-        freeGraphsInfo(&qnnEmbdGraphsInfo, qnnEmbdGraphsCount);
-        qnnEmbdGraphsInfo = nullptr;
-    }
+        cleanup_batch_graphs();
 
-    cleanup_batch_graphs();
-
-    for (int i = 0; i < qnnContextHandles.size(); i++) {
-        if (QNN_CONTEXT_NO_ERROR !=
-            g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.contextFree(qnnContextHandles[i], nullptr)) {
-            LOGE("Could not free context");
+        for (int i = 0; i < qnnContextHandles.size(); i++) {
+            if (QNN_CONTEXT_NO_ERROR !=
+                g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.contextFree(qnnContextHandles[i], nullptr)) {
+                LOGE("Could not free context");
+            }
         }
+        qnnContextHandles.clear();
+
+        for (int i = 0; i < graphConfigsInfoCount; i++) {
+            delete graphConfigsInfo[i];
+        }
+        delete graphConfigsInfo;
+
+        delete qnnIOTensorUtils;
+
+        if (qnnModelHandle)
+            pal::dynamicloading::dlClose(qnnModelHandle);
+
+        tokenInputTensorBatchDecode.clear();
+        deepEmbeddingTensors.clear();
+        deepEmbeddingPrefillTensors.clear();
+        stateTensorsNameToTensorPointer.clear();
     }
-    qnnContextHandles.clear();
-
-    for (int i = 0; i < graphConfigsInfoCount; i++) {
-        delete graphConfigsInfo[i];
-    }
-    delete graphConfigsInfo;
-
-    delete qnnIOTensorUtils;
-
-    if (qnnModelHandle)
-        pal::dynamicloading::dlClose(qnnModelHandle);
-
-    tokenInputTensorBatchDecode.clear();
-    deepEmbeddingTensors.clear();
-    deepEmbeddingPrefillTensors.clear();
-    stateTensorsNameToTensorPointer.clear();
     return RWKV_SUCCESS;
 }
 
