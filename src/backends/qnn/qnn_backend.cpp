@@ -615,21 +615,31 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
             if (is_rmpack) {
                 bufferSizes[i] = rmpack->getFileSize("model_" + std::to_string(i));
 #if USE_MMAP
-                buffer[i] = std::shared_ptr<uint8_t>(
-                    (uint8_t*)rmpack->mmapFile("model_" + std::to_string(i)), [this, i](uint8_t* p) {
-                        if (p) {
-                            rmpack->unmapFile("model_" + std::to_string(i));
+                try {
+                    buffer[i] = std::shared_ptr<uint8_t>(
+                        (uint8_t*)rmpack->mmapFile("model_" + std::to_string(i)), [this, i](uint8_t* p) {
+                            if (p) {
+                                rmpack->unmapFile("model_" + std::to_string(i));
+                            }
                         }
-                    }
-                );
+                    );
+                } catch (const std::exception& e) {
+                    LOGE("Failed to mmap model chunk %d: %s", i, e.what());
+                    return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
+                }
 #else
-                buffer[i] = std::shared_ptr<uint8_t>(
-                    (uint8_t*)rmpack->readFileToMemory("model_" + std::to_string(i)), [this, i](uint8_t* p) {
-                        if (p) {
-                            rmpack->freeFileMemory("model_" + std::to_string(i));
+                try {
+                    buffer[i] = std::shared_ptr<uint8_t>(
+                        (uint8_t*)rmpack->readFileToMemory("model_" + std::to_string(i)), [this, i](uint8_t* p) {
+                            if (p) {
+                                rmpack->freeFileMemory("model_" + std::to_string(i));
+                            }
                         }
-                    }
-                );
+                    );
+                } catch (const std::exception& e) {
+                    LOGE("Failed to read model chunk %d: %s", i, e.what());
+                    return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
+                }
 #endif
             } else {
                 if (n_chunks > 1) {
@@ -768,7 +778,6 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
             free(cfgs);
             cfgs = nullptr;
 
-            isContextCreated = true;
             if (RWKV_SUCCESS == returnStatus) {
                 for (size_t graphIdx = 0; graphIdx < graphCounts[i]; graphIdx++) {
                     if (nullptr == g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.graphRetrieve) {
@@ -786,7 +795,10 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
             }
             if (RWKV_SUCCESS != returnStatus) {
                 LOGD("Cleaning up graph Info structures.");
-                freeGraphsInfo(&graphInfos[i], graphCounts[i]);
+                for (int j = 0; j <= i; j++) {
+                    freeGraphsInfo(&graphInfos[j], graphCounts[j]);
+                }
+                return returnStatus;
             }
 
             if (RWKV_SUCCESS == returnStatus && i == 0) {
@@ -972,7 +984,6 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
             LOGE("Could not create context");
             return RWKV_ERROR_BACKEND;
         }
-        isContextCreated = true;
 
         // conpose graphs
         if (graphConfigsInfo == nullptr) {
@@ -2380,59 +2391,56 @@ int qnn_backend::deserialize_runtime_state(std::vector<uint8_t> &data, std::any 
 int qnn_backend::release_model() {
     LOGI("[QNN] release_model");
     // free graphs
-    {
-        std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);  
-        if (qnnPrefillGraphsCount > 0) {
-            for (int i = 0; i < qnnPrefillGraphsCount; i++) {
-                auto graphInfo     = (*qnnPrefillGraphsInfo)[i];
-                qnnIOTensorUtils->tearDownTensors(inputTensorsPrefill[i], graphInfo.numInputTensors);
-                qnnIOTensorUtils->tearDownTensors(outputTensorsPrefill[i], graphInfo.numOutputTensors);
-                inputTensorsPrefill[i]  = nullptr;
-                outputTensorsPrefill[i] = nullptr;
-            }
-
-            freeGraphsInfo(&qnnPrefillGraphsInfo, qnnPrefillGraphsCount);
-            qnnPrefillGraphsInfo = nullptr;
+    if (qnnPrefillGraphsCount > 0) {
+        for (int i = 0; i < qnnPrefillGraphsCount; i++) {
+            auto graphInfo     = (*qnnPrefillGraphsInfo)[i];
+            qnnIOTensorUtils->tearDownTensors(inputTensorsPrefill[i], graphInfo.numInputTensors);
+            qnnIOTensorUtils->tearDownTensors(outputTensorsPrefill[i], graphInfo.numOutputTensors);
+            inputTensorsPrefill[i]  = nullptr;
+            outputTensorsPrefill[i] = nullptr;
         }
 
-        if (qnnEmbdGraphsCount > 0) {
-            for (int i = 0; i < qnnEmbdGraphsCount; i++) {
-                auto graphInfo     = (*qnnEmbdGraphsInfo)[i];
-                qnnIOTensorUtils->tearDownTensors(inputTensorsEmbd[i], graphInfo.numInputTensors);
-                qnnIOTensorUtils->tearDownTensors(outputTensorsEmbd[i], graphInfo.numOutputTensors);
-                inputTensorsEmbd[i]  = nullptr;
-                outputTensorsEmbd[i] = nullptr;
-            }
-
-            freeGraphsInfo(&qnnEmbdGraphsInfo, qnnEmbdGraphsCount);
-            qnnEmbdGraphsInfo = nullptr;
-        }
-
-        cleanup_batch_graphs();
-
-        for (int i = 0; i < qnnContextHandles.size(); i++) {
-            if (QNN_CONTEXT_NO_ERROR !=
-                g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.contextFree(qnnContextHandles[i], nullptr)) {
-                LOGE("Could not free context");
-            }
-        }
-        qnnContextHandles.clear();
-
-        for (int i = 0; i < graphConfigsInfoCount; i++) {
-            delete graphConfigsInfo[i];
-        }
-        delete graphConfigsInfo;
-
-        delete qnnIOTensorUtils;
-
-        if (qnnModelHandle)
-            pal::dynamicloading::dlClose(qnnModelHandle);
-
-        tokenInputTensorBatchDecode.clear();
-        deepEmbeddingTensors.clear();
-        deepEmbeddingPrefillTensors.clear();
-        stateTensorsNameToTensorPointer.clear();
+        freeGraphsInfo(&qnnPrefillGraphsInfo, qnnPrefillGraphsCount);
+        qnnPrefillGraphsInfo = nullptr;
     }
+
+    if (qnnEmbdGraphsCount > 0) {
+        for (int i = 0; i < qnnEmbdGraphsCount; i++) {
+            auto graphInfo     = (*qnnEmbdGraphsInfo)[i];
+            qnnIOTensorUtils->tearDownTensors(inputTensorsEmbd[i], graphInfo.numInputTensors);
+            qnnIOTensorUtils->tearDownTensors(outputTensorsEmbd[i], graphInfo.numOutputTensors);
+            inputTensorsEmbd[i]  = nullptr;
+            outputTensorsEmbd[i] = nullptr;
+        }
+
+        freeGraphsInfo(&qnnEmbdGraphsInfo, qnnEmbdGraphsCount);
+        qnnEmbdGraphsInfo = nullptr;
+    }
+
+    cleanup_batch_graphs();
+
+    for (int i = 0; i < qnnContextHandles.size(); i++) {
+        if (QNN_CONTEXT_NO_ERROR !=
+            g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.contextFree(qnnContextHandles[i], nullptr)) {
+            LOGE("Could not free context");
+        }
+    }
+    qnnContextHandles.clear();
+
+    for (int i = 0; i < graphConfigsInfoCount; i++) {
+        delete graphConfigsInfo[i];
+    }
+    delete graphConfigsInfo;
+
+    delete qnnIOTensorUtils;
+
+    if (qnnModelHandle)
+        pal::dynamicloading::dlClose(qnnModelHandle);
+
+    tokenInputTensorBatchDecode.clear();
+    deepEmbeddingTensors.clear();
+    deepEmbeddingPrefillTensors.clear();
+    stateTensorsNameToTensorPointer.clear();
     return RWKV_SUCCESS;
 }
 
@@ -2465,7 +2473,7 @@ int qnn_backend::release() {
         return RWKV_SUCCESS;
     }
     if (g_qnn_backend_context_ptr->ref_count > 0) {
-        std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
+        // std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
         g_qnn_backend_context_ptr->ref_count--;
         LOGI("[QNN] qnn_backend::release: qnn_backend ref_count: %d", g_qnn_backend_context_ptr->ref_count);
     }

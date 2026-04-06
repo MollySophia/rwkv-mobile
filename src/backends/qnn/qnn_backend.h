@@ -94,7 +94,6 @@ private:
     double prefill_speed = -1;
     void *qnnModelHandle = nullptr;
 
-    bool isContextCreated = false;
     bool isTensorInitialized = false;
 
     int prefillSequenceLength = 0;
