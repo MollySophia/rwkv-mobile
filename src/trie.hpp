@@ -11,6 +11,17 @@
 #include <sstream>
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
+
+static inline std::ifstream openInputFile(const std::string& file_name) {
+#ifdef _WIN32
+    std::ifstream file(std::filesystem::u8path(file_name));
+    if (file.is_open()) {
+        return file;
+    }
+#endif
+    return std::ifstream(file_name);
+}
 
 std::string processVocabFormat(const std::string &input) {
     std::string final;
@@ -439,7 +450,7 @@ private:
 public:
     OptimizedTrieTokenizer(const std::string& file_name) {
         root = std::make_unique<OptimizedTrie>();
-        std::ifstream file(file_name);
+        std::ifstream file = openInputFile(file_name);
         if (!file.is_open()) {
             return;
         }
