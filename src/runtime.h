@@ -441,6 +441,9 @@ private:
         const std::deque<ModelInstance::SpeedSample>& samples,
         double trim_ratio_total
     );
+    static double _compute_weighted_average_speed_tokens_per_s(
+        const std::deque<ModelInstance::SpeedSample>& samples
+    );
     void _clear_speed_samples(ModelInstance& model);
     int _get_prefill_checkpoint_interval(int total_tokens) const;
 

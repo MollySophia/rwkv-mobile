@@ -70,6 +70,9 @@ public:
     double get_prefill_speed() override {
         return prefill_speed;
     }
+    void reset_speed_stats() override {
+        prefill_speed = -1;
+    }
 
     int debug_dump_state();
 

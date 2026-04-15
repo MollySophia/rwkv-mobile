@@ -147,6 +147,24 @@ double Runtime::_compute_trimmed_mean_speed_tokens_per_s(
     return sum / (double)(end - begin);
 }
 
+double Runtime::_compute_weighted_average_speed_tokens_per_s(
+    const std::deque<ModelInstance::SpeedSample>& samples
+) {
+    int64_t total_tokens = 0;
+    int64_t total_duration_us = 0;
+    for (const auto& s : samples) {
+        if (s.tokens <= 0 || s.duration_us <= 0) {
+            continue;
+        }
+        total_tokens += s.tokens;
+        total_duration_us += s.duration_us;
+    }
+    if (total_tokens <= 0 || total_duration_us <= 0) {
+        return 0.0;
+    }
+    return (double)total_tokens * 1e6 / (double)total_duration_us;
+}
+
 std::string backend_enum_to_str(int backend) {
     switch (backend) {
         case RWKV_BACKEND_WEBRWKV:
@@ -197,13 +215,16 @@ void Runtime::_prefill_progress_start(int model_id, int total_tokens) {
     }
 
     auto &model = _models.at(model_id);
-    double estimated_speed = model->backend ? model->backend->get_prefill_speed() : -1.0;
-    if (estimated_speed <= 0.0) {
+    double estimated_speed = 0.0;
+    {
         std::lock_guard<std::mutex> speed_lock(model->speed_samples_mutex);
-        estimated_speed = _compute_trimmed_mean_speed_tokens_per_s(model->prefill_samples_us, _speed_trim_ratio_total);
+        estimated_speed = _compute_weighted_average_speed_tokens_per_s(model->prefill_samples_us);
     }
     if (estimated_speed <= 0.0 && _prefill_speed > 0.0) {
         estimated_speed = _prefill_speed;
+    }
+    if (estimated_speed <= 0.0 && model->backend) {
+        estimated_speed = model->backend->get_prefill_speed();
     }
     if (estimated_speed <= 0.0) {
         // Conservative fallback so the UI still shows progress on first use.
@@ -1166,7 +1187,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     model->response_buffer_decoded_tokens = 0;
     model->response_buffer_eos_found = false;
 
-    _clear_speed_samples(*model);
+    reset_inference_speed_stats(model_id);
 
     if (force_lang == 1) {
         LOGI("forcing output language to Chinese\n");
@@ -1462,7 +1483,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         model->response_buffer_eos_found_batch[batch_idx] = false;
     }
 
-    _clear_speed_samples(*model);
+    reset_inference_speed_stats(model_id);
 
     std::vector<std::vector<int>> response_ids_raw_batch(batch_size);
 
@@ -2759,7 +2780,7 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     model->response_buffer_decoded_tokens_batch.resize(batch_size);
     model->response_buffer_eos_found_batch.resize(batch_size);
 
-    _clear_speed_samples(*model);
+    reset_inference_speed_stats(model_id);
 
     std::vector<int> decoded_idx_batch(batch_size);
     std::vector<std::string> decoded_text_batch(batch_size);
@@ -2893,7 +2914,7 @@ int Runtime::gen_completion(int model_id, std::string prompt, int max_length, in
     model->stop_signal = false;
     model->sampler->clear_occurences();
 
-    _clear_speed_samples(*model);
+    reset_inference_speed_stats(model_id);
 
     std::vector<int> ids = model->tokenizer->encode(prompt);
     std::vector<int> tokens_to_prefill;
@@ -2983,7 +3004,7 @@ int Runtime::gen_completion_singletoken_topk(int model_id, std::string prompt, i
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
 
-    _clear_speed_samples(*model);
+    reset_inference_speed_stats(model_id);
 
     model->is_generating = true;
 
@@ -3195,19 +3216,28 @@ double Runtime::get_avg_prefill_speed(int model_id) {
         return 0.0;
     }
     auto &model = _models.at(model_id);
-    double speed_from_backend = model->backend->get_prefill_speed();
-    if (speed_from_backend > 0) {
-        return speed_from_backend;
+
+    double speed_from_backend = model->backend ? model->backend->get_prefill_speed() : -1.0;
+    if (model->backend_name == "qnn") {
+        if (speed_from_backend > 0.0) {
+            _prefill_speed = speed_from_backend;
+            return speed_from_backend;
+        }
+        return (_prefill_speed < 0) ? 0.0 : _prefill_speed;
     }
 
     double speed = 0.0;
     {
         std::lock_guard<std::mutex> lock(model->speed_samples_mutex);
-        speed = _compute_trimmed_mean_speed_tokens_per_s(model->prefill_samples_us, _speed_trim_ratio_total);
+        speed = _compute_weighted_average_speed_tokens_per_s(model->prefill_samples_us);
     }
     if (speed > 0.0) {
         _prefill_speed = speed;
         return speed;
+    }
+
+    if (speed_from_backend > 0.0) {
+        return speed_from_backend;
     }
     return (_prefill_speed < 0) ? 0.0 : _prefill_speed;
 }
@@ -3219,6 +3249,9 @@ void Runtime::reset_inference_speed_stats(int model_id) {
 
     auto &model = _models.at(model_id);
     _clear_speed_samples(*model);
+    if (model->backend) {
+        model->backend->reset_speed_stats();
+    }
     _decode_speed = -1;
     _prefill_speed = -1;
 }
