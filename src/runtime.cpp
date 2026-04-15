@@ -1187,8 +1187,6 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     model->response_buffer_decoded_tokens = 0;
     model->response_buffer_eos_found = false;
 
-    reset_inference_speed_stats(model_id);
-
     if (force_lang == 1) {
         LOGI("forcing output language to Chinese\n");
     }
@@ -1208,6 +1206,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     LOGI("matched state cache for prefix: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
 
     if (tokens_to_prefill.size() > 0) {
+        reset_inference_speed_stats(model_id);
         _prefill_progress_start(model_id, tokens_to_prefill.size());
         auto text_to_prefill = model->tokenizer->decode(tokens_to_prefill);
         LOGI("new text to prefill: \"%s\"", escape_special_chars(text_to_prefill).c_str());
@@ -1483,8 +1482,6 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         model->response_buffer_eos_found_batch[batch_idx] = false;
     }
 
-    reset_inference_speed_stats(model_id);
-
     std::vector<std::vector<int>> response_ids_raw_batch(batch_size);
 
     std::vector<std::string> input_texts(batch_size);
@@ -1497,6 +1494,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     std::vector<bool> is_pseudo_thinking_batch(batch_size, false);
     std::vector<std::any> state_batch(batch_size);
     std::vector<bool> thinking_end_tag_found_batch(batch_size, false);
+    bool reset_speed_stats_for_this_batch = false;
     std::vector<std::vector<float>> prefill_logits_f32_batch(batch_size);
     std::vector<std::vector<float>> logits_final_f32_batch(batch_size);
     std::vector<bool> logits_final_set(batch_size, false);
@@ -1568,6 +1566,10 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
         // prefill needed tokens
         if (tokens_to_prefill.size() > 0) {
+            if (!reset_speed_stats_for_this_batch) {
+                reset_inference_speed_stats(model_id);
+                reset_speed_stats_for_this_batch = true;
+            }
             _prefill_progress_start(model_id, tokens_to_prefill.size());
             LOGI("new text to prefill: \"%s\"", escape_special_chars(model->tokenizer->decode(tokens_to_prefill)).c_str());
 

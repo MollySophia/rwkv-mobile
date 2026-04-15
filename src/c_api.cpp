@@ -271,7 +271,6 @@ int rwkvmobile_runtime_eval_chat_with_history_async(
     }
 
     auto rt = static_cast<class Runtime *>(handle);
-    rt->reset_inference_speed_stats(model_id);
     rt->set_is_generating(model_id, true);
     rt->set_stop_signal(model_id, false);
     std::vector<std::string> inputs_vec;
@@ -316,7 +315,6 @@ int rwkvmobile_runtime_eval_chat_batch_with_history_async(
     }
 
     auto rt = static_cast<class Runtime *>(handle);
-    rt->reset_inference_speed_stats(model_id);
     rt->set_is_generating(model_id, true);
     rt->set_stop_signal(model_id, false);
     std::vector<std::vector<std::string>> inputs_vec(batch_size);
