@@ -777,6 +777,7 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
     };
 
     auto space_after_roles = get_space_after_roles(model_id);
+    std::string padding = space_after_roles ? " " : "";
     auto normalize_role = [&](const std::string &role) -> std::string {
         if (role == "user") {
             return model->user_role;
@@ -809,7 +810,7 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
             content = replace_text(content, "\n\n", "\n");
         }
 
-        text += model->bos_token + role + ":" + (space_after_roles ? " " : "") + content;
+        text += model->bos_token + role + ":" + padding + content;
         if (i != inputs.size() - 1) {
             text += model->eos_token;
         }
@@ -821,7 +822,11 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         if (last_role == model->user_role) {
             text += model->bos_token + model->response_role + ":";
             if (enable_reasoning) {
-                text += (space_after_roles ? " " : "") + model->thinking_token;
+                if (model->thinking_token.empty()) {
+                    LOGE("reasoning is enabled, but thinking tag string is empty. Avoid adding space after roles");
+                } else {
+                    text += padding + model->thinking_token;
+                }
             }
         } else if (last_role == model->response_role) {
             text += model->bos_token + model->user_role + ":";
