@@ -1,6 +1,7 @@
 #include "runtime.h"
 #include "backend.h"
 #include "logger.h"
+#include "tensor.h"
 #include "utils.h"
 #include <functional>
 #include <filesystem>
@@ -67,12 +68,20 @@ namespace rwkvmobile {
 const int chinese_tokens_start = 10250;
 const int chinese_tokens_end = 18493;
 
+const std::vector<int> thinking_tag_tokens = {
+    11, // '\n'
+    61, // '<'
+    261, // '\n\n'
+    295, // ' <'
+    0, // <EOD>
+    5439, // '></'
+    790, // '><'
+};
+
 inline void mask_thinking_tag(Tensor1D &logits) {
-    tensor1d_set_f32(logits, 11, -1e9f); // '\n'
-    tensor1d_set_f32(logits, 61, -1e9f); // '<'
-    tensor1d_set_f32(logits, 261, -1e9f); // '\n\n'
-    tensor1d_set_f32(logits, 295, -1e9f); // ' <'
-    tensor1d_set_f32(logits, 0, -1e9f); // <EOD>
+    for (int token : thinking_tag_tokens) {
+        tensor1d_set_f32(logits, token, -1e9f);
+    }
 }
 
 inline void mask_non_chinese_tokens(Tensor1D &logits, int num_vocab) {
@@ -814,11 +823,13 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         if (i != inputs.size() - 1) {
             text += model->eos_token;
         }
+        LOGI("message[%zu]: role: %s, content: %s", i, role.c_str(), content.c_str());
     }
 
     if (!inputs.empty() && add_generation_prompt) {
         text += model->eos_token;
         std::string last_role = normalize_role(resolved_roles.back());
+        LOGI("last_role: %s, adding generation prompt", last_role.c_str());
         if (last_role == model->user_role) {
             text += model->bos_token + model->response_role + ":";
             if (enable_reasoning) {
@@ -3503,10 +3514,12 @@ std::string Runtime::get_thinking_token(int model_id) {
 
 void Runtime::set_thinking_token(int model_id, std::string thinking_token) {
     if (_models.find(model_id) == _models.end()) {
+        LOGE("set_thinking_token: model_id %i not found", model_id);
         return;
     }
     auto &model = _models.at(model_id);
     model->thinking_token = thinking_token;
+    LOGI("set_thinking_token: model_id %i, thinking_token %s", model_id, thinking_token.c_str());
 }
 
 void Runtime::set_space_after_roles(int model_id, bool space_after_roles) {
