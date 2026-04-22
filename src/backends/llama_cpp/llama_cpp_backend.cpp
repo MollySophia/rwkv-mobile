@@ -6,6 +6,7 @@
 
 #include "backend.h"
 #include "llama_cpp_backend.h"
+#include "c_api.h"
 #include "llama.h"
 #include "llama-model.h"
 #include "llama-memory-recurrent.h"
@@ -76,6 +77,14 @@ int llama_cpp_backend::load_model(std::string model_path, void * extra) {
     model_params.n_gpu_layers = 0;
 #endif
     model_params.progress_callback = nullptr;
+
+    llama_cpp_args *args = nullptr;
+    if (extra) {
+        args = reinterpret_cast<llama_cpp_args*>(extra);
+    }
+    if (args) {
+        model_params.n_gpu_layers = args->n_gpu_layers;
+    }
 
     LOGI("n_gpu_layers: %d", model_params.n_gpu_layers);
     model = llama_model_load_from_file(model_path.c_str(), model_params);

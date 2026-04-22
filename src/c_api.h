@@ -95,6 +95,10 @@ struct web_rwkv_args {
     int quant_layers;
 };
 
+struct llama_cpp_args {
+    int n_gpu_layers;
+};
+
 struct batch_tokens_count {
     int * counts;
     int batch_size;

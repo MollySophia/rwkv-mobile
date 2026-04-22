@@ -1562,6 +1562,12 @@ final class web_rwkv_args extends ffi.Struct{
 
 }
 
+final class llama_cpp_args extends ffi.Struct{
+  @ffi.Int()
+  external int n_gpu_layers;
+
+}
+
 final class batch_tokens_count extends ffi.Struct{
   external ffi.Pointer<ffi.Int> counts;
 
@@ -1589,4 +1595,3 @@ const int RWKV_LOG_LEVEL_WARN = 2;
 
 
 const int RWKV_LOG_LEVEL_ERROR = 3;
-
