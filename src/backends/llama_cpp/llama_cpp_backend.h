@@ -39,7 +39,7 @@ private:
 #if defined(__ANDROID__)
     static constexpr int kMaxBatchSlots = 1;
 #else
-    static constexpr int kMaxBatchSlots = 128;
+    static constexpr int kMaxBatchSlots = 32;
 #endif
 
     struct replayable_state {
