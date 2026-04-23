@@ -17,6 +17,28 @@ NucleusSampler::NucleusSampler() {
     _penalty_decay = std::vector<float>(_max_batch_size, 0.996f);
 }
 
+void NucleusSampler::ensure_batch_capacity(int batch_size) {
+    if (batch_size <= _max_batch_size) {
+        return;
+    }
+
+    auto resize_with_last = [batch_size](auto &values, auto default_value) {
+        const auto fill_value = values.empty() ? default_value : values.back();
+        values.resize(batch_size, fill_value);
+    };
+
+    resize_with_last(_temperature, 1.0f);
+    resize_with_last(_top_k, 128);
+    resize_with_last(_top_p, 0.5f);
+    resize_with_last(_presence_penalty, 2.0f);
+    resize_with_last(_frequency_penalty, 0.2f);
+    resize_with_last(_penalty_decay, 0.996f);
+
+    _batch_index_buffer.resize(batch_size);
+    _batch_probs_buffer.resize(batch_size);
+    _max_batch_size = batch_size;
+}
+
 int NucleusSampler::sample(const Tensor1D & logits, const size_t size) {
     return sample(logits, size, _temperature[0], _top_k[0], _top_p[0], _index_buffer, _probs_buffer);
 }
@@ -115,18 +137,20 @@ std::vector<int> NucleusSampler::sample_batch(const Tensor1D & logits, const siz
 }
 
 std::vector<int> NucleusSampler::sample_batch(const Tensor1D & logits, const size_t sampling_size, const size_t hstep, int batch_size, std::vector<float> temperature, std::vector<int> top_k, std::vector<float> top_p) {
+    ensure_batch_capacity(batch_size);
+
     std::vector<int> ret(batch_size);
 
-    if (temperature.size() == 1) {
-        temperature = std::vector<float>(batch_size, temperature[0]);
+    if ((int)temperature.size() < batch_size) {
+        temperature.resize(batch_size, temperature.empty() ? 1.0f : temperature.back());
     }
 
-    if (top_k.size() == 1) {
-        top_k = std::vector<int>(batch_size, top_k[0]);
+    if ((int)top_k.size() < batch_size) {
+        top_k.resize(batch_size, top_k.empty() ? 128 : top_k.back());
     }
 
-    if (top_p.size() == 1) {
-        top_p = std::vector<float>(batch_size, top_p[0]);
+    if ((int)top_p.size() < batch_size) {
+        top_p.resize(batch_size, top_p.empty() ? 0.5f : top_p.back());
     }
 
     if (_batch_index_buffer.size() < batch_size) {

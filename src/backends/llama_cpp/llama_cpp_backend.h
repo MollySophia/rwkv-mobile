@@ -17,6 +17,7 @@ public:
     int eval(int id, Tensor1D & logits) override;
     int eval(std::vector<int> ids, Tensor1D & logits) override;
     int eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) override;
+    int eval_batch_tokens(const std::vector<int> &ids, Tensor1D & logits) override;
     int eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) override;
     bool is_available() override;
     int zero_state() override;
@@ -26,6 +27,7 @@ public:
     int get_state_on_batch_slot(int slot, std::any &state) override;
     int set_state_on_batch_slot(int slot, std::any state) override;
     int zero_state_on_batch_slot(int slot) override;
+    int copy_state_between_batch_slots(int src_slot, int dst_slot) override;
     int release_model() override;
     int release() override;
     int load_raw_states(std::vector<std::vector<half_float::half>> states) override;
@@ -37,7 +39,7 @@ private:
 #if defined(__ANDROID__)
     static constexpr int kMaxBatchSlots = 1;
 #else
-    static constexpr int kMaxBatchSlots = 16;
+    static constexpr int kMaxBatchSlots = 128;
 #endif
 
     struct replayable_state {
@@ -55,7 +57,6 @@ private:
 
     llama_model * model = nullptr;
     llama_context * ctx = nullptr;
-    std::vector<float> logits_buffer;
     std::vector<replayable_state> pending_checkpoint_states;
     llama_batch batch_decode = {};
     bool batch_decode_initialized = false;

@@ -17,14 +17,11 @@ namespace rwkvmobile {
 static constexpr uint32_t kReplayableStateMagic = 0x5350524c; // "LRPS"
 static constexpr uint32_t kReplayableStateVersion = 1;
 
-static int copy_logits_to_owned_tensor(float * logits_out, int vocab_size, std::vector<float> &storage, Tensor1D &logits) {
+static int make_logits_tensor_view(float * logits_out, size_t count, Tensor1D &logits) {
     if (!logits_out) {
         return RWKV_ERROR_EVAL;
     }
-
-    storage.resize((size_t) vocab_size);
-    memcpy(storage.data(), logits_out, (size_t) vocab_size * sizeof(float));
-    logits = Tensor1D::make(storage.data(), TensorDType::F32, (size_t) vocab_size);
+    logits = Tensor1D::make(logits_out, TensorDType::F32, count);
     return RWKV_SUCCESS;
 }
 
@@ -33,8 +30,8 @@ void llama_cpp_backend::initialize_supported_batch_sizes() {
     supported_batch_sizes = {1};
 #else
     supported_batch_sizes.clear();
-    supported_batch_sizes.reserve(16);
-    for (int i = 1; i <= 16; ++i) {
+    supported_batch_sizes.reserve(kMaxBatchSlots);
+    for (int i = 1; i <= kMaxBatchSlots; ++i) {
         supported_batch_sizes.push_back(i);
     }
 #endif
@@ -87,7 +84,11 @@ int llama_cpp_backend::load_model(std::string model_path, void * extra) {
     }
 
     llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 1048576;
+    const uint32_t n_ctx_train = std::max<uint32_t>(1u, (uint32_t) llama_model_n_ctx_train(model));
+    // RWKV mobile models can advertise very large metadata contexts; keep the
+    // per-sequence working window aligned with the common 8k runtime target.
+    const uint32_t n_ctx_per_seq = std::min<uint32_t>(n_ctx_train, 8192u);
+    ctx_params.n_ctx = n_ctx_per_seq * (uint32_t) kMaxBatchSlots;
     ctx_params.n_seq_max = kMaxBatchSlots;
     ctx_params.kv_unified = false;
     ctx = llama_init_from_model(model, ctx_params);
@@ -124,7 +125,7 @@ int llama_cpp_backend::eval(int id, Tensor1D & logits) {
     }
 
     float * logits_out = llama_get_logits_ith(ctx, -1);
-    int ret = copy_logits_to_owned_tensor(logits_out, vocab_size, logits_buffer, logits);
+    int ret = make_logits_tensor_view(logits_out, (size_t) vocab_size, logits);
     if (ret != RWKV_SUCCESS) {
         return ret;
     }
@@ -153,6 +154,19 @@ int llama_cpp_backend::eval(std::vector<int> ids, Tensor1D & logits) {
 }
 
 int llama_cpp_backend::eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) {
+    std::vector<int> flat_ids;
+    flat_ids.reserve(ids.size());
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (ids[i].size() != 1) {
+            LOGE("llama_cpp_backend::eval_batch only supports single-token decode per slot");
+            return RWKV_ERROR_UNSUPPORTED;
+        }
+        flat_ids.push_back(ids[i][0]);
+    }
+    return eval_batch_tokens(flat_ids, logits);
+}
+
+int llama_cpp_backend::eval_batch_tokens(const std::vector<int> &ids, Tensor1D & logits) {
     if (!ctx || !batch_decode_initialized) {
         return RWKV_ERROR_EVAL;
     }
@@ -169,16 +183,14 @@ int llama_cpp_backend::eval_batch(std::vector<std::vector<int>> ids, Tensor1D & 
 
     batch_decode.n_tokens = 0;
     for (int i = 0; i < batch_size; ++i) {
-        if (ids[i].size() != 1) {
-            LOGE("llama_cpp_backend::eval_batch only supports single-token decode per slot");
-            return RWKV_ERROR_UNSUPPORTED;
+        const llama_seq_id seq_id = (llama_seq_id) i;
+        llama_pos pos = llama_memory_seq_pos_max(mem, seq_id) + 1;
+        if (pos < 0) {
+            pos = 0;
         }
 
-        const llama_seq_id seq_id = (llama_seq_id) i;
-        const llama_pos pos = llama_memory_seq_pos_max(mem, seq_id) + 1;
-
-        batch_decode.token[i] = ids[i][0];
-        batch_decode.pos[i] = pos < 0 ? 0 : pos;
+        batch_decode.token[i] = ids[(size_t) i];
+        batch_decode.pos[i] = pos;
         batch_decode.n_seq_id[i] = 1;
         batch_decode.seq_id[i][0] = seq_id;
         batch_decode.logits[i] = 1;
@@ -189,27 +201,12 @@ int llama_cpp_backend::eval_batch(std::vector<std::vector<int>> ids, Tensor1D & 
         return RWKV_ERROR_EVAL;
     }
 
-    if (logits_buffer.size() < (size_t) batch_size * (size_t) vocab_size) {
-        logits_buffer.resize((size_t) batch_size * (size_t) vocab_size);
-    }
-
     for (int i = 0; i < batch_size; ++i) {
-        float * logits_out = llama_get_logits_ith(ctx, i);
-        if (!logits_out) {
-            return RWKV_ERROR_EVAL;
-        }
-        memcpy(logits_buffer.data() + (size_t) i * (size_t) vocab_size, logits_out, (size_t) vocab_size * sizeof(float));
+        pending_checkpoint_states[(size_t) i] = replayable_state{};
     }
 
-    for (int i = 0; i < batch_size; ++i) {
-        int ret = get_state_bytes_for_slot(i, pending_checkpoint_states[(size_t) i].seq_state);
-        if (ret != RWKV_SUCCESS) {
-            return ret;
-        }
-    }
-
-    logits = Tensor1D::make(logits_buffer.data(), TensorDType::F32, (size_t) batch_size * (size_t) vocab_size);
-    return RWKV_SUCCESS;
+    float * logits_out = llama_get_logits(ctx);
+    return make_logits_tensor_view(logits_out, (size_t) batch_size * (size_t) vocab_size, logits);
 }
 
 int llama_cpp_backend::eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) {
@@ -228,7 +225,7 @@ int llama_cpp_backend::eval_with_embeddings(const float *embeddings, int n_token
         return RWKV_ERROR_EVAL;
     }
     float * logits_out = llama_get_logits_ith(ctx, -1);
-    int ret = copy_logits_to_owned_tensor(logits_out, vocab_size, logits_buffer, logits);
+    int ret = make_logits_tensor_view(logits_out, (size_t) vocab_size, logits);
     if (ret != RWKV_SUCCESS) {
         return ret;
     }
@@ -435,6 +432,26 @@ int llama_cpp_backend::zero_state_on_batch_slot(int slot) {
     if ((size_t) slot < pending_checkpoint_states.size()) {
         pending_checkpoint_states[(size_t) slot] = replayable_state{};
     }
+    return RWKV_SUCCESS;
+}
+
+int llama_cpp_backend::copy_state_between_batch_slots(int src_slot, int dst_slot) {
+    if (!ctx || src_slot < 0 || src_slot >= kMaxBatchSlots || dst_slot < 0 || dst_slot >= kMaxBatchSlots) {
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    llama_memory_t mem = llama_get_memory(ctx);
+    if (!mem) {
+        return RWKV_ERROR_EVAL;
+    }
+
+    int ret = zero_state_on_batch_slot(dst_slot);
+    if (ret != RWKV_SUCCESS) {
+        return ret;
+    }
+
+    llama_memory_seq_cp(mem, (llama_seq_id) src_slot, (llama_seq_id) dst_slot, -1, -1);
+    pending_checkpoint_states[(size_t) dst_slot] = pending_checkpoint_states[(size_t) src_slot];
     return RWKV_SUCCESS;
 }
 

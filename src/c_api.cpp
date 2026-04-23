@@ -892,11 +892,11 @@ struct response_buffer rwkvmobile_runtime_get_response_buffer_content(rwkvmobile
     auto rt = static_cast<class Runtime *>(runtime);
     std::string content = rt->get_response_buffer_content(model_id);
     buffer.length = content.size();
-    buffer.content = (char *)malloc(buffer.length * sizeof(char));
+    buffer.content = (char *)malloc((buffer.length + 1) * sizeof(char));
     if (buffer.content == nullptr) {
         return buffer;
     }
-    memset(buffer.content, 0, buffer.length);
+    memset(buffer.content, 0, buffer.length + 1);
     strncpy(buffer.content, content.c_str(), buffer.length);
     buffer.eos_found = rt->get_response_buffer_eos_found(model_id);
     return buffer;
@@ -916,17 +916,12 @@ struct batch_tokens_count rwkvmobile_runtime_get_response_buffer_tokens_count_ba
     }
     auto rt = static_cast<class Runtime *>(runtime);
     std::vector<int> counts = rt->get_response_buffer_tokens_count_batch(model_id);
-    static int token_counts_static[32];
-    if (counts.size() > 32) {
-        return {nullptr, 0};
-    }
+    static std::vector<int> token_counts_static;
+    token_counts_static = std::move(counts);
 
     struct batch_tokens_count count;
-    count.counts = token_counts_static;
-    count.batch_size = counts.size();
-    for (int i = 0; i < counts.size(); i++) {
-        count.counts[i] = counts[i];
-    }
+    count.counts = token_counts_static.empty() ? nullptr : token_counts_static.data();
+    count.batch_size = token_counts_static.size();
     return count;
 }
 
@@ -974,7 +969,8 @@ struct response_buffer_batch rwkvmobile_runtime_get_response_buffer_content_batc
     buffer.lengths = (int *)malloc(contents.size() * sizeof(int));
     buffer.eos_founds = (int *)malloc(contents.size() * sizeof(int));
     for (int i = 0; i < contents.size(); i++) {
-        buffer.contents[i] = (char *)malloc(contents[i].size() * sizeof(char));
+        buffer.contents[i] = (char *)malloc((contents[i].size() + 1) * sizeof(char));
+        memset(buffer.contents[i], 0, contents[i].size() + 1);
         strncpy(buffer.contents[i], contents[i].c_str(), contents[i].size());
         buffer.lengths[i] = contents[i].size();
         buffer.eos_founds[i] = eos_founds[i];

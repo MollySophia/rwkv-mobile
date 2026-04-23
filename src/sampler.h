@@ -38,20 +38,20 @@ public:
     void set_seed(int32_t seed);
     int get_seed();
 
-    void set_temperature(float temperature) { _temperature = std::vector<float>(_max_batch_size, temperature)   ; }
-    void set_top_k(int top_k) { _top_k = std::vector<int>(_max_batch_size, top_k); }
-    void set_top_p(float top_p) { _top_p = std::vector<float>(_max_batch_size, top_p); }
-    void set_presence_penalty(float presence_penalty) { _presence_penalty = std::vector<float>(_max_batch_size, presence_penalty); }
-    void set_frequency_penalty(float frequency_penalty) { _frequency_penalty = std::vector<float>(_max_batch_size, frequency_penalty); }
-    void set_penalty_decay(float penalty_decay) { _penalty_decay = std::vector<float>(_max_batch_size, penalty_decay); }
+    void set_temperature(float temperature) { ensure_batch_capacity(_max_batch_size); _temperature = std::vector<float>(_max_batch_size, temperature); }
+    void set_top_k(int top_k) { ensure_batch_capacity(_max_batch_size); _top_k = std::vector<int>(_max_batch_size, top_k); }
+    void set_top_p(float top_p) { ensure_batch_capacity(_max_batch_size); _top_p = std::vector<float>(_max_batch_size, top_p); }
+    void set_presence_penalty(float presence_penalty) { ensure_batch_capacity(_max_batch_size); _presence_penalty = std::vector<float>(_max_batch_size, presence_penalty); }
+    void set_frequency_penalty(float frequency_penalty) { ensure_batch_capacity(_max_batch_size); _frequency_penalty = std::vector<float>(_max_batch_size, frequency_penalty); }
+    void set_penalty_decay(float penalty_decay) { ensure_batch_capacity(_max_batch_size); _penalty_decay = std::vector<float>(_max_batch_size, penalty_decay); }
     void set_token_banned(std::vector<int> token_banned) { _token_banned = token_banned; }
 
-    void set_temperature_on_batch_slot(int slot, float temperature) { if (slot >= 0 && slot < _max_batch_size) _temperature[slot] = temperature; }
-    void set_top_k_on_batch_slot(int slot, int top_k) { if (slot >= 0 && slot < _max_batch_size) _top_k[slot] = top_k; }
-    void set_top_p_on_batch_slot(int slot, float top_p) { if (slot >= 0 && slot < _max_batch_size) _top_p[slot] = top_p; }
-    void set_presence_penalty_on_batch_slot(int slot, float presence_penalty) { if (slot >= 0 && slot < _max_batch_size) _presence_penalty[slot] = presence_penalty; }
-    void set_frequency_penalty_on_batch_slot(int slot, float frequency_penalty) { if (slot >= 0 && slot < _max_batch_size) _frequency_penalty[slot] = frequency_penalty; }
-    void set_penalty_decay_on_batch_slot(int slot, float penalty_decay) { if (slot >= 0 && slot < _max_batch_size) _penalty_decay[slot] = penalty_decay; }
+    void set_temperature_on_batch_slot(int slot, float temperature) { if (slot >= 0) { ensure_batch_capacity(slot + 1); _temperature[slot] = temperature; } }
+    void set_top_k_on_batch_slot(int slot, int top_k) { if (slot >= 0) { ensure_batch_capacity(slot + 1); _top_k[slot] = top_k; } }
+    void set_top_p_on_batch_slot(int slot, float top_p) { if (slot >= 0) { ensure_batch_capacity(slot + 1); _top_p[slot] = top_p; } }
+    void set_presence_penalty_on_batch_slot(int slot, float presence_penalty) { if (slot >= 0) { ensure_batch_capacity(slot + 1); _presence_penalty[slot] = presence_penalty; } }
+    void set_frequency_penalty_on_batch_slot(int slot, float frequency_penalty) { if (slot >= 0) { ensure_batch_capacity(slot + 1); _frequency_penalty[slot] = frequency_penalty; } }
+    void set_penalty_decay_on_batch_slot(int slot, float penalty_decay) { if (slot >= 0) { ensure_batch_capacity(slot + 1); _penalty_decay[slot] = penalty_decay; } }
 
     float get_temperature() { return _temperature[0]; }
     int get_top_k() { return _top_k[0]; }
@@ -61,14 +61,16 @@ public:
     float get_penalty_decay() { return _penalty_decay[0]; }
     std::vector<int> get_token_banned() { return _token_banned; }
 
-    float get_temperature_on_batch_slot(int slot) { return _temperature[std::max(0, std::min(slot, _max_batch_size - 1))]; }
-    int get_top_k_on_batch_slot(int slot) { return _top_k[std::max(0, std::min(slot, _max_batch_size - 1))]; }
-    float get_top_p_on_batch_slot(int slot) { return _top_p[std::max(0, std::min(slot, _max_batch_size - 1))]; }
-    float get_presence_penalty_on_batch_slot(int slot) { return _presence_penalty[std::max(0, std::min(slot, _max_batch_size - 1))]; }
-    float get_frequency_penalty_on_batch_slot(int slot) { return _frequency_penalty[std::max(0, std::min(slot, _max_batch_size - 1))]; }
-    float get_penalty_decay_on_batch_slot(int slot) { return _penalty_decay[std::max(0, std::min(slot, _max_batch_size - 1))]; }
+    float get_temperature_on_batch_slot(int slot) { return _temperature[std::max(0, std::min(slot, (int)_temperature.size() - 1))]; }
+    int get_top_k_on_batch_slot(int slot) { return _top_k[std::max(0, std::min(slot, (int)_top_k.size() - 1))]; }
+    float get_top_p_on_batch_slot(int slot) { return _top_p[std::max(0, std::min(slot, (int)_top_p.size() - 1))]; }
+    float get_presence_penalty_on_batch_slot(int slot) { return _presence_penalty[std::max(0, std::min(slot, (int)_presence_penalty.size() - 1))]; }
+    float get_frequency_penalty_on_batch_slot(int slot) { return _frequency_penalty[std::max(0, std::min(slot, (int)_frequency_penalty.size() - 1))]; }
+    float get_penalty_decay_on_batch_slot(int slot) { return _penalty_decay[std::max(0, std::min(slot, (int)_penalty_decay.size() - 1))]; }
 
 private:
+    void ensure_batch_capacity(int batch_size);
+
     std::mutex _mutex;
     std::minstd_rand0 _generator;
 

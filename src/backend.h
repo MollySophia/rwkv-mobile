@@ -59,6 +59,17 @@ public:
     virtual int eval(int id, Tensor1D & logits) { (void)id; logits = {}; return 0; };
     virtual int eval(std::vector<int> ids, Tensor1D & logits) { (void)ids; logits = {}; return 0; };
     virtual int eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) { (void)ids; logits = {}; return RWKV_ERROR_UNSUPPORTED; };
+    virtual int eval_batch_tokens(const std::vector<int> &ids, Tensor1D & logits) {
+        if (ids.empty()) {
+            logits = {};
+            return RWKV_ERROR_BACKEND | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+        std::vector<std::vector<int>> ids_batch(ids.size(), std::vector<int>(1));
+        for (size_t i = 0; i < ids.size(); i++) {
+            ids_batch[i][0] = ids[i];
+        }
+        return eval_batch(std::move(ids_batch), logits);
+    };
     virtual int eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) { (void)embeddings; (void)n_tokens; logits = {}; return RWKV_ERROR_UNSUPPORTED; };
     virtual int get_state(std::any &state) { return 0; }
     virtual int set_state(std::any state) { return 0; }
@@ -71,6 +82,16 @@ public:
     virtual int get_state_on_batch_slot(int slot, std::any &state) { return 0; }
     virtual int set_state_on_batch_slot(int slot, std::any state) { return 0; }
     virtual int zero_state_on_batch_slot(int slot) { return 0; }
+    virtual int copy_state_between_batch_slots(int src_slot, int dst_slot) {
+        std::any state;
+        int ret = get_state_on_batch_slot(src_slot, state);
+        if (ret != RWKV_SUCCESS) {
+            return ret;
+        }
+        ret = set_state_on_batch_slot(dst_slot, state);
+        free_state(state);
+        return ret;
+    }
 
     virtual double get_prefill_speed() { return -1; }
     virtual double get_decode_speed() { return -1; }

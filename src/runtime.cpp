@@ -748,13 +748,7 @@ int Runtime::eval_logits_batch_decode(int model_id, std::vector<int> ids, Tensor
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
     auto start = std::chrono::high_resolution_clock::now();
-    std::vector<std::vector<int>> ids_batch(ids.size());
-    for (int i = 0; i < ids.size(); i++) {
-        ids_batch[i] = std::vector<int>(1);
-        ids_batch[i][0] = ids[i];
-    }
-
-    int ret = model->backend->eval_batch(ids_batch, logits);
+    int ret = model->backend->eval_batch_tokens(ids, logits);
     auto end = std::chrono::high_resolution_clock::now();
     const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     _record_speed_sample(*model, /*is_prefill=*/false, /*tokens=*/(int)ids.size(), duration_us);
@@ -2803,68 +2797,140 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
     std::vector<int> decoded_idx_batch(batch_size);
     std::vector<std::string> decoded_text_batch(batch_size);
     std::vector<state_node*> nodes_batch(batch_size);
+    std::vector<std::any> state_batch(batch_size);
     Tensor1D logits;
 
     std::vector<std::map<int, float>> occurences_batch(batch_size);
-    for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
-        model->response_buffer_batch[batch_idx] = "";
-        model->response_buffer_ids_batch[batch_idx].clear();
-        model->response_buffer_decoded_tokens_batch[batch_idx] = 0;
-        model->response_buffer_eos_found_batch[batch_idx] = false;
+    const bool use_shared_uncached_prefill = disable_cache && batch_size > 1 &&
+        std::all_of(prompts.begin() + 1, prompts.end(), [&](const std::string &prompt) {
+            return prompt == prompts[0];
+        });
 
-        std::vector<int> ids = model->tokenizer->encode(prompts[batch_idx]);
-        std::vector<int> tokens_to_prefill;
-        if (!disable_cache) {
-            nodes_batch[batch_idx] = model->backend->match_and_load_state(ids, tokens_to_prefill);
-        } else {
-            nodes_batch[batch_idx] = model->backend->state_root.get();
-            tokens_to_prefill = ids;
+    if (use_shared_uncached_prefill) {
+        std::vector<int> ids = model->tokenizer->encode(prompts[0]);
+        Tensor1D shared_prefill_logits;
+
+        int ret = model->backend->zero_state();
+        if (ret != RWKV_SUCCESS) {
+            LOGE("gen_completion_batch: Error resetting state for shared uncached prefill");
+            model->is_generating = false;
+            return ret;
         }
-        _prefill_progress_start(model_id, tokens_to_prefill.size());
 
-        int checkpoint_interval = _get_prefill_checkpoint_interval((int) tokens_to_prefill.size());
-        for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
-            std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
-            int ret = eval_logits(model_id, tokens_to_prefill_chunk, logits);
-            if (ret || logits.data_ptr == nullptr) {
-                LOGE("gen_completion_batch: Error evaluating logits");
+        _prefill_progress_start(model_id, ids.size());
+        int checkpoint_interval = _get_prefill_checkpoint_interval((int) ids.size());
+        for (int j = 0; j < ids.size(); j += checkpoint_interval) {
+            std::vector<int> tokens_to_prefill_chunk = std::vector<int>(ids.begin() + j, ids.begin() + std::min(j + checkpoint_interval, (int) ids.size()));
+            ret = eval_logits(model_id, tokens_to_prefill_chunk, shared_prefill_logits);
+            if (ret || shared_prefill_logits.data_ptr == nullptr) {
+                LOGE("gen_completion_batch: Error evaluating shared logits");
                 model->is_generating = false;
                 return ret;
-            }
-            if (!disable_cache) {
-                ret = model->backend->register_state_checkpoint(nodes_batch[batch_idx], tokens_to_prefill_chunk, logits);
-                if (ret) {
-                    LOGE("gen_completion_batch: Error registering state checkpoint");
-                    model->is_generating = false;
-                    return ret;
-                }
-                LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
             }
         }
         _prefill_progress_finish(model_id);
 
-        model->response_buffer_batch[batch_idx] = prompts[batch_idx];
-        model->response_buffer_ids_batch[batch_idx] = ids;
-        model->response_buffer_decoded_tokens_batch[batch_idx] = (int)ids.size();
+        for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
+            model->response_buffer_batch[batch_idx] = prompts[batch_idx];
+            model->response_buffer_ids_batch[batch_idx] = ids;
+            model->response_buffer_decoded_tokens_batch[batch_idx] = (int) ids.size();
+            model->response_buffer_eos_found_batch[batch_idx] = false;
 
-        if (logits.data_ptr == nullptr) {
-            if (!nodes_batch[batch_idx]->logits.empty()) {
-                logits = Tensor1D::make(nodes_batch[batch_idx]->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab()).copy();
-            } else {
-                LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
-                model->is_generating = false;
-                return RWKV_ERROR_RUNTIME;
-            }
+            Tensor1D slot_prefill_logits = shared_prefill_logits.copy();
+            model->sampler->apply_penalties(slot_prefill_logits, model->backend->get_num_vocab(), occurences_batch[batch_idx],
+                model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
+                model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
+            decoded_idx_batch[batch_idx] = model->sampler->sample(slot_prefill_logits, model->backend->get_num_vocab());
         }
 
-        model->sampler->apply_penalties(logits, model->backend->get_num_vocab(), occurences_batch[batch_idx],
-            model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
-            model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
-        decoded_idx_batch[batch_idx] = model->sampler->sample(logits, model->backend->get_num_vocab());
-    }
+        for (int batch_idx = 1; batch_idx < batch_size; batch_idx++) {
+            ret = model->backend->copy_state_between_batch_slots(0, batch_idx);
+            if (ret != RWKV_SUCCESS) {
+                model->is_generating = false;
+                LOGE("gen_completion_batch: Error copying shared batch slot state");
+                return ret;
+            }
+        }
+    } else {
+        for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
+            model->response_buffer_batch[batch_idx] = "";
+            model->response_buffer_ids_batch[batch_idx].clear();
+            model->response_buffer_decoded_tokens_batch[batch_idx] = 0;
+            model->response_buffer_eos_found_batch[batch_idx] = false;
 
-    for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
-        model->backend->set_state_on_batch_slot(batch_idx, nodes_batch[batch_idx]->state);
+            std::vector<int> ids = model->tokenizer->encode(prompts[batch_idx]);
+            Tensor1D batch_prefill_logits;
+            std::vector<int> tokens_to_prefill;
+            if (!disable_cache) {
+                nodes_batch[batch_idx] = model->backend->match_and_load_state(ids, tokens_to_prefill);
+            } else {
+                int ret = model->backend->zero_state();
+                if (ret != RWKV_SUCCESS) {
+                    LOGE("gen_completion_batch: Error resetting state for uncached prefill");
+                    model->is_generating = false;
+                    return ret;
+                }
+                nodes_batch[batch_idx] = model->backend->state_root.get();
+                tokens_to_prefill = ids;
+            }
+            _prefill_progress_start(model_id, tokens_to_prefill.size());
+
+            int checkpoint_interval = _get_prefill_checkpoint_interval((int) tokens_to_prefill.size());
+            for (int j = 0; j < tokens_to_prefill.size(); j += checkpoint_interval) {
+                std::vector<int> tokens_to_prefill_chunk = std::vector<int>(tokens_to_prefill.begin() + j, tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int)tokens_to_prefill.size()));
+                int ret = eval_logits(model_id, tokens_to_prefill_chunk, batch_prefill_logits);
+                if (ret || batch_prefill_logits.data_ptr == nullptr) {
+                    LOGE("gen_completion_batch: Error evaluating logits");
+                    model->is_generating = false;
+                    return ret;
+                }
+                if (!disable_cache) {
+                    ret = model->backend->register_state_checkpoint(nodes_batch[batch_idx], tokens_to_prefill_chunk, batch_prefill_logits);
+                    if (ret) {
+                        LOGE("gen_completion_batch: Error registering state checkpoint");
+                        model->is_generating = false;
+                        return ret;
+                    }
+                    LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
+                }
+            }
+            _prefill_progress_finish(model_id);
+
+            model->response_buffer_batch[batch_idx] = prompts[batch_idx];
+            model->response_buffer_ids_batch[batch_idx] = ids;
+            model->response_buffer_decoded_tokens_batch[batch_idx] = (int)ids.size();
+
+            if (batch_prefill_logits.data_ptr == nullptr) {
+                if (!nodes_batch[batch_idx]->logits.empty()) {
+                    batch_prefill_logits = Tensor1D::make(nodes_batch[batch_idx]->logits.data(), TensorDType::F32, (size_t)model->backend->get_num_vocab()).copy();
+                } else {
+                    LOGE("no logits found, neither from saved state nor from new tokens to prefill\n");
+                    model->is_generating = false;
+                    return RWKV_ERROR_RUNTIME;
+                }
+            }
+
+            int ret = model->backend->get_state(state_batch[batch_idx]);
+            if (ret != RWKV_SUCCESS) {
+                LOGE("gen_completion_batch: Error capturing prefetched state");
+                model->is_generating = false;
+                return ret;
+            }
+
+            model->sampler->apply_penalties(batch_prefill_logits, model->backend->get_num_vocab(), occurences_batch[batch_idx],
+                model->sampler->get_token_banned(), model->sampler->get_presence_penalty(),
+                model->sampler->get_frequency_penalty(), model->sampler->get_penalty_decay());
+            decoded_idx_batch[batch_idx] = model->sampler->sample(batch_prefill_logits, model->backend->get_num_vocab());
+        }
+
+        for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
+            int ret = model->backend->set_state_on_batch_slot(batch_idx, state_batch[batch_idx]);
+            if (ret != RWKV_SUCCESS) {
+                model->is_generating = false;
+                LOGE("gen_completion_batch: Error restoring batch slot state");
+                return ret;
+            }
+        }
     }
 
     for (int i = 0; i < max_length; i++) {
@@ -2881,9 +2947,6 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
             if (!model->response_buffer_eos_found_batch[batch_idx]) {
                 model->response_buffer_eos_found_batch[batch_idx] = (decoded_idx_batch[batch_idx] == stop_code);
-                if (model->response_buffer_eos_found_batch[batch_idx]) {
-                    continue;
-                }
                 model->response_buffer_ids_batch[batch_idx].push_back(decoded_idx_batch[batch_idx]);
                 if (callback_batch) {
                     decoded_text_batch[batch_idx] = model->tokenizer->decode(decoded_idx_batch[batch_idx]);
@@ -2905,7 +2968,9 @@ int Runtime::gen_completion_batch(int model_id, std::vector<std::string> prompts
         }
 
         for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
-            occurences_batch[batch_idx][decoded_idx_batch[batch_idx]]++;
+            if (!model->response_buffer_eos_found_batch[batch_idx]) {
+                occurences_batch[batch_idx][decoded_idx_batch[batch_idx]]++;
+            }
         }
     }
 
