@@ -2,6 +2,7 @@
 #include "commondef.h"
 #include "c_api.h"
 #include "logger.h"
+#include "rwkv_mobile_build_info.h"
 #include "soc_detect.h"
 #ifdef ENABLE_SERVER
 #include "rwkv_http_server.h"
@@ -1179,6 +1180,10 @@ float rwkvmobile_runtime_get_prefill_progress(rwkvmobile_runtime_t runtime, int 
     }
     auto rt = static_cast<class Runtime *>(runtime);
     return rt->get_prefill_progress(model_id);
+}
+
+const char * rwkvmobile_get_commit_hash() {
+    return RWKV_MOBILE_GIT_COMMIT_HASH;
 }
 
 const char * rwkvmobile_get_platform_name() {

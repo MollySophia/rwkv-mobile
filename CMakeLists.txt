@@ -47,6 +47,42 @@ if (ADDRESS_SANITIZER)
     # set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
 endif()
 
+set(RWKV_MOBILE_GIT_COMMIT_HASH "unknown")
+find_package(Git QUIET)
+if (GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE RWKV_MOBILE_GIT_COMMIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE RWKV_MOBILE_GIT_COMMIT_HASH_RESULT
+    )
+    if (NOT RWKV_MOBILE_GIT_COMMIT_HASH_RESULT EQUAL 0 OR RWKV_MOBILE_GIT_COMMIT_HASH STREQUAL "")
+        set(RWKV_MOBILE_GIT_COMMIT_HASH "unknown")
+    endif()
+
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" status --porcelain --untracked-files=no
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE RWKV_MOBILE_GIT_STATUS_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE RWKV_MOBILE_GIT_STATUS_RESULT
+    )
+    if (RWKV_MOBILE_GIT_STATUS_RESULT EQUAL 0 AND NOT RWKV_MOBILE_GIT_STATUS_OUTPUT STREQUAL "")
+        set(RWKV_MOBILE_GIT_COMMIT_HASH "${RWKV_MOBILE_GIT_COMMIT_HASH}-dirty")
+    endif()
+endif()
+
+set(RWKV_MOBILE_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${RWKV_MOBILE_GENERATED_INCLUDE_DIR}")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rwkv_mobile_build_info.h.in"
+    "${RWKV_MOBILE_GENERATED_INCLUDE_DIR}/rwkv_mobile_build_info.h"
+    @ONLY
+)
+
 set(RWKV_MOBILE_SRCS
     src/runtime.cpp
     src/sampler.cpp
@@ -308,7 +344,7 @@ if (WIN32)
 endif()
 
 add_library(rwkv_mobile_internal STATIC ${RWKV_MOBILE_SRCS})
-target_include_directories(rwkv_mobile_internal PUBLIC src)
+target_include_directories(rwkv_mobile_internal PUBLIC src "${RWKV_MOBILE_GENERATED_INCLUDE_DIR}")
 if (CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
     target_link_options(rwkv_mobile_internal PRIVATE
         "-Wl,-z,max-page-size=16384"
@@ -634,7 +670,7 @@ endif()
 
 if (BUILD_STATIC_LIB)
     add_library(rwkv_mobile_static STATIC src/c_api.cpp)
-    target_include_directories(rwkv_mobile_static PUBLIC src)
+    target_include_directories(rwkv_mobile_static PUBLIC src PRIVATE "${RWKV_MOBILE_GENERATED_INCLUDE_DIR}")
     target_link_libraries(rwkv_mobile_static PRIVATE rwkv_mobile_internal)
 
     if (IOS)
@@ -694,6 +730,7 @@ if (BUILD_STATIC_LIB)
     add_custom_target(rwkv_mobile ALL DEPENDS ${CMAKE_BINARY_DIR}/librwkv_mobile.a)
 else()
     add_library(rwkv_mobile SHARED src/c_api.cpp)
+    target_include_directories(rwkv_mobile PRIVATE "${RWKV_MOBILE_GENERATED_INCLUDE_DIR}")
     if (CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
         target_link_options(rwkv_mobile PRIVATE
             "-Wl,-z,max-page-size=16384"

@@ -298,6 +298,9 @@ int rwkvmobile_load_rerank_model(rwkvmobile_runtime_t runtime, const char *model
 
 int rwkvmobile_get_embedding(rwkvmobile_runtime_t runtime, const char **input, const int input_length,float **embedding);
 
+// build info
+const char * rwkvmobile_get_commit_hash();
+
 // platform info
 const char * rwkvmobile_get_platform_name();
 
