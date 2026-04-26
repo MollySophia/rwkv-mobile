@@ -1,0 +1,3 @@
+#pragma once
+
+#define RWKV_MOBILE_GIT_COMMIT_HASH "@RWKV_MOBILE_GIT_COMMIT_HASH@"
