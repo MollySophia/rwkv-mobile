@@ -21,6 +21,11 @@ parser.add_argument(
     help='Import OmniQuant per-channel int4 metadata for supported Linear layers and fall back to int8 elsewhere',
 )
 parser.add_argument(
+    '--att-output-int8',
+    action='store_true',
+    help='When importing OmniQuant int4 metadata, keep att.output weights in the int8 fallback path',
+)
+parser.add_argument(
     '--state-mode',
     choices=['coreml', 'tensor', 'wkv-coreml'],
     default='wkv-coreml',
@@ -39,6 +44,9 @@ OMNIQUANT_MODULE_MAP = {
     'ffn.key.weight_quantizer': 'ffn.key',
     'ffn.value.weight_quantizer': 'ffn.value',
 }
+active_omniquant_module_map = dict(OMNIQUANT_MODULE_MAP)
+if parser_args.att_output_int8:
+    active_omniquant_module_map.pop('attn.o_proj.weight_quantizer')
 
 compression_modes = [
     parser_args.int8,
@@ -61,7 +69,7 @@ if parser_args.omniquant_parameters is not None:
 
     for layer_idx, layer_params in omniquant_parameters.items():
         layer_idx = int(layer_idx)
-        for omni_prefix, module_suffix in OMNIQUANT_MODULE_MAP.items():
+        for omni_prefix, module_suffix in active_omniquant_module_map.items():
             up_key = f'{omni_prefix}.upbound_factor'
             low_key = f'{omni_prefix}.lowbound_factor'
             if up_key not in layer_params or low_key not in layer_params:
@@ -132,7 +140,11 @@ def _compute_omniquant_int4_per_channel(
     return dequantized_weight.to(weight.dtype), scale
 
 
-def _apply_omniquant_import(model: torch.nn.Module, omni_params: dict) -> dict[str, list[str]]:
+def _apply_omniquant_import(
+    model: torch.nn.Module,
+    omni_params: dict,
+    module_map: dict[str, str],
+) -> dict[str, list[str]]:
     _set_or_replace_buffer(model, '_COREML_/metadata_version', torch.tensor(1, dtype=torch.int32))
 
     stats = {
@@ -144,7 +156,7 @@ def _apply_omniquant_import(model: torch.nn.Module, omni_params: dict) -> dict[s
 
     for layer_idx, layer_params in omni_params.items():
         layer_idx = int(layer_idx)
-        for omni_prefix, module_suffix in OMNIQUANT_MODULE_MAP.items():
+        for omni_prefix, module_suffix in module_map.items():
             up_key = f'{omni_prefix}.upbound_factor'
             low_key = f'{omni_prefix}.lowbound_factor'
             module_name = f'blocks.{layer_idx}.{module_suffix}'
@@ -315,7 +327,9 @@ elif use_int:
     full_model = quantizer.compress()
 
 if omniquant_parameters is not None:
-    omniquant_stats = _apply_omniquant_import(full_model, omniquant_parameters)
+    if parser_args.att_output_int8:
+        print('Keeping blocks.*.att.output weights in int8 fallback.')
+    omniquant_stats = _apply_omniquant_import(full_model, omniquant_parameters, active_omniquant_module_map)
     print(
         'Applied OmniQuant int4 metadata to',
         len(omniquant_stats['applied']),
@@ -422,6 +436,8 @@ def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name += f'-{mode_tag}'
     if parser_args.omniquant_parameters is not None:
         output_name += '-omni-int4int8mix'
+        if parser_args.att_output_int8:
+            output_name += '-attout-int8'
     elif parser_args.int4:
         output_name += '-int4'
     elif parser_args.int8:
@@ -446,6 +462,8 @@ def _build_combined_base_name() -> str:
     output_name += '-coreml'
     if parser_args.omniquant_parameters is not None:
         output_name += '-omni-int4int8mix'
+        if parser_args.att_output_int8:
+            output_name += '-attout-int8'
     elif parser_args.int4:
         output_name += '-int4'
     elif parser_args.int8:
