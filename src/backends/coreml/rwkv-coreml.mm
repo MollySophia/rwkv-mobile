@@ -19,10 +19,19 @@
 #include "half.hpp"
 #include "logger.h"
 
+enum rwkv_coreml_state_mode {
+    RWKV_COREML_STATE_MODE_COREML = 0,
+    RWKV_COREML_STATE_MODE_TENSOR = 1,
+    RWKV_COREML_STATE_MODE_WKV_COREML = 2,
+};
+
 struct rwkv_coreml_context {
     std::vector<const void *> model_decode;
     std::vector<const void *> model_prefill;
     std::vector<const void *> states;
+    std::vector<const void *> state_wkv_tensors;
+    std::vector<const void *> state_tokenshift_tensors;
+    rwkv_coreml_state_mode state_mode = RWKV_COREML_STATE_MODE_COREML;
     int num_chunks = 0;
     int load_done_chunks = 0;
     float load_progress_reported = 0.f;
@@ -57,9 +66,18 @@ static void rwkv_coreml_release_resources(struct rwkv_coreml_context * ctx) {
     for (size_t i = 0; i < ctx->states.size(); ++i) {
         if (ctx->states[i]) CFRelease(ctx->states[i]);
     }
+    for (size_t i = 0; i < ctx->state_wkv_tensors.size(); ++i) {
+        if (ctx->state_wkv_tensors[i]) CFRelease(ctx->state_wkv_tensors[i]);
+    }
+    for (size_t i = 0; i < ctx->state_tokenshift_tensors.size(); ++i) {
+        if (ctx->state_tokenshift_tensors[i]) CFRelease(ctx->state_tokenshift_tensors[i]);
+    }
     ctx->model_decode.clear();
     ctx->model_prefill.clear();
     ctx->states.clear();
+    ctx->state_wkv_tensors.clear();
+    ctx->state_tokenshift_tensors.clear();
+    ctx->state_mode = RWKV_COREML_STATE_MODE_COREML;
     ctx->state_wkv_bytes_per_chunk.clear();
     ctx->state_tokenshift_bytes_per_chunk.clear();
     ctx->state_wkv_bytes = 0;
@@ -99,7 +117,37 @@ static NSString * trim_string(NSString *value) {
     return trimmed;
 }
 
-static bool parse_coreml_config(NSString *config_path, NSString **basename_out, int *num_chunks_out) {
+static bool parse_state_mode(NSString *value, rwkv_coreml_state_mode *state_mode_out) {
+    NSString *mode = trim_string(value);
+    if (mode == nil || mode.length == 0 || [mode isEqualToString:@"coreml"]) {
+        if (state_mode_out) *state_mode_out = RWKV_COREML_STATE_MODE_COREML;
+        return true;
+    }
+    if ([mode isEqualToString:@"tensor"]) {
+        if (state_mode_out) *state_mode_out = RWKV_COREML_STATE_MODE_TENSOR;
+        return true;
+    }
+    if ([mode isEqualToString:@"wkv-coreml"]) {
+        if (state_mode_out) *state_mode_out = RWKV_COREML_STATE_MODE_WKV_COREML;
+        return true;
+    }
+    NSLog(@"config.yaml invalid state_mode: %@", mode);
+    return false;
+}
+
+static NSString * state_mode_name(rwkv_coreml_state_mode state_mode) {
+    switch (state_mode) {
+        case RWKV_COREML_STATE_MODE_COREML:
+            return @"coreml";
+        case RWKV_COREML_STATE_MODE_TENSOR:
+            return @"tensor";
+        case RWKV_COREML_STATE_MODE_WKV_COREML:
+            return @"wkv-coreml";
+    }
+    return @"coreml";
+}
+
+static bool parse_coreml_config(NSString *config_path, NSString **basename_out, int *num_chunks_out, rwkv_coreml_state_mode *state_mode_out) {
     NSError *error = nil;
     NSString *content = [NSString stringWithContentsOfFile:config_path encoding:NSUTF8StringEncoding error:&error];
     if (error || content == nil) {
@@ -108,6 +156,8 @@ static bool parse_coreml_config(NSString *config_path, NSString **basename_out, 
     }
     NSString *basename = nil;
     int num_chunks = 0;
+    // Legacy CoreML exports did not write state_mode; they used full Core ML state.
+    rwkv_coreml_state_mode state_mode = RWKV_COREML_STATE_MODE_COREML;
     NSArray<NSString *> *lines = [content componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
     for (NSString *line in lines) {
         NSString *trimmed = trim_string(line);
@@ -120,6 +170,10 @@ static bool parse_coreml_config(NSString *config_path, NSString **basename_out, 
             basename = value;
         } else if ([key isEqualToString:@"num_chunks"]) {
             num_chunks = [value intValue];
+        } else if ([key isEqualToString:@"state_mode"]) {
+            if (!parse_state_mode(value, &state_mode)) {
+                return false;
+            }
         }
     }
     if (basename == nil || basename.length == 0) {
@@ -132,10 +186,173 @@ static bool parse_coreml_config(NSString *config_path, NSString **basename_out, 
     }
     if (basename_out) *basename_out = basename;
     if (num_chunks_out) *num_chunks_out = num_chunks;
+    if (state_mode_out) *state_mode_out = state_mode;
     return true;
 }
 
+static MLFeatureValue * multi_array_feature(MLMultiArray *array) {
+    return [MLFeatureValue featureValueWithMultiArray:array];
+}
+
+static void copy_multi_array(MLMultiArray *dst, MLMultiArray *src) {
+    if (dst == nil || src == nil) return;
+    [src getBytesWithHandler:^(const void *src_bytes, NSInteger src_size) {
+        if (src_bytes == nullptr || src_size <= 0) return;
+        [dst getMutableBytesWithHandler:^(void *dst_bytes, NSInteger dst_size, NSArray<NSNumber *> *strides) {
+            (void)strides;
+            if (dst_bytes == nullptr || dst_size <= 0) return;
+            const size_t n = std::min((size_t)src_size, (size_t)dst_size);
+            if (n > 0) std::memcpy(dst_bytes, src_bytes, n);
+            if ((size_t)dst_size > n) std::memset((uint8_t*)dst_bytes + n, 0, (size_t)dst_size - n);
+        }];
+    }];
+}
+
+static MLMultiArray * make_zero_multi_array_from_feature(NSDictionary *model_inputs, NSString *name) {
+    MLFeatureDescription *desc = model_inputs[name];
+    if (desc == nil || desc.type != MLFeatureTypeMultiArray || desc.multiArrayConstraint == nil) {
+        return nil;
+    }
+    NSError *error = nil;
+    MLMultiArray *array = [[MLMultiArray alloc] initWithShape:desc.multiArrayConstraint.shape
+                                                     dataType:desc.multiArrayConstraint.dataType
+                                                        error:&error];
+    if (error || array == nil) {
+        NSLog(@"Error allocating %@ state tensor: %@", name, error);
+        return nil;
+    }
+    [array getMutableBytesWithHandler:^(void *mutableBytes, NSInteger size, NSArray<NSNumber *> *strides) {
+        (void)strides;
+        if (mutableBytes != nullptr && size > 0) std::memset(mutableBytes, 0, (size_t)size);
+    }];
+    return array;
+}
+
+static MLMultiArray * external_state_wkv(struct rwkv_coreml_context *ctx, int chunk_idx) {
+    return (__bridge MLMultiArray *)ctx->state_wkv_tensors[chunk_idx];
+}
+
+static MLMultiArray * external_state_tokenshift(struct rwkv_coreml_context *ctx, int chunk_idx) {
+    return (__bridge MLMultiArray *)ctx->state_tokenshift_tensors[chunk_idx];
+}
+
+static bool update_external_state_from_output(struct rwkv_coreml_context *ctx, int chunk_idx, id<MLFeatureProvider> outFeatures) {
+    MLFeatureValue *tokenshift_value = [outFeatures featureValueForName:@"state_tokenshift_out"];
+    MLMultiArray *tokenshift_out = tokenshift_value.multiArrayValue;
+    if (tokenshift_out == nil) {
+        NSLog(@"Core ML output missing state_tokenshift_out");
+        return false;
+    }
+    copy_multi_array(external_state_tokenshift(ctx, chunk_idx), tokenshift_out);
+
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_TENSOR) {
+        MLFeatureValue *wkv_value = [outFeatures featureValueForName:@"state_wkv_out"];
+        MLMultiArray *wkv_out = wkv_value.multiArrayValue;
+        if (wkv_out == nil) {
+            NSLog(@"Core ML output missing state_wkv_out");
+            return false;
+        }
+        copy_multi_array(external_state_wkv(ctx, chunk_idx), wkv_out);
+    }
+    return true;
+}
+
+static id<MLFeatureProvider> predict_generic_chunk(
+    struct rwkv_coreml_context *ctx,
+    bool prefill,
+    int chunk_idx,
+    MLMultiArray *in0,
+    MLMultiArray *v_first_in
+) {
+    MLModel *model = (__bridge MLModel *)(prefill ? ctx->model_prefill[chunk_idx] : ctx->model_decode[chunk_idx]);
+    NSMutableDictionary<NSString *, MLFeatureValue *> *features = [NSMutableDictionary dictionary];
+    features[@"in0"] = multi_array_feature(in0);
+    features[@"state_tokenshift_in"] = multi_array_feature(external_state_tokenshift(ctx, chunk_idx));
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_TENSOR) {
+        features[@"state_wkv_in"] = multi_array_feature(external_state_wkv(ctx, chunk_idx));
+    }
+    if (chunk_idx > 0 && ctx->num_chunks > 1) {
+        if (v_first_in == nil) {
+            NSLog(@"Core ML chunk %d missing v_first_in", chunk_idx);
+            return nil;
+        }
+        features[@"v_first_in"] = multi_array_feature(v_first_in);
+    }
+
+    NSError *error = nil;
+    MLDictionaryFeatureProvider *input = [[MLDictionaryFeatureProvider alloc] initWithDictionary:features error:&error];
+    if (error || input == nil) {
+        NSLog(@"Error creating Core ML feature provider for chunk %d: %@", chunk_idx, error);
+        return nil;
+    }
+
+    MLPredictionOptions *options = [[MLPredictionOptions alloc] init];
+    id<MLFeatureProvider> outFeatures = nil;
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_WKV_COREML) {
+        MLState *state = (__bridge MLState *)ctx->states[chunk_idx];
+        outFeatures = [model predictionFromFeatures:input usingState:state options:options error:&error];
+    } else {
+        outFeatures = [model predictionFromFeatures:input options:options error:&error];
+    }
+    if (error || outFeatures == nil) {
+        NSLog(@"Core ML prediction failed for chunk %d state_mode %@: %@", chunk_idx, state_mode_name(ctx->state_mode), error);
+        return nil;
+    }
+    if (!update_external_state_from_output(ctx, chunk_idx, outFeatures)) {
+        return nil;
+    }
+    return outFeatures;
+}
+
+static void* run_generic(struct rwkv_coreml_context *ctx, MLMultiArray *in0, bool prefill) {
+    MLMultiArray *current = in0;
+    MLMultiArray *v_first_out = nil;
+    id<MLFeatureProvider> final_out = nil;
+
+    for (int chunk_idx = 0; chunk_idx < ctx->num_chunks; ++chunk_idx) {
+        id<MLFeatureProvider> outFeatures = predict_generic_chunk(ctx, prefill, chunk_idx, current, v_first_out);
+        if (outFeatures == nil) return NULL;
+
+        MLFeatureValue *out0_value = [outFeatures featureValueForName:@"out0"];
+        current = out0_value.multiArrayValue;
+        if (current == nil) {
+            NSLog(@"Core ML output missing out0 for chunk %d", chunk_idx);
+            return NULL;
+        }
+
+        if (chunk_idx == 0 && ctx->num_chunks > 1) {
+            MLFeatureValue *v_first_value = [outFeatures featureValueForName:@"v_first_out"];
+            v_first_out = v_first_value.multiArrayValue;
+            if (v_first_out == nil) {
+                NSLog(@"Core ML output missing v_first_out for chunk 0");
+                return NULL;
+            }
+        }
+
+        if (chunk_idx == ctx->num_chunks - 1) {
+            final_out = outFeatures;
+        }
+    }
+
+    if (prefill) {
+        ctx->out_prefill = final_out;
+    } else {
+        ctx->out_decode = final_out;
+    }
+    return current.dataPointer;
+}
+
 static void with_state_wkv(struct rwkv_coreml_context *ctx, int chunk_idx, void (^handler)(MLMultiArray *buffer)) {
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_TENSOR) {
+        MLMultiArray *buffer = (__bridge MLMultiArray *)ctx->state_wkv_tensors[chunk_idx];
+        handler(buffer);
+        return;
+    }
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_WKV_COREML) {
+        MLState *state = (__bridge MLState *)ctx->states[chunk_idx];
+        [state getMultiArrayForStateNamed:@"state_wkv" handler:handler];
+        return;
+    }
     if (ctx->num_chunks == 1) {
         rwkv_coreml_singlechunk_implState *state = (__bridge rwkv_coreml_singlechunk_implState *)ctx->states[0];
         [state getMultiArrayForState:rwkv_coreml_singlechunk_implStateNameState_wkv handler:handler];
@@ -151,6 +368,11 @@ static void with_state_wkv(struct rwkv_coreml_context *ctx, int chunk_idx, void 
 }
 
 static void with_state_tokenshift(struct rwkv_coreml_context *ctx, int chunk_idx, void (^handler)(MLMultiArray *buffer)) {
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_TENSOR || ctx->state_mode == RWKV_COREML_STATE_MODE_WKV_COREML) {
+        MLMultiArray *buffer = (__bridge MLMultiArray *)ctx->state_tokenshift_tensors[chunk_idx];
+        handler(buffer);
+        return;
+    }
     if (ctx->num_chunks == 1) {
         rwkv_coreml_singlechunk_implState *state = (__bridge rwkv_coreml_singlechunk_implState *)ctx->states[0];
         [state getMultiArrayForState:rwkv_coreml_singlechunk_implStateNameState_tokenshift handler:handler];
@@ -180,9 +402,11 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
         NSString *config_path = [path_model_str stringByAppendingPathComponent:@"config.yaml"];
         NSString *basename = nil;
         int num_chunks = 0;
-        if (!parse_coreml_config(config_path, &basename, &num_chunks)) {
+        rwkv_coreml_state_mode state_mode = RWKV_COREML_STATE_MODE_COREML;
+        if (!parse_coreml_config(config_path, &basename, &num_chunks, &state_mode)) {
             return -1;
         }
+        ctx->state_mode = state_mode;
 
         // select which device to run the Core ML model on
         MLModelConfiguration *config_decode = [[MLModelConfiguration alloc] init];
@@ -199,6 +423,8 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
         ctx->model_decode.reserve((size_t)num_chunks);
         ctx->model_prefill.reserve((size_t)num_chunks);
         ctx->states.reserve((size_t)num_chunks);
+        ctx->state_wkv_tensors.reserve((size_t)num_chunks);
+        ctx->state_tokenshift_tensors.reserve((size_t)num_chunks);
         ctx->state_wkv_bytes_per_chunk.resize((size_t)num_chunks, 0);
         ctx->state_tokenshift_bytes_per_chunk.resize((size_t)num_chunks, 0);
 
@@ -244,27 +470,57 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
                 return -1;
             }
             ctx->load_done_chunks = chunk_idx * 2 + 2;
-            if (num_chunks == 1) {
+            if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML && num_chunks == 1) {
                 rwkv_coreml_singlechunk_impl *model_decode = [[rwkv_coreml_singlechunk_impl alloc] initWithMLModel:mlmodel_decode];
                 rwkv_coreml_singlechunk_impl *model_prefill = [[rwkv_coreml_singlechunk_impl alloc] initWithMLModel:mlmodel_prefill];
                 ctx->model_decode.push_back(CFBridgingRetain(model_decode));
                 ctx->model_prefill.push_back(CFBridgingRetain(model_prefill));
                 rwkv_coreml_singlechunk_implState *state = [model_decode newState];
                 ctx->states.push_back(CFBridgingRetain(state));
-            } else if (chunk_idx == 0) {
+            } else if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML && chunk_idx == 0) {
                 rwkv_coreml_firstchunk_impl *model_decode = [[rwkv_coreml_firstchunk_impl alloc] initWithMLModel:mlmodel_decode];
                 rwkv_coreml_firstchunk_impl *model_prefill = [[rwkv_coreml_firstchunk_impl alloc] initWithMLModel:mlmodel_prefill];
                 ctx->model_decode.push_back(CFBridgingRetain(model_decode));
                 ctx->model_prefill.push_back(CFBridgingRetain(model_prefill));
                 rwkv_coreml_firstchunk_implState *state = [model_decode newState];
                 ctx->states.push_back(CFBridgingRetain(state));
-            } else {
+            } else if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML) {
                 rwkv_coreml_impl *model_decode = [[rwkv_coreml_impl alloc] initWithMLModel:mlmodel_decode];
                 rwkv_coreml_impl *model_prefill = [[rwkv_coreml_impl alloc] initWithMLModel:mlmodel_prefill];
                 ctx->model_decode.push_back(CFBridgingRetain(model_decode));
                 ctx->model_prefill.push_back(CFBridgingRetain(model_prefill));
                 rwkv_coreml_implState *state = [model_decode newState];
                 ctx->states.push_back(CFBridgingRetain(state));
+            } else {
+                ctx->model_decode.push_back(CFBridgingRetain(mlmodel_decode));
+                ctx->model_prefill.push_back(CFBridgingRetain(mlmodel_prefill));
+
+                NSDictionary *model_inputs_decode = mlmodel_decode.modelDescription.inputDescriptionsByName;
+                MLMultiArray *state_tokenshift = make_zero_multi_array_from_feature(model_inputs_decode, @"state_tokenshift_in");
+                if (state_tokenshift == nil) {
+                    NSLog(@"Error getting state_tokenshift_in for state_mode %@", state_mode_name(ctx->state_mode));
+                    rwkv_coreml_release_resources(ctx);
+                    return -1;
+                }
+                ctx->state_tokenshift_tensors.push_back(CFBridgingRetain(state_tokenshift));
+
+                if (ctx->state_mode == RWKV_COREML_STATE_MODE_TENSOR) {
+                    MLMultiArray *state_wkv = make_zero_multi_array_from_feature(model_inputs_decode, @"state_wkv_in");
+                    if (state_wkv == nil) {
+                        NSLog(@"Error getting state_wkv_in for state_mode tensor");
+                        rwkv_coreml_release_resources(ctx);
+                        return -1;
+                    }
+                    ctx->state_wkv_tensors.push_back(CFBridgingRetain(state_wkv));
+                } else {
+                    MLState *state = [mlmodel_decode newState];
+                    if (state == nil) {
+                        NSLog(@"Error creating Core ML state for state_mode wkv-coreml");
+                        rwkv_coreml_release_resources(ctx);
+                        return -1;
+                    }
+                    ctx->states.push_back(CFBridgingRetain(state));
+                }
             }
 
             if (chunk_idx == 0) {
@@ -341,8 +597,8 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
             ctx->state_tokenshift_bytes += ctx->state_tokenshift_bytes_per_chunk[i];
         }
 
-        NSLog(@"num_chunks: %d, num_heads: %d, head_dim: %d, vocab_size: %d, n_layers: %d, prefill_seq_length: %d, state_wkv_bytes: %zu, state_tokenshift_bytes: %zu\n",
-            ctx->num_chunks, ctx->num_heads, ctx->head_dim, ctx->vocab_size, ctx->n_layers, ctx->prefill_seq_length, ctx->state_wkv_bytes, ctx->state_tokenshift_bytes);
+        NSLog(@"state_mode: %@, num_chunks: %d, num_heads: %d, head_dim: %d, vocab_size: %d, n_layers: %d, prefill_seq_length: %d, state_wkv_bytes: %zu, state_tokenshift_bytes: %zu\n",
+            state_mode_name(ctx->state_mode), ctx->num_chunks, ctx->num_heads, ctx->head_dim, ctx->vocab_size, ctx->n_layers, ctx->prefill_seq_length, ctx->state_wkv_bytes, ctx->state_tokenshift_bytes);
         return 0;
     }
 }
@@ -388,6 +644,10 @@ void* rwkv_coreml_decode(struct rwkv_coreml_context * ctx, int token) {
                                                error: nil
         ];
 
+        if (ctx->state_mode != RWKV_COREML_STATE_MODE_COREML) {
+            return run_generic(ctx, inMultiArray, false);
+        }
+
         if (ctx->num_chunks == 1) {
             rwkv_coreml_singlechunk_impl *model_decode = (__bridge rwkv_coreml_singlechunk_impl *)ctx->model_decode[0];
             rwkv_coreml_singlechunk_implState *state = (__bridge rwkv_coreml_singlechunk_implState *)ctx->states[0];
@@ -429,6 +689,10 @@ void* rwkv_coreml_prefill(struct rwkv_coreml_context * ctx, std::vector<int> tok
                                          deallocator: nil
                                                error: nil
         ];
+
+        if (ctx->state_mode != RWKV_COREML_STATE_MODE_COREML) {
+            return run_generic(ctx, inMultiArray, true);
+        }
 
         if (ctx->num_chunks == 1) {
             rwkv_coreml_singlechunk_impl *model_prefill = (__bridge rwkv_coreml_singlechunk_impl *)ctx->model_prefill[0];
@@ -490,7 +754,7 @@ int rwkv_coreml_get_state_tokenshift_bytes(struct rwkv_coreml_context * ctx) {
 
 std::vector<std::vector<uint8_t>> rwkv_coreml_get_state(struct rwkv_coreml_context * ctx) {
     std::vector<std::vector<uint8_t>> state_ret(2); // wkv and tokenshift
-    if (!ctx || ctx->states.empty()) {
+    if (!ctx || ctx->num_chunks <= 0) {
         NSLog(@"rwkv_coreml_get_state: invalid ctx/state");
         return state_ret;
     }
@@ -545,7 +809,7 @@ std::vector<std::vector<uint8_t>> rwkv_coreml_get_state(struct rwkv_coreml_conte
 }
 
 void rwkv_coreml_set_state(struct rwkv_coreml_context * ctx, std::vector<std::vector<uint8_t>> state) {
-    if (!ctx || ctx->states.empty()) {
+    if (!ctx || ctx->num_chunks <= 0) {
         NSLog(@"rwkv_coreml_set_state: invalid ctx/state");
         return;
     }
@@ -594,7 +858,7 @@ void rwkv_coreml_set_state(struct rwkv_coreml_context * ctx, std::vector<std::ve
 }
 
 void rwkv_coreml_set_wkv_state(struct rwkv_coreml_context * ctx, std::vector<half_float::half> state) {
-    if (!ctx || ctx->states.empty()) {
+    if (!ctx || ctx->num_chunks <= 0) {
         NSLog(@"rwkv_coreml_set_wkv_state: invalid ctx/state");
         return;
     }
@@ -620,7 +884,7 @@ void rwkv_coreml_set_wkv_state(struct rwkv_coreml_context * ctx, std::vector<hal
 }
 
 void rwkv_coreml_zero_state(struct rwkv_coreml_context * ctx) {
-    if (!ctx || ctx->states.empty()) return;
+    if (!ctx || ctx->num_chunks <= 0) return;
     for (int chunk_idx = 0; chunk_idx < ctx->num_chunks; ++chunk_idx) {
         with_state_wkv(ctx, chunk_idx, ^(MLMultiArray *buffer) {
             [buffer getMutableBytesWithHandler:^(void *mutableBytes, NSInteger size, NSArray<NSNumber *> *strides) {

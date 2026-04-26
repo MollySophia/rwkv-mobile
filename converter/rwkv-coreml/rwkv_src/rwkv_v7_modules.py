@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import rwkv_src.elemwise_ops as op
 
 class Rwkv7SelfAttention(nn.Module):
@@ -92,6 +91,18 @@ class Rwkv7SelfAttention(nn.Module):
         self.sigmoid_v              = nn.Sigmoid()
         self.sigmoid_w              = nn.Sigmoid()
 
+    def _normalize_heads(self, x):
+        norm2 = torch.sum(x * x, dim=-1, keepdim=True)
+        return x * torch.rsqrt(torch.clamp(norm2, min=1e-12))
+
+    def _head_group_norm(self, x, seq_length, batch_size):
+        x = x.view(seq_length, self.num_heads, self.head_size)
+        mean = torch.mean(x, dim=-1, keepdim=True)
+        x = x - mean
+        var = torch.mean(x * x, dim=-1, keepdim=True)
+        x = x * torch.rsqrt(var + 64e-5)
+        return x.view(batch_size, seq_length, self.hidden_size)
+
     def forward(self, x, state1, state2, v_first):
         last_x = x
         x = self.ln_1(x)
@@ -120,7 +131,7 @@ class Rwkv7SelfAttention(nn.Module):
         time_decay = self.matmul_time_decay_w2(self.tanh_w(self.matmul_time_decay_w1(xw)))
 
         kk = key * self.k_k
-        kk = torch.nn.functional.normalize(kk.view(seq_length, self.num_heads, self.head_size), dim=-1, p=2.0, eps=1e-6).view(batch_size, seq_length, hidden_size)
+        kk = self._normalize_heads(kk.view(seq_length, self.num_heads, self.head_size)).view(batch_size, seq_length, hidden_size)
         key = key * (1 + (a-1) * self.k_a)
 
         if self.layer_id == 0:
@@ -159,7 +170,7 @@ class Rwkv7SelfAttention(nn.Module):
             x = torch.cat(x_list, dim=0)
 
         # group_norm
-        x = self.ln_x(x).view(batch_size, seq_length, self.hidden_size)
+        x = self._head_group_norm(x, seq_length, batch_size)
         x = self.mul_ln_x(x, self.ln_x_w)
         x = self.add_ln_x(x, self.ln_x_b)
 

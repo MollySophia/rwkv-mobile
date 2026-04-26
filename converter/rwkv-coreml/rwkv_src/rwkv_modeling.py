@@ -70,8 +70,15 @@ class RWKV_Block(nn.Module):
     def forward(self, x, state=None, v_first=None):
         if len(state) == 2:
             token_shift_state, wkv_state = state
-            x, token_shift_state[:, 2*self.layer_offset, :], wkv_state[self.layer_offset, :, :], v_first = self.att(x, token_shift_state[:, 2*self.layer_offset, :], wkv_state[self.layer_offset, :, :], v_first)
-            x, token_shift_state[:, 2*self.layer_offset+1, :] = self.ffn(x, token_shift_state[:, 2*self.layer_offset+1, :])
+            att_idx = 2 * self.layer_offset
+            ffn_idx = att_idx + 1
+            x, token_shift_state[:, att_idx:att_idx+1, :], wkv_state[self.layer_offset:self.layer_offset+1, :, :, :], v_first = self.att(
+                x,
+                token_shift_state[:, att_idx:att_idx+1, :],
+                wkv_state[self.layer_offset:self.layer_offset+1, :, :, :],
+                v_first,
+            )
+            x, token_shift_state[:, ffn_idx:ffn_idx+1, :] = self.ffn(x, token_shift_state[:, ffn_idx:ffn_idx+1, :])
             return x, [token_shift_state, wkv_state], v_first
         else:
             x, state[3*self.layer_offset], state[3*self.layer_offset+1], v_first = self.att(x, state[3*self.layer_offset], state[3*self.layer_offset+1], v_first)
@@ -184,25 +191,32 @@ class RWKV_RNN_Stateful(RWKV_RNN):
     def __init__(self, args, chunks=1, chunk_idx=0):
         super().__init__(args, chunks, chunk_idx)
         self.layers_this_chunk = self.layer_end - self.layer_begin
-        self.register_buffer('state_tokenshift', torch.zeros(2, self.layers_this_chunk, self.args.n_embd))
+        self.register_buffer('state_tokenshift', torch.zeros(1, 2 * self.layers_this_chunk, self.args.n_embd))
         self.register_buffer('state_wkv', torch.zeros(self.layers_this_chunk, self.args.n_head, self.args.head_size, self.args.head_size))
 
     def forward(self, in0, v_first=None):
         states = []
         for i in range(self.layers_this_chunk):
-            states.append(self.state_tokenshift[0:1, i:i+1, :])
+            att_idx = 2 * i
+            ffn_idx = att_idx + 1
+            states.append(self.state_tokenshift[:, att_idx:att_idx+1, :])
             states.append(self.state_wkv[i:i+1, :, :, :])
-            states.append(self.state_tokenshift[1:2, i:i+1, :])
+            states.append(self.state_tokenshift[:, ffn_idx:ffn_idx+1, :])
 
         outputs = super().forward(in0, states, v_first)
         if len(outputs) == 2:
             x, states = outputs
         else:
             x, states, v_first = outputs
+        eps = torch.finfo(torch.float32).smallest_normal
+        token_shift_updates = []
+        wkv_updates = []
         for i in range(self.layers_this_chunk):
-            self.state_tokenshift[0:1, i:i+1, :] = states[3*i] + torch.finfo(torch.float32).smallest_normal
-            self.state_wkv[i:i+1, :, :, :] = states[3*i+1] + torch.finfo(torch.float32).smallest_normal
-            self.state_tokenshift[1:2, i:i+1, :] = states[3*i+2] + torch.finfo(torch.float32).smallest_normal
+            token_shift_updates.append(states[3*i].reshape(1, 1, self.args.n_embd))
+            token_shift_updates.append(states[3*i+2].reshape(1, 1, self.args.n_embd))
+            wkv_updates.append(states[3*i+1])
+        self.state_tokenshift[:] = torch.cat(token_shift_updates, dim=1) + eps
+        self.state_wkv[:] = torch.cat(wkv_updates, dim=0) + eps
 
         if self.chunk_idx == 0 and self.chunks != 1:
             return x, v_first
@@ -242,7 +256,7 @@ class RWKV_RNN_Stateful(RWKV_RNN):
 
         obj.register_buffer(
             'state_tokenshift',
-            torch.zeros(2, obj.layers_this_chunk, obj.args.n_embd, device=obj.device),
+            torch.zeros(1, 2 * obj.layers_this_chunk, obj.args.n_embd, device=obj.device),
         )
         obj.register_buffer(
             'state_wkv',
