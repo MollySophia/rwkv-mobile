@@ -308,7 +308,7 @@ int rwkvmobile_runtime_eval_chat_batch_with_history_async(
     void (*callback_batch)(const int, const char **, const int*, const char **),
     int enable_reasoning,
     int force_reasoning,
-    int force_lang,
+    const int * force_langs,
     int add_generation_prompt
 ) {
     if (handle == nullptr || inputs == nullptr || num_inputs == 0 || max_tokens <= 0 || batch_size <= 0) {
@@ -319,10 +319,14 @@ int rwkvmobile_runtime_eval_chat_batch_with_history_async(
     rt->set_is_generating(model_id, true);
     rt->set_stop_signal(model_id, false);
     std::vector<std::vector<std::string>> inputs_vec(batch_size);
+    std::vector<int> force_langs_vec(batch_size, FORCE_LANG_NONE);
     for (int i = 0; i < batch_size; i++) {
         inputs_vec[i].resize(num_inputs[i]);
         for (int j = 0; j < num_inputs[i]; j++) {
             inputs_vec[i][j] = std::string(inputs[i][j]);
+        }
+        if (force_langs != nullptr) {
+            force_langs_vec[i] = force_langs[i];
         }
     }
 
@@ -336,7 +340,7 @@ int rwkvmobile_runtime_eval_chat_batch_with_history_async(
             enable_reasoning != 0,
             force_reasoning != 0,
             add_generation_prompt != 0,
-            force_lang,
+            force_langs_vec,
             {});
         return ret;
     });

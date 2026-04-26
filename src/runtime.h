@@ -136,7 +136,7 @@ public:
     );
     int chat_batch(int model_id, std::vector<std::vector<std::string>> inputs, const int max_length, const int batch_size,
         void (*callback_batch)(const int, const char **, const int*, const char **) = nullptr, bool enable_reasoning = false, bool force_reasoning = false,
-        bool add_generation_prompt = true, int force_lang = 0, std::vector<std::vector<std::string>> roles_map = {}
+        bool add_generation_prompt = true, std::vector<int> force_langs = {}, std::vector<std::vector<std::string>> roles_map = {}
     );
     int gen_completion(int model_id, std::string prompt, int max_length, int stop_code, void (*callback)(const char *, const int, const char *), bool disable_cache=false);
     int gen_completion_batch(int model_id, std::vector<std::string> prompts, int batch_size, int max_length, int stop_code, void (*callback_batch)(const int, const char **, const int*, const char **), bool disable_cache=false);

@@ -184,7 +184,7 @@ Batch chat. Batch size must be in `supported_batch_sizes`.
   "max_tokens": 64,
   "enable_reasoning": false,
   "force_reasoning": false,
-  "force_lang": 0
+  "force_lang": [0, 1]
 }
 ```
 
@@ -192,7 +192,9 @@ Batch chat. Batch size must be in `supported_batch_sizes`.
 |-------|------|----------|-------------|
 | conversations | array | yes | Each item has `messages` (same format as chat) |
 | max_tokens | int | no | Max tokens per conversation |
-| enable_reasoning, force_reasoning, force_lang | - | no | Same as chat |
+| enable_reasoning, force_reasoning | - | no | Same as chat |
+| force_lang | int or int[] | no | Force language for all conversations, or one value per conversation (1 = Chinese) |
+| force_language | string or string[] | no | "zh" or "zh-CN" for all conversations, or one value per conversation |
 
 **Response:**
 ```json

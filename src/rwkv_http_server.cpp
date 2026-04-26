@@ -104,6 +104,13 @@ static void apply_sampling_params(rwkvmobile::Runtime & runtime, int model_id, c
     runtime.set_penalty_params(model_id, presence_penalty, frequency_penalty, penalty_decay);
 }
 
+static int force_language_to_id(const std::string & force_language) {
+    if (force_language == "zh" || force_language == "zh-CN") {
+        return 1;
+    }
+    return 0;
+}
+
 static json build_timings(rwkvmobile::Runtime & runtime, int model_id, int prompt_tokens, int predicted_tokens) {
     double prefill_speed = runtime.get_avg_prefill_speed(model_id);
     double decode_speed = runtime.get_avg_decode_speed(model_id);
@@ -471,9 +478,7 @@ int RwkvHttpServer::start() {
         int force_lang = body.value("force_lang", 0);
         if (force_lang == 0) {
             std::string force_language = body.value("force_language", "");
-            if (force_language == "zh" || force_language == "zh-CN") {
-                force_lang = 1;
-            }
+            force_lang = force_language_to_id(force_language);
         }
 
         std::string prompt_text = impl_->runtime->apply_chat_template(impl_->model_id, inputs, enable_reasoning, true, roles);
@@ -679,12 +684,34 @@ int RwkvHttpServer::start() {
 
         bool enable_reasoning = body.value("enable_reasoning", false);
         bool force_reasoning = body.value("force_reasoning", false);
-        int force_lang = body.value("force_lang", 0);
-        if (force_lang == 0) {
-            std::string force_language = body.value("force_language", "");
-            if (force_language == "zh" || force_language == "zh-CN") {
-                force_lang = 1;
+        std::vector<int> force_langs_batch;
+        bool force_langs_batch_provided = false;
+        int force_lang = 0;
+        if (body.contains("force_lang") && body["force_lang"].is_array()) {
+            force_langs_batch_provided = true;
+            for (const auto & item : body["force_lang"]) {
+                if (!item.is_number_integer()) {
+                    set_error_response(res, 400, "force_lang array must contain integers", "invalid_request_error");
+                    return;
+                }
+                force_langs_batch.push_back(item.get<int>());
             }
+        } else {
+            force_lang = body.value("force_lang", 0);
+        }
+        if (!force_langs_batch_provided && body.contains("force_language") && body["force_language"].is_array()) {
+            force_langs_batch_provided = true;
+            for (const auto & item : body["force_language"]) {
+                if (!item.is_string()) {
+                    set_error_response(res, 400, "force_language array must contain strings", "invalid_request_error");
+                    return;
+                }
+                force_langs_batch.push_back(force_language_to_id(item.get<std::string>()));
+            }
+        }
+        if (!force_langs_batch_provided && force_lang == 0) {
+            std::string force_language = body.value("force_language", "");
+            force_lang = force_language_to_id(force_language);
         }
 
         std::vector<std::vector<std::string>> inputs_batch;
@@ -731,7 +758,13 @@ int RwkvHttpServer::start() {
         apply_sampling_params(*impl_->runtime, impl_->model_id, body);
 
         int batch_size = (int)inputs_batch.size();
-        int ret = impl_->runtime->chat_batch(impl_->model_id, inputs_batch, max_tokens, batch_size, nullptr, enable_reasoning, force_reasoning, true, force_lang, roles_batch);
+        if (!force_langs_batch_provided) {
+            force_langs_batch.assign((size_t)batch_size, force_lang);
+        } else if (force_langs_batch.size() != (size_t)batch_size) {
+            set_error_response(res, 400, "force_lang / force_language array length must match conversations length", "invalid_request_error");
+            return;
+        }
+        int ret = impl_->runtime->chat_batch(impl_->model_id, inputs_batch, max_tokens, batch_size, nullptr, enable_reasoning, force_reasoning, true, force_langs_batch, roles_batch);
         if (ret != rwkvmobile::RWKV_SUCCESS) {
             set_error_response(res, 500, "generation failed", "server_error");
             return;

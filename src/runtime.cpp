@@ -1454,17 +1454,13 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     const int max_length, const int batch_size,
     void (*callback_batch)(const int, const char **, const int*, const char **),
     bool enable_reasoning, bool force_reasoning, bool add_generation_prompt,
-    int force_lang, std::vector<std::vector<std::string>> roles_map) {
+    std::vector<int> force_langs, std::vector<std::vector<std::string>> roles_map) {
     if (_models.find(model_id) == _models.end()) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
     auto &model = _models.at(model_id);
     if (model->backend == nullptr || model->tokenizer == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
-    }
-
-    if (force_lang == 1) {
-        LOGI("forcing output language to Chinese\n");
     }
 
     auto &supported_sizes = model->backend->supported_batch_sizes;
@@ -1476,6 +1472,23 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     if (inputs.size() != batch_size) {
         LOGE("chat_batch: inputs size %d is not equal to batch size %d\n", inputs.size(), batch_size);
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    std::vector<int> force_langs_batch(batch_size, 0);
+    if (!force_langs.empty()) {
+        if (force_langs.size() == 1) {
+            std::fill(force_langs_batch.begin(), force_langs_batch.end(), force_langs[0]);
+        } else if (force_langs.size() == (size_t)batch_size) {
+            std::copy(force_langs.begin(), force_langs.end(), force_langs_batch.begin());
+        } else {
+            LOGE("chat_batch: force_langs size %d is not equal to batch size %d\n", (int)force_langs.size(), batch_size);
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+    }
+    for (int i = 0; i < batch_size; i++) {
+        if (force_langs_batch[i] == 1) {
+            LOGI("batch %d forcing output language to Chinese\n", i);
+        }
     }
 
     model->is_generating = true;
@@ -1565,9 +1578,67 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         } else {
             role_for_parsing = history_ends_with_user_message ? model->response_role : model->user_role;
         }
-        model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());;
+        model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());
         model->response_buffer_ids_batch[batch_idx].clear();
         model->response_buffer_eos_found_batch[batch_idx] = false;
+
+        is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
+    }
+
+    size_t common_prefix_len = 0;
+    if (batch_size > 1 && !text_ids_batch.empty()) {
+        common_prefix_len = text_ids_batch[0].size();
+        for (int batch_idx = 1; batch_idx < batch_size; batch_idx++) {
+            common_prefix_len = std::min(common_prefix_len, text_ids_batch[batch_idx].size());
+            size_t j = 0;
+            while (j < common_prefix_len && text_ids_batch[0][j] == text_ids_batch[batch_idx][j]) {
+                j++;
+            }
+            common_prefix_len = j;
+        }
+    }
+
+    if (common_prefix_len > 0) {
+        std::vector<int> common_prefix_ids(text_ids_batch[0].begin(), text_ids_batch[0].begin() + common_prefix_len);
+        std::vector<int> common_tokens_to_prefill;
+        state_node *common_node = model->backend->match_and_load_state(common_prefix_ids, common_tokens_to_prefill);
+        LOGI("batch common prefix tokens: %zu, matched state cache for prefix: \"%s\"",
+            common_prefix_len, escape_special_chars(model->tokenizer->decode(common_node->ids)).c_str());
+
+        if (common_tokens_to_prefill.size() > 0) {
+            if (!reset_speed_stats_for_this_batch) {
+                reset_inference_speed_stats(model_id);
+                reset_speed_stats_for_this_batch = true;
+            }
+            _prefill_progress_start(model_id, common_tokens_to_prefill.size());
+            LOGI("batch common text to prefill: \"%s\"", escape_special_chars(model->tokenizer->decode(common_tokens_to_prefill)).c_str());
+
+            Tensor1D common_prefill_logits;
+            int checkpoint_interval = _get_prefill_checkpoint_interval((int) common_tokens_to_prefill.size());
+            for (int j = 0; j < common_tokens_to_prefill.size(); j += checkpoint_interval) {
+                std::vector<int> tokens_to_prefill_chunk = std::vector<int>(
+                    common_tokens_to_prefill.begin() + j,
+                    common_tokens_to_prefill.begin() + std::min(j + checkpoint_interval, (int) common_tokens_to_prefill.size())
+                );
+                ret = eval_logits(model_id, tokens_to_prefill_chunk, common_prefill_logits);
+                if (ret) {
+                    model->is_generating = false;
+                    LOGE("failed to eval common prefix logits\n");
+                    return ret;
+                }
+                ret = model->backend->register_state_checkpoint(common_node, tokens_to_prefill_chunk, common_prefill_logits);
+                if (ret) {
+                    model->is_generating = false;
+                    LOGE("failed to register common prefix state checkpoint\n");
+                    return ret;
+                }
+                LOGI("registered common prefix state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(common_node->ids)).c_str());
+            }
+            _prefill_progress_finish(model_id);
+        }
+    }
+
+    for (int batch_idx = 0; batch_idx < batch_size; batch_idx++) {
         std::vector<int> tokens_to_prefill;
         nodes_batch[batch_idx] = model->backend->match_and_load_state(text_ids_batch[batch_idx], tokens_to_prefill);
         LOGI("batch %d matched state cache for prefix: \"%s\"", batch_idx, escape_special_chars(model->tokenizer->decode(nodes_batch[batch_idx]->ids)).c_str());
@@ -1622,8 +1693,6 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         }
         std::copy_n(prefill_logits_f32_batch[batch_idx].data(), num_vocab, batch_slot);
 
-        is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
-
         model->backend->get_state(state_batch[batch_idx]);
     }
 
@@ -1656,7 +1725,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 mask_thinking_tag(view);
             }
 
-            if (force_lang == 1 && i <= 2) {
+            if (force_langs_batch[original_j] == 1 && i <= 2) {
                 mask_non_chinese_tokens(view, num_vocab);
             }
         }
