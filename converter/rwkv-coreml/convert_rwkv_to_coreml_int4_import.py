@@ -18,12 +18,19 @@ parser.add_argument('--lut4', action='store_true', help='Use lut4 palettization'
 parser.add_argument(
     '--omniquant-parameters',
     type=Path,
-    help='Import OmniQuant per-channel int4 metadata for supported Linear layers and fall back to int8 elsewhere',
+    help='Import OmniQuant per-channel int4 metadata for supported Linear layers and use --omniquant-fallback elsewhere',
 )
 parser.add_argument(
-    '--att-output-int8',
+    '--omniquant-fallback',
+    choices=['int8', 'lut6'],
+    default='int8',
+    help='Fallback compression for weights without imported OmniQuant int4 metadata',
+)
+parser.add_argument(
+    '--att-output-fallback',
+    dest='att_output_fallback',
     action='store_true',
-    help='When importing OmniQuant int4 metadata, keep att.output weights in the int8 fallback path',
+    help='When importing OmniQuant int4 metadata, keep att.output weights in the selected fallback path',
 )
 parser.add_argument(
     '--state-mode',
@@ -45,7 +52,7 @@ OMNIQUANT_MODULE_MAP = {
     'ffn.value.weight_quantizer': 'ffn.value',
 }
 active_omniquant_module_map = dict(OMNIQUANT_MODULE_MAP)
-if parser_args.att_output_int8:
+if parser_args.att_output_fallback:
     active_omniquant_module_map.pop('attn.o_proj.weight_quantizer')
 
 compression_modes = [
@@ -58,7 +65,12 @@ compression_modes = [
 if sum(bool(mode) for mode in compression_modes) > 1:
     raise ValueError('Choose only one of --int8/--int4/--lut8/--lut6/--lut4.')
 if parser_args.omniquant_parameters is not None and any(compression_modes):
-    raise ValueError('--omniquant-parameters already implies int8 fallback; do not combine it with other compression flags.')
+    raise ValueError('--omniquant-parameters already implies fallback compression; do not combine it with other compression flags.')
+if parser_args.omniquant_parameters is None:
+    if parser_args.omniquant_fallback != 'int8':
+        raise ValueError('--omniquant-fallback requires --omniquant-parameters.')
+    if parser_args.att_output_fallback:
+        raise ValueError('--att-output-fallback requires --omniquant-parameters.')
 
 omniquant_parameters = None
 omniquant_target_modules = []
@@ -261,20 +273,30 @@ def build_inputs_prefill(chunk_idx: int = 0):
 use_int = False
 use_lut = False
 if parser_args.omniquant_parameters is not None:
-    config = PostTrainingQuantizerConfig.from_dict(
-        {
-            "global_config": {
-                "weight_dtype": "int8",
-                "granularity": "per_channel",
-            },
+    if parser_args.omniquant_fallback == 'int8':
+        config = PostTrainingQuantizerConfig.from_dict(
+            {
+                "global_config": {
+                    "weight_dtype": "int8",
+                    "granularity": "per_channel",
+                },
+                "module_name_configs": {
+                    module_name: None for module_name in omniquant_target_modules
+                },
+                "module_type_configs": {
+                }
+            }
+        )
+        use_int = True
+    elif parser_args.omniquant_fallback == 'lut6':
+        palettization_config_dict = {
+            "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 16},
             "module_name_configs": {
                 module_name: None for module_name in omniquant_target_modules
             },
-            "module_type_configs": {
-            }
         }
-    )
-    use_int = True
+        palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+        use_lut = True
 elif parser_args.int4:
     config = PostTrainingQuantizerConfig.from_dict(
         {
@@ -327,15 +349,15 @@ elif use_int:
     full_model = quantizer.compress()
 
 if omniquant_parameters is not None:
-    if parser_args.att_output_int8:
-        print('Keeping blocks.*.att.output weights in int8 fallback.')
+    if parser_args.att_output_fallback:
+        print(f'Keeping blocks.*.att.output weights in {parser_args.omniquant_fallback} fallback.')
     omniquant_stats = _apply_omniquant_import(full_model, omniquant_parameters, active_omniquant_module_map)
     print(
         'Applied OmniQuant int4 metadata to',
         len(omniquant_stats['applied']),
         'Linear layers;',
         len(omniquant_stats['missing_params']),
-        'layers fell back to int8 because OmniQuant params were missing.'
+        f'layers fell back to {parser_args.omniquant_fallback} because OmniQuant params were missing.'
     )
     if omniquant_stats['missing_module']:
         print('Warning: missing modules for OmniQuant import:', len(omniquant_stats['missing_module']))
@@ -435,9 +457,9 @@ def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
     output_name += f'-{mode_tag}'
     if parser_args.omniquant_parameters is not None:
-        output_name += '-omni-int4int8mix'
-        if parser_args.att_output_int8:
-            output_name += '-attout-int8'
+        output_name += f'-omni-int4{parser_args.omniquant_fallback}mix'
+        if parser_args.att_output_fallback:
+            output_name += f'-attout-{parser_args.omniquant_fallback}'
     elif parser_args.int4:
         output_name += '-int4'
     elif parser_args.int8:
@@ -461,9 +483,9 @@ def _build_combined_base_name() -> str:
     output_name = str(os.path.basename(parser_args.model)).replace('.pth', '')
     output_name += '-coreml'
     if parser_args.omniquant_parameters is not None:
-        output_name += '-omni-int4int8mix'
-        if parser_args.att_output_int8:
-            output_name += '-attout-int8'
+        output_name += f'-omni-int4{parser_args.omniquant_fallback}mix'
+        if parser_args.att_output_fallback:
+            output_name += f'-attout-{parser_args.omniquant_fallback}'
     elif parser_args.int4:
         output_name += '-int4'
     elif parser_args.int8:
@@ -581,6 +603,9 @@ with open(output_dir / 'config.yaml', 'w', encoding='utf-8') as f:
     f.write(f'basename: {combined_base_name}\n')
     f.write(f'num_chunks: {parser_args.chunks}\n')
     f.write(f'state_mode: {parser_args.state_mode}\n')
+    if parser_args.omniquant_parameters is not None:
+        f.write(f'omniquant_fallback: {parser_args.omniquant_fallback}\n')
+        f.write(f'att_output_fallback: {str(parser_args.att_output_fallback).lower()}\n')
 
 def reset_state_buffers(model):
     for name, buffer in model.named_buffers():
