@@ -187,6 +187,38 @@ class RWKV_RNN(torch.nn.Module):
             else:
                 return x, state
 
+    @classmethod
+    def from_full_model(cls, full_model, chunks=1, chunk_idx=0):
+        obj = cls.__new__(cls)
+        nn.Module.__init__(obj)
+        obj.args = full_model.args
+        obj.eval()
+
+        boundaries = _compute_chunk_boundaries(obj.args.n_layer, chunks)
+        obj.layer_begin, obj.layer_end = boundaries[chunk_idx]
+        obj.chunk_idx = chunk_idx
+        obj.chunks = chunks
+
+        obj.device = getattr(full_model, "device", torch.device("cpu"))
+        obj.gpu = getattr(full_model, "gpu", obj.device is not torch.device("cpu"))
+
+        if chunk_idx == 0:
+            if obj.args.USE_EMBEDDING and hasattr(full_model, "embedding"):
+                obj.embedding = full_model.embedding
+            elif hasattr(full_model, "emb_weight"):
+                obj.emb_weight = full_model.emb_weight
+
+        blocks = []
+        for i in range(obj.layer_begin, obj.layer_end):
+            blocks.append(_clone_block_with_offset(full_model.blocks[i], i - obj.layer_begin))
+        obj.blocks = nn.ModuleList(blocks)
+
+        if chunk_idx == chunks - 1 and not obj.args.SKIP_LMHEAD:
+            obj.ln_out = full_model.ln_out
+            obj.head = full_model.head
+
+        return obj
+
 class RWKV_RNN_Stateful(RWKV_RNN):
     def __init__(self, args, chunks=1, chunk_idx=0):
         super().__init__(args, chunks, chunk_idx)
@@ -297,8 +329,10 @@ class RWKV_LMHead(torch.nn.Module):
         x = self.head(x)
         return x
 
-def make_chunks(chunks, args):
-    return [RWKV_RNN(args, chunks=chunks, chunk_idx=i) for i in range(chunks)]
+def make_chunks(chunks, args, full_model=None):
+    if full_model is None:
+        return [RWKV_RNN(args, chunks=chunks, chunk_idx=i) for i in range(chunks)]
+    return [RWKV_RNN.from_full_model(full_model, chunks=chunks, chunk_idx=i) for i in range(chunks)]
 
 def make_chunks_stateful(chunks, args, full_model=None):
     if full_model is None:

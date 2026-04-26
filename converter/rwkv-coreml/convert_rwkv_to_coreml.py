@@ -230,9 +230,7 @@ else:
     if parser_args.chunks == 1:
         models = [full_model]
     else:
-        if use_int or use_lut:
-            raise ValueError(f'--state-mode {parser_args.state_mode} with quantization currently supports only --chunks 1')
-        models = make_chunks(parser_args.chunks, model_args)
+        models = make_chunks(parser_args.chunks, model_args, full_model=full_model)
     if parser_args.state_mode == 'tensor':
         models = [TensorStateRWKV(model) for model in models]
     else:
