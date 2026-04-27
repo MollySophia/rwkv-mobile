@@ -107,8 +107,8 @@ Chat completion (OpenAI-compatible).
 | stream | bool | no | SSE streaming (default: false) |
 | enable_reasoning | bool | no | Enable thinking/reasoning |
 | force_reasoning | bool | no | Force reasoning mode |
-| force_lang | int | no | Force language (1 = Chinese) |
-| force_language | string | no | "zh" or "zh-CN" for Chinese |
+| force_lang | int | no | Force language (1 = Chinese, 2 = English) |
+| force_language | string | no | "zh" / "zh-CN" for Chinese, "en" / "en-US" / "en-GB" for English |
 | temperature, top_k, top_p, ... | - | no | Same as completions |
 
 **Response (non-stream):**
@@ -193,8 +193,8 @@ Batch chat. Batch size must be in `supported_batch_sizes`.
 | conversations | array | yes | Each item has `messages` (same format as chat) |
 | max_tokens | int | no | Max tokens per conversation |
 | enable_reasoning, force_reasoning | - | no | Same as chat |
-| force_lang | int or int[] | no | Force language for all conversations, or one value per conversation (1 = Chinese) |
-| force_language | string or string[] | no | "zh" or "zh-CN" for all conversations, or one value per conversation |
+| force_lang | int or int[] | no | Force language for all conversations, or one value per conversation (1 = Chinese, 2 = English) |
+| force_language | string or string[] | no | "zh" / "zh-CN" or "en" / "en-US" / "en-GB" for all conversations, or one value per conversation |
 
 **Response:**
 ```json

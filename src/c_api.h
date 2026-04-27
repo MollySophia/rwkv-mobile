@@ -111,6 +111,7 @@ extern "C" {
 enum {
     FORCE_LANG_NONE = 0,
     FORCE_LANG_CHN = 1,
+    FORCE_LANG_EN = 2,
 };
 
 int rwkvmobile_runtime_get_available_backend_names(char * backend_names_buffer, int buffer_size);

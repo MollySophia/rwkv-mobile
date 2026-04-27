@@ -108,6 +108,9 @@ static int force_language_to_id(const std::string & force_language) {
     if (force_language == "zh" || force_language == "zh-CN") {
         return 1;
     }
+    if (force_language == "en" || force_language == "en-US" || force_language == "en-GB") {
+        return 2;
+    }
     return 0;
 }
 

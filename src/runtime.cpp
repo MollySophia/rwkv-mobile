@@ -85,13 +85,20 @@ inline void mask_thinking_tag(Tensor1D &logits) {
 }
 
 inline void mask_non_chinese_tokens(Tensor1D &logits, int num_vocab) {
-    int current_token = 0, current_range_idx = 0;
+    int current_token = 0;
     while (current_token < num_vocab) {
         if (current_token >= chinese_tokens_start && current_token <= chinese_tokens_end) {
             current_token = chinese_tokens_end + 1;
         }
         tensor1d_set_f32(logits, (size_t)current_token, -1e9f);
         current_token++;
+    }
+}
+
+inline void mask_chinese_tokens(Tensor1D &logits, int num_vocab) {
+    int last_chinese_token = std::min(chinese_tokens_end, num_vocab - 1);
+    for (int token = chinese_tokens_start; token <= last_chinese_token; token++) {
+        tensor1d_set_f32(logits, (size_t)token, -1e9f);
     }
 }
 
@@ -1199,6 +1206,8 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
 
     if (force_lang == 1) {
         LOGI("forcing output language to Chinese\n");
+    } else if (force_lang == 2) {
+        LOGI("forcing output language to English\n");
     }
 
     auto input_text = apply_chat_template(model_id, inputs, enable_reasoning, add_generation_prompt, roles_map);
@@ -1351,8 +1360,12 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
             mask_thinking_tag(logits);
         }
 
-        if (i <= 2 && force_lang == 1) {
-            mask_non_chinese_tokens(logits, model->backend->get_num_vocab());
+        if (i <= 2) {
+            if (force_lang == 1) {
+                mask_non_chinese_tokens(logits, model->backend->get_num_vocab());
+            } else if (force_lang == 2) {
+                mask_chinese_tokens(logits, model->backend->get_num_vocab());
+            }
         }
 
         decoded_idx = model->sampler->sample(logits, model->backend->get_num_vocab());
@@ -1488,6 +1501,8 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
     for (int i = 0; i < batch_size; i++) {
         if (force_langs_batch[i] == 1) {
             LOGI("batch %d forcing output language to Chinese\n", i);
+        } else if (force_langs_batch[i] == 2) {
+            LOGI("batch %d forcing output language to English\n", i);
         }
     }
 
@@ -1725,8 +1740,12 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
                 mask_thinking_tag(view);
             }
 
-            if (force_langs_batch[original_j] == 1 && i <= 2) {
-                mask_non_chinese_tokens(view, num_vocab);
+            if (i <= 2) {
+                if (force_langs_batch[original_j] == 1) {
+                    mask_non_chinese_tokens(view, num_vocab);
+                } else if (force_langs_batch[original_j] == 2) {
+                    mask_chinese_tokens(view, num_vocab);
+                }
             }
         }
 
