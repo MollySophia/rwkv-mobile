@@ -252,7 +252,7 @@ int soc_detect::detect_platform() {
             windows_cpu_name = cpu_name;
         }
         m_soc_name = windows_cpu_name.c_str();
-        m_soc_partname = windows_cpu_name.c_str();
+        // m_soc_partname = windows_cpu_name.c_str();
     }
 #endif
     return RWKV_SUCCESS;
