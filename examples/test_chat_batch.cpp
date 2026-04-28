@@ -26,21 +26,24 @@ int main(int argc, char **argv) {
     int batch_size = atoi(argv[4]);
 
     if (argc == 6 && std::string(argv[5]) == "style_repro") {
-        if (batch_size != 4) {
-            std::cerr << "style_repro expects batch_size=4" << std::endl;
+        const std::string base_prompt = "用三句话介绍一下杭州西湖。";
+        const std::vector<std::pair<std::string, std::string>> styles = {
+            {"jin", ""},
+            {"gu", " 请使用文言文回答。"},
+            {"mao", " 请扮演猫娘回答"},
+            {"en", " 请使用英语回答"},
+            {"ja", " 请使用日语回答"},
+            {"yue", " 请用香港粵語回答"},
+        };
+        if (batch_size != (int)styles.size()) {
+            std::cerr << "style_repro expects batch_size=" << styles.size() << std::endl;
             runtime.release();
             return 1;
         }
+        const bool enable_reasoning = true;
         runtime.set_seed(model_id, 42);
         runtime.set_sampler_params(model_id, 1.0f, 1, 1.0f);
-
-        const std::string base_prompt = "用三句话介绍一下杭州西湖。";
-        const std::vector<std::pair<std::string, std::string>> styles = {
-            {"gu", " 请用文言文回答。"},
-            {"mao", " 请用可爱的猫咪口吻回答，多使用“喵”，保持猫风格。"},
-            {"en", " Use English only. Direct answer. No preface. Never speak in Chinese. Do not use any Chinese characters."},
-            {"ja", " 日本語のみ。前置きなしで直接回答。"},
-        };
+        runtime.set_thinking_token(model_id, "<think>\n</think");
 
         std::vector<std::vector<std::string>> input_list_batch;
         input_list_batch.reserve(styles.size());
@@ -49,14 +52,14 @@ int main(int argc, char **argv) {
         }
 
         std::cout << "Batch style prompts:" << std::endl;
-        ENSURE_SUCCESS_OR_LOG_EXIT(runtime.chat_batch(model_id, input_list_batch, 120, batch_size, nullptr, false, false, true), "Failed to chat batch");
+        ENSURE_SUCCESS_OR_LOG_EXIT(runtime.chat_batch(model_id, input_list_batch, 120, batch_size, nullptr, enable_reasoning, false, true), "Failed to chat batch");
         auto batch_response = runtime.get_response_buffer_content_batch(model_id);
         for (int i = 0; i < batch_size; i++) {
             std::cout << "[" << styles[i].first << "] " << batch_response[i] << std::endl << std::endl;
         }
 
         std::cout << "Single EN prompt:" << std::endl;
-        ENSURE_SUCCESS_OR_LOG_EXIT(runtime.chat(model_id, {base_prompt + styles[2].second}, 120, nullptr, false, false, true), "Failed to chat single EN");
+        ENSURE_SUCCESS_OR_LOG_EXIT(runtime.chat(model_id, {base_prompt + styles[3].second}, 120, nullptr, enable_reasoning, false, true), "Failed to chat single EN");
         std::cout << runtime.get_response_buffer_content(model_id) << std::endl << std::endl;
 
         runtime.release();
