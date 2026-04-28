@@ -345,6 +345,9 @@ endif()
 
 add_library(rwkv_mobile_internal STATIC ${RWKV_MOBILE_SRCS})
 target_include_directories(rwkv_mobile_internal PUBLIC src "${RWKV_MOBILE_GENERATED_INCLUDE_DIR}")
+if (WIN32)
+    target_link_libraries(rwkv_mobile_internal PUBLIC Advapi32)
+endif()
 if (CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
     target_link_options(rwkv_mobile_internal PRIVATE
         "-Wl,-z,max-page-size=16384"

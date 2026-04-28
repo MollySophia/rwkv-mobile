@@ -4,8 +4,17 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <algorithm>
 #include <cstring>
+#include <cctype>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #ifdef __linux__
 #include <dirent.h>
@@ -17,6 +26,103 @@
 #endif
 
 namespace rwkvmobile {
+
+#ifdef _WIN32
+namespace {
+
+std::string wide_to_utf8(const std::wstring &input) {
+    if (input.empty()) {
+        return "";
+    }
+
+    int size = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), static_cast<int>(input.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return "";
+    }
+
+    std::string output(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, input.c_str(), static_cast<int>(input.size()), output.data(), size, nullptr, nullptr);
+    return output;
+}
+
+std::string trim(const std::string &input) {
+    auto first = std::find_if_not(input.begin(), input.end(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    });
+    auto last = std::find_if_not(input.rbegin(), input.rend(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    }).base();
+
+    if (first >= last) {
+        return "";
+    }
+    return std::string(first, last);
+}
+
+std::string read_registry_string(HKEY root, const wchar_t *subkey, const wchar_t *value_name) {
+    DWORD type = 0;
+    DWORD size = 0;
+    LSTATUS status = RegGetValueW(root, subkey, value_name, RRF_RT_REG_SZ, &type, nullptr, &size);
+    if (status != ERROR_SUCCESS || size < sizeof(wchar_t)) {
+        return "";
+    }
+
+    std::wstring value(size / sizeof(wchar_t), L'\0');
+    status = RegGetValueW(root, subkey, value_name, RRF_RT_REG_SZ, &type, value.data(), &size);
+    if (status != ERROR_SUCCESS) {
+        return "";
+    }
+
+    if (!value.empty() && value.back() == L'\0') {
+        value.pop_back();
+    }
+    return trim(wide_to_utf8(value));
+}
+
+std::string to_lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool contains(const std::string &haystack, const char *needle) {
+    return haystack.find(needle) != std::string::npos;
+}
+
+void detect_windows_snapdragon(std::string &cpu_name, platform_type &platform, const char *&soc_partname, const char *&htp_arch) {
+    const std::string lower_cpu_name = to_lower(cpu_name);
+
+    if (!contains(lower_cpu_name, "qualcomm") && !contains(lower_cpu_name, "snapdragon")) {
+        return;
+    }
+
+    platform = PLATFORM_SNAPDRAGON;
+
+    if (contains(lower_cpu_name, "x elite") || contains(lower_cpu_name, "x1e")) {
+        cpu_name = "X Elite";
+        soc_partname = "SC8380";
+        htp_arch = "v73";
+    } else if (contains(lower_cpu_name, "x plus") || contains(lower_cpu_name, "x1p")) {
+        cpu_name = "X Plus";
+        soc_partname = "SC8380";
+        htp_arch = "v73";
+    } else if (contains(lower_cpu_name, "oryon") || contains(lower_cpu_name, "x1")) {
+        cpu_name = "X1";
+        soc_partname = "SC8380";
+        htp_arch = "v73";
+    } else if (contains(lower_cpu_name, "8cx gen 3") || contains(lower_cpu_name, "sc8280")) {
+        cpu_name = "8cx Gen 3";
+        soc_partname = "SC8280X";
+        htp_arch = "v68";
+    } else if (contains(lower_cpu_name, "8cx")) {
+        cpu_name = "8cx Gen 2";
+        soc_partname = "SC8180X";
+    }
+}
+
+} // namespace
+#endif
 
 const char * platform_name[] = {
     "Snapdragon",
@@ -127,15 +233,27 @@ int soc_detect::detect_platform() {
 #endif
 
 #else // _WIN32
-    // TODO
-#endif
+    static std::string windows_cpu_name;
+    std::string cpu_name = read_registry_string(
+        HKEY_LOCAL_MACHINE,
+        L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+        L"ProcessorNameString");
+    if (cpu_name.empty()) {
+        cpu_name = read_registry_string(
+            HKEY_LOCAL_MACHINE,
+            L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+            L"Identifier");
+    }
 
-#if defined(_WIN32) && defined(ENABLE_QNN)
-    // TODO: Detect this
-    m_platform_type = PLATFORM_SNAPDRAGON;
-    m_htp_arch = "v73";
-    m_soc_partname = "SC8380";
-    m_soc_name = "X Elite";
+    detect_windows_snapdragon(cpu_name, m_platform_type, m_soc_partname, m_htp_arch);
+
+    if (!cpu_name.empty()) {
+        if (windows_cpu_name != cpu_name) {
+            windows_cpu_name = cpu_name;
+        }
+        m_soc_name = windows_cpu_name.c_str();
+        m_soc_partname = windows_cpu_name.c_str();
+    }
 #endif
     return RWKV_SUCCESS;
 }
