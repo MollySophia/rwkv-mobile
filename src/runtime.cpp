@@ -1594,8 +1594,21 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
             role_for_parsing = history_ends_with_user_message ? model->response_role : model->user_role;
         }
         model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());
-        model->response_buffer_ids_batch[batch_idx].clear();
+        if (model->response_buffer_batch[batch_idx].empty()) {
+            model->response_buffer_ids_batch[batch_idx].clear();
+            model->response_buffer_decoded_tokens_batch[batch_idx] = 0;
+        } else {
+            model->response_buffer_ids_batch[batch_idx] = model->tokenizer->encode(model->response_buffer_batch[batch_idx]);
+            model->response_buffer_decoded_tokens_batch[batch_idx] = (int)model->response_buffer_ids_batch[batch_idx].size();
+        }
         model->response_buffer_eos_found_batch[batch_idx] = false;
+
+        if (!input.empty() && !history_ends_with_user_message) {
+            std::vector<int> ids = model->tokenizer->encode(" " + input[input.size() - 1]);
+            for (auto id : ids) {
+                occurences_batch[batch_idx][id]++;
+            }
+        }
 
         is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
     }
@@ -3858,6 +3871,9 @@ std::vector<std::string> Runtime::get_response_buffer_content_batch(int model_id
         int &decoded = model->response_buffer_decoded_tokens_batch[i];
         for (int j = decoded; j < total; j++) {
             model->response_buffer_batch[i] += model->tokenizer->decode(model->response_buffer_ids_batch[i][j]);
+        }
+        if (model->response_buffer_batch[i].size() > 0 && model->response_buffer_batch[i][0] == ' ') {
+            model->response_buffer_batch[i] = model->response_buffer_batch[i].substr(1);
         }
         decoded = total;
     }

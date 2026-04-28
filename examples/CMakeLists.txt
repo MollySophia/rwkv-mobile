@@ -33,6 +33,9 @@ target_link_libraries(test_generation_batch PUBLIC rwkv_mobile_internal)
 add_executable(test_chat_resume test_chat_resume.cpp ../src/c_api.cpp)
 target_link_libraries(test_chat_resume PUBLIC rwkv_mobile_internal)
 
+add_executable(test_chat_batch_resume test_chat_batch_resume.cpp ../src/c_api.cpp)
+target_link_libraries(test_chat_batch_resume PUBLIC rwkv_mobile_internal)
+
 add_executable(test_chat_c_api test_chat_c_api.cpp ../src/c_api.cpp)
 target_link_libraries(test_chat_c_api PUBLIC rwkv_mobile_internal)
 
