@@ -824,7 +824,7 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         if (i != inputs.size() - 1) {
             text += model->eos_token;
         }
-        LOGI("message[%zu]: role: %s, content: %s", i, role.c_str(), content.c_str());
+        LOGI("message[%zu]: role: \"%s\", content: \"%s\"", i, role.c_str(), escape_special_chars(content).c_str());
     }
 
     if (!inputs.empty() && add_generation_prompt) {

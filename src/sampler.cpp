@@ -5,6 +5,13 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(_M_ARM64) || defined(__aarch64__)
+#include <arm_neon.h>
+#define RWKV_MOBILE_USE_NEON_TOPK_PREFILTER 1
+#elif defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86)
+#include <immintrin.h>
+#define RWKV_MOBILE_USE_SSE_TOPK_PREFILTER 1
+#endif
 
 namespace rwkvmobile {
 
@@ -14,6 +21,48 @@ constexpr int kMaxSamplerThreads = 4;
 #else
 constexpr int kMaxSamplerThreads = 8;
 #endif
+
+inline void swap_sampler_heap_item(std::vector<int> &indices, std::vector<float> &values, int a, int b) {
+    std::swap(indices[(size_t)a], indices[(size_t)b]);
+    std::swap(values[(size_t)a], values[(size_t)b]);
+}
+
+void sift_up_min_heap(std::vector<int> &indices, std::vector<float> &values, int pos) {
+    while (pos > 0) {
+        int parent = (pos - 1) / 2;
+        if (values[(size_t)parent] <= values[(size_t)pos]) {
+            break;
+        }
+        swap_sampler_heap_item(indices, values, parent, pos);
+        pos = parent;
+    }
+}
+
+void sift_down_min_heap(std::vector<int> &indices, std::vector<float> &values, int pos, int count) {
+    while (true) {
+        int smallest = pos;
+        int left = pos * 2 + 1;
+        int right = left + 1;
+        if (left < count && values[(size_t)left] < values[(size_t)smallest]) {
+            smallest = left;
+        }
+        if (right < count && values[(size_t)right] < values[(size_t)smallest]) {
+            smallest = right;
+        }
+        if (smallest == pos) {
+            break;
+        }
+        swap_sampler_heap_item(indices, values, pos, smallest);
+        pos = smallest;
+    }
+}
+
+void sort_min_heap_desc(std::vector<int> &indices, std::vector<float> &values, int count) {
+    for (int end = count - 1; end > 0; --end) {
+        swap_sampler_heap_item(indices, values, 0, end);
+        sift_down_min_heap(indices, values, 0, end);
+    }
+}
 }
 
 NucleusSampler::NucleusSampler() {
@@ -77,45 +126,89 @@ int NucleusSampler::sample(const Tensor1D & logits, const size_t size, float tem
         }
     }
 
-    // Keep only top-k indices using a min-heap (convert only scalars as needed).
-    struct Item { float v; int i; };
-    std::vector<Item> heap;
-    heap.reserve((size_t)top_k);
-    for (size_t i = 0; i < size; ++i) {
-        const float v = tensor1d_get_f32(logits, i);
-        if ((int)heap.size() < top_k) {
-            heap.push_back({v, (int)i});
-            if ((int)heap.size() == top_k) {
-                std::make_heap(heap.begin(), heap.end(), [](const Item& a, const Item& b){ return a.v > b.v; }); // min-heap
+    if ((int)index_buffer.size() < top_k) index_buffer.resize((size_t)top_k);
+    if ((int)probs_buffer.size() < top_k) probs_buffer.resize((size_t)top_k);
+
+    // Keep only top-k indices using reusable min-heap buffers.
+    int heap_size = 0;
+    auto push_logit = [&](float v, int index) {
+        if (heap_size < top_k) {
+            index_buffer[(size_t)heap_size] = index;
+            probs_buffer[(size_t)heap_size] = v;
+            sift_up_min_heap(index_buffer, probs_buffer, heap_size);
+            heap_size++;
+        } else if (v > probs_buffer[0]) {
+            index_buffer[0] = index;
+            probs_buffer[0] = v;
+            sift_down_min_heap(index_buffer, probs_buffer, 0, heap_size);
+        }
+    };
+
+    if (logits.dtype == TensorDType::F32) {
+        const float *data = static_cast<const float*>(logits.data_ptr);
+        size_t i = 0;
+        for (; i < size && heap_size < top_k; ++i) {
+            push_logit(data[i], (int)i);
+        }
+#if defined(RWKV_MOBILE_USE_NEON_TOPK_PREFILTER)
+        for (; i + 4 <= size; i += 4) {
+            float32x4_t values = vld1q_f32(data + i);
+            uint32x4_t mask = vcgtq_f32(values, vdupq_n_f32(probs_buffer[0]));
+            if (vmaxvq_u32(mask) == 0) {
+                continue;
             }
-        } else if (v > heap.front().v) {
-            std::pop_heap(heap.begin(), heap.end(), [](const Item& a, const Item& b){ return a.v > b.v; });
-            heap.back() = {v, (int)i};
-            std::push_heap(heap.begin(), heap.end(), [](const Item& a, const Item& b){ return a.v > b.v; });
+            const float v0 = vgetq_lane_f32(values, 0);
+            const float v1 = vgetq_lane_f32(values, 1);
+            const float v2 = vgetq_lane_f32(values, 2);
+            const float v3 = vgetq_lane_f32(values, 3);
+            if (v0 > probs_buffer[0]) push_logit(v0, (int)i);
+            if (v1 > probs_buffer[0]) push_logit(v1, (int)i + 1);
+            if (v2 > probs_buffer[0]) push_logit(v2, (int)i + 2);
+            if (v3 > probs_buffer[0]) push_logit(v3, (int)i + 3);
+        }
+#elif defined(RWKV_MOBILE_USE_SSE_TOPK_PREFILTER)
+        for (; i + 4 <= size; i += 4) {
+            __m128 values = _mm_loadu_ps(data + i);
+            __m128 threshold = _mm_set1_ps(probs_buffer[0]);
+            int mask = _mm_movemask_ps(_mm_cmpgt_ps(values, threshold));
+            if (mask == 0) {
+                continue;
+            }
+            alignas(16) float lanes[4];
+            _mm_store_ps(lanes, values);
+            if (lanes[0] > probs_buffer[0]) push_logit(lanes[0], (int)i);
+            if (lanes[1] > probs_buffer[0]) push_logit(lanes[1], (int)i + 1);
+            if (lanes[2] > probs_buffer[0]) push_logit(lanes[2], (int)i + 2);
+            if (lanes[3] > probs_buffer[0]) push_logit(lanes[3], (int)i + 3);
+        }
+#endif
+        for (; i < size; ++i) {
+            push_logit(data[i], (int)i);
+        }
+    } else if (logits.dtype == TensorDType::F16) {
+        const half_float::half *data = static_cast<const half_float::half*>(logits.data_ptr);
+        for (size_t i = 0; i < size; ++i) {
+            push_logit((float)data[i], (int)i);
+        }
+    } else {
+        for (size_t i = 0; i < size; ++i) {
+            push_logit(tensor1d_get_f32(logits, i), (int)i);
         }
     }
-    std::sort(heap.begin(), heap.end(), [](const Item& a, const Item& b){ return a.v > b.v; }); // desc by logit
-
-    const int len0 = (int)heap.size();
-    if ((int)index_buffer.size() < len0) index_buffer.resize(len0);
-    if ((int)probs_buffer.size() < len0) probs_buffer.resize(len0);
-    for (int k = 0; k < len0; ++k) {
-        index_buffer[k] = heap[k].i;
-        probs_buffer[k] = heap[k].v; // store logits temporarily
-    }
+    sort_min_heap_desc(index_buffer, probs_buffer, heap_size);
 
     // softmax on top-k only
     float sum = 0.0f;
     const float max_logit = probs_buffer[0];
-    for (int k = 0; k < len0; ++k) {
+    for (int k = 0; k < heap_size; ++k) {
         probs_buffer[k] = std::exp((probs_buffer[k] - max_logit) / temperature);
         sum += probs_buffer[k];
     }
 
     // top-p
     float cumsum = 0.0f;
-    int len = len0;
-    for (int k = 0; k < len0; ++k) {
+    int len = heap_size;
+    for (int k = 0; k < heap_size; ++k) {
         probs_buffer[k] /= sum;
         cumsum += probs_buffer[k];
         if (cumsum >= top_p) {

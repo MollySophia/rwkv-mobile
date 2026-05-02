@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> input_list = {
         "Hello!",
         "Hello! I'm your AI assistant. I'm here to help you with various tasks, such as answering questions, brainstorming ideas, drafting emails, writing code, providing advice, and much more.",
-        "Tell me a long story",
+        "Tell me a 2-digits random number",
     };
     std::vector<std::vector<std::string>> input_list_batch(batch_size);
     for (int i = 0; i < batch_size; i++) {
@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     }
 
     input_list.push_back(batch_response[rand() % batch_size]);
-    input_list.push_back("Now tell me a joke.");
+    input_list.push_back("Now repeat the number you just said.");
 
     std::cout << "Testing new chat prompt: " << input_list[input_list.size()-1] << std::endl << std::endl;
     ENSURE_SUCCESS_OR_LOG_EXIT(runtime.chat(model_id, input_list, 2000, nullptr, false), "Failed to chat");
