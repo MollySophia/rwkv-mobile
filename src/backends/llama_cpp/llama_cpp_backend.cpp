@@ -3,6 +3,9 @@
 #include <thread>
 #include <algorithm>
 #include <cstring>
+#if defined(__ANDROID__)
+#include <unistd.h>
+#endif
 
 #include "backend.h"
 #include "llama_cpp_backend.h"
@@ -105,10 +108,19 @@ int llama_cpp_backend::load_model(std::string model_path, void * extra) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
 
-// #ifdef __ANDROID__
-//     // TODO: set according to the number of prime cores on the device
-//     llama_set_n_threads(ctx, 2, 2);
-// #endif
+#ifdef __ANDROID__
+    const long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    const int n_threads = online_cpus > 0 ? (int) online_cpus : (int) std::thread::hardware_concurrency();
+    if (n_threads > 0) {
+        llama_set_n_threads(ctx, n_threads, n_threads);
+        ggml_threadpool_params threadpool_params = ggml_threadpool_params_default(n_threads);
+        threadpool = ggml_threadpool_new(&threadpool_params);
+        if (threadpool) {
+            llama_attach_threadpool(ctx, threadpool, nullptr);
+        }
+        LOGI("n_threads: %d", n_threads);
+    }
+#endif
 
     vocab_size = model->vocab.n_tokens();
     hidden_size = llama_model_n_embd(model);
@@ -577,6 +589,10 @@ int llama_cpp_backend::release_model() {
     if (ctx) {
         llama_free(ctx);
         ctx = nullptr;
+    }
+    if (threadpool) {
+        ggml_threadpool_free(threadpool);
+        threadpool = nullptr;
     }
     if (model) {
         llama_model_free(model);

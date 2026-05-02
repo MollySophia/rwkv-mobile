@@ -2,6 +2,7 @@
 #define LLAMA_CPP_BACKEND_H
 
 #include "backend.h"
+#include "ggml-cpu.h"
 #include "llama.h"
 
 namespace rwkvmobile {
@@ -57,6 +58,7 @@ private:
 
     llama_model * model = nullptr;
     llama_context * ctx = nullptr;
+    ggml_threadpool_t threadpool = nullptr;
     std::vector<replayable_state> pending_checkpoint_states;
     llama_batch batch_decode = {};
     bool batch_decode_initialized = false;
