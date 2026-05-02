@@ -27,6 +27,9 @@ target_link_libraries(test_state_matching PUBLIC rwkv_mobile_internal)
 add_executable(test_chat_batch test_chat_batch.cpp)
 target_link_libraries(test_chat_batch PUBLIC rwkv_mobile_internal)
 
+add_executable(sampler_batch_threads_benchmark sampler_batch_threads_benchmark.cpp)
+target_link_libraries(sampler_batch_threads_benchmark PUBLIC rwkv_mobile_internal)
+
 add_executable(test_generation_batch test_generation_batch.cpp ../src/c_api.cpp)
 target_link_libraries(test_generation_batch PUBLIC rwkv_mobile_internal)
 

@@ -2,8 +2,19 @@
 #include <mutex>
 #include <cmath>
 #include <limits>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace rwkvmobile {
+
+namespace {
+#ifdef ANDROID
+constexpr int kMaxSamplerThreads = 4;
+#else
+constexpr int kMaxSamplerThreads = 8;
+#endif
+}
 
 NucleusSampler::NucleusSampler() {
     _seed = std::random_device()();
@@ -160,7 +171,12 @@ std::vector<int> NucleusSampler::sample_batch(const Tensor1D & logits, const siz
         _batch_probs_buffer.resize(batch_size);
     }
 
-    #pragma omp parallel for
+    int sampler_threads = batch_size;
+#ifdef _OPENMP
+    sampler_threads = std::max(1, std::min({batch_size, kMaxSamplerThreads, omp_get_max_threads()}));
+#endif
+
+    #pragma omp parallel for num_threads(sampler_threads)
     for (int i = 0; i < batch_size; i++) {
         Tensor1D view = tensor1d_subview(logits, (size_t)i * hstep, sampling_size);
         ret[i] = sample(view, sampling_size, temperature[i], top_k[i], top_p[i], _batch_index_buffer[i], _batch_probs_buffer[i]);
