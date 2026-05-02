@@ -99,7 +99,19 @@ void detect_windows_snapdragon(std::string &cpu_name, platform_type &platform, c
 
     platform = PLATFORM_SNAPDRAGON;
 
-    if (contains(lower_cpu_name, "x elite") || contains(lower_cpu_name, "x1e")) {
+    if (contains(lower_cpu_name, "x2 elite extreme") || contains(lower_cpu_name, "x2e9")) {
+        cpu_name = "X2 Elite Extreme";
+        soc_partname = "SC8480";
+        htp_arch = "v81";
+    } else if (contains(lower_cpu_name, "x2 elite") || contains(lower_cpu_name, "x2e")) {
+        cpu_name = "X2 Elite";
+        soc_partname = "SC8480";
+        htp_arch = "v81";
+    } else if (contains(lower_cpu_name, "x2 plus") || contains(lower_cpu_name, "x2p")) {
+        cpu_name = "X2 Plus";
+        soc_partname = "SC8480";
+        htp_arch = "v81";
+    } else if (contains(lower_cpu_name, "x elite") || contains(lower_cpu_name, "x1e")) {
         cpu_name = "X Elite";
         soc_partname = "SC8380";
         htp_arch = "v73";
@@ -107,7 +119,7 @@ void detect_windows_snapdragon(std::string &cpu_name, platform_type &platform, c
         cpu_name = "X Plus";
         soc_partname = "SC8380";
         htp_arch = "v73";
-    } else if (contains(lower_cpu_name, "oryon") || contains(lower_cpu_name, "x1")) {
+    } else if (contains(lower_cpu_name, "oryon") && contains(lower_cpu_name, "x1")) {
         cpu_name = "X1";
         soc_partname = "SC8380";
         htp_arch = "v73";
