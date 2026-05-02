@@ -239,7 +239,7 @@ jobs:
     - name: setup-vulkan-sdk
       run: |
         sudo apt-get update
-        sudo apt-get install -y libvulkan-dev glslang-tools
+        sudo apt-get install -y libvulkan-dev glslang-tools spirv-headers
         if ! command -v glslc >/dev/null 2>&1; then
           sudo apt-get install -y glslc
         fi
