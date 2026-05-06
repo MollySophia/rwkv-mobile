@@ -3,6 +3,7 @@
 #include "commondef.h"
 #include "logger.h"
 #include "rwkv-coreml.h"
+#include "c_api.h"
 
 namespace rwkvmobile {
 
@@ -11,6 +12,13 @@ int coreml_rwkv_backend::init(void * extra) {
 }
 
 int coreml_rwkv_backend::load_model(std::string model_path, void * extra) {
+    coreml_args *args = nullptr;
+    if (extra) {
+        args = reinterpret_cast<coreml_args*>(extra);
+    }
+    const int load_prefill_async = args != nullptr ? args->load_prefill_async : 0;
+    const int async_prefill_decode_load_threshold_ms = args != nullptr ? args->async_prefill_decode_load_threshold_ms : 0;
+
     if (ctx) {
         rwkv_coreml_free(ctx);
         ctx = nullptr;
@@ -19,7 +27,7 @@ int coreml_rwkv_backend::load_model(std::string model_path, void * extra) {
     if (ctx == nullptr) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
-    if (rwkv_coreml_init(ctx, model_path.c_str()) != 0) {
+    if (rwkv_coreml_init(ctx, model_path.c_str(), load_prefill_async, async_prefill_decode_load_threshold_ms) != 0) {
         rwkv_coreml_free(ctx);
         ctx = nullptr;
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
@@ -43,24 +51,33 @@ float coreml_rwkv_backend::get_load_progress() const {
 
 int coreml_rwkv_backend::eval(int id, Tensor1D & logits) {
     void* logits_ptr = rwkv_coreml_decode(ctx, id);
+    if (logits_ptr == nullptr) {
+        return RWKV_ERROR_EVAL;
+    }
     logits = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
     return RWKV_SUCCESS;
 }
 
 int coreml_rwkv_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     int i = 0;
-    for (; i + prefill_seq_length <= ids.size(); i += prefill_seq_length) {
-        std::vector<int> tokens_to_prefill = std::vector<int>(ids.begin() + i, ids.begin() + i + prefill_seq_length);
-        void* logits_ptr = rwkv_coreml_prefill(ctx, tokens_to_prefill);
-        logits = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
-    }
-    for (; i < ids.size(); i++) {
+    while (i < ids.size()) {
+        int current_prefill_seq_length = rwkv_coreml_get_prefill_seq_length(ctx);
+        if (rwkv_coreml_is_prefill_ready(ctx) && current_prefill_seq_length > 1 && i + current_prefill_seq_length <= ids.size()) {
+            std::vector<int> tokens_to_prefill = std::vector<int>(ids.begin() + i, ids.begin() + i + current_prefill_seq_length);
+            void* logits_ptr = rwkv_coreml_prefill(ctx, tokens_to_prefill);
+            if (logits_ptr == nullptr) {
+                return RWKV_ERROR_EVAL;
+            }
+            logits = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
+            i += current_prefill_seq_length;
+            continue;
+        }
         int ret = eval(ids[i], logits);
         if (ret != RWKV_SUCCESS) {
             return ret;
         }
+        i++;
     }
-
     return RWKV_SUCCESS;
 }
 

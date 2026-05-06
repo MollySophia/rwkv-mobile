@@ -5,10 +5,12 @@
 struct rwkv_coreml_context;
 
 struct rwkv_coreml_context * rwkv_coreml_new_context(void);
-int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model);
+int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model, int load_prefill_async, int async_prefill_decode_load_threshold_ms);
 void rwkv_coreml_free(struct rwkv_coreml_context * ctx);
 
 float rwkv_coreml_get_load_progress(struct rwkv_coreml_context * ctx);
+
+int rwkv_coreml_is_prefill_ready(struct rwkv_coreml_context * ctx);
 
 void* rwkv_coreml_decode(
         struct rwkv_coreml_context * ctx,

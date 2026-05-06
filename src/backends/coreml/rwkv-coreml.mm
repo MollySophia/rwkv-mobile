@@ -14,8 +14,11 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <string>
 #include <vector>
 #include <chrono>
+#include <thread>
+#include <atomic>
 #include "half.hpp"
 #include "logger.h"
 
@@ -25,6 +28,8 @@ enum rwkv_coreml_state_mode {
     RWKV_COREML_STATE_MODE_WKV_COREML = 2,
 };
 
+static constexpr int kDefaultAsyncPrefillDecodeLoadThresholdMs = 5000;
+
 struct rwkv_coreml_context {
     std::vector<const void *> model_decode;
     std::vector<const void *> model_prefill;
@@ -33,14 +38,18 @@ struct rwkv_coreml_context {
     std::vector<const void *> state_tokenshift_tensors;
     rwkv_coreml_state_mode state_mode = RWKV_COREML_STATE_MODE_COREML;
     int num_chunks = 0;
-    int load_done_chunks = 0;
+    std::atomic<int> load_done_chunks{0};
     float load_progress_reported = 0.f;
     int n_layers;
     int num_heads;
     int head_dim;
     int embd_dim;
     int vocab_size;
-    int prefill_seq_length;
+    std::atomic<int> prefill_seq_length{0};
+    std::atomic<bool> load_prefill_async{false};
+    std::atomic<bool> prefill_ready{false};
+    std::atomic<bool> prefill_failed{false};
+    std::thread prefill_load_thread;
 
     // IMPORTANT (ARC): these Objective-C objects live inside a C++ struct.
     // Without __strong, ARC will not automatically retain/release them, causing
@@ -55,8 +64,16 @@ struct rwkv_coreml_context {
     size_t state_tokenshift_bytes = 0;
 };
 
+static void rwkv_coreml_join_prefill_loader(struct rwkv_coreml_context * ctx) {
+    if (!ctx) return;
+    if (ctx->prefill_load_thread.joinable()) {
+        ctx->prefill_load_thread.join();
+    }
+}
+
 static void rwkv_coreml_release_resources(struct rwkv_coreml_context * ctx) {
     if (!ctx) return;
+    rwkv_coreml_join_prefill_loader(ctx);
     for (size_t i = 0; i < ctx->model_decode.size(); ++i) {
         if (ctx->model_decode[i]) CFRelease(ctx->model_decode[i]);
     }
@@ -83,14 +100,17 @@ static void rwkv_coreml_release_resources(struct rwkv_coreml_context * ctx) {
     ctx->state_wkv_bytes = 0;
     ctx->state_tokenshift_bytes = 0;
     ctx->num_chunks = 0;
-    ctx->load_done_chunks = 0;
+    ctx->load_done_chunks.store(0);
     ctx->load_progress_reported = 0.f;
     ctx->n_layers = 0;
     ctx->num_heads = 0;
     ctx->head_dim = 0;
     ctx->embd_dim = 0;
     ctx->vocab_size = 0;
-    ctx->prefill_seq_length = 0;
+    ctx->prefill_seq_length.store(0);
+    ctx->load_prefill_async.store(false);
+    ctx->prefill_ready.store(false);
+    ctx->prefill_failed.store(false);
     // Release retained Objective-C objects eagerly (they are __strong).
     ctx->out_decode = nil;
     ctx->out_prefill = nil;
@@ -145,6 +165,60 @@ static NSString * state_mode_name(rwkv_coreml_state_mode state_mode) {
             return @"wkv-coreml";
     }
     return @"coreml";
+}
+
+static int env_int_or_default(const char *name, int default_value, int min_value, int max_value) {
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') return default_value;
+    char *end = nullptr;
+    long parsed = std::strtol(value, &end, 10);
+    if (end == value || parsed < min_value || parsed > max_value) return default_value;
+    return (int)parsed;
+}
+
+static MLModel * load_coreml_model_with_retry(
+    NSURL *url_model,
+    MLModelConfiguration *configuration,
+    NSString *model_name,
+    NSString *function_name,
+    int chunk_idx,
+    int num_chunks
+) {
+    const int max_attempts = env_int_or_default("RWKV_COREML_LOAD_RETRY_ATTEMPTS", 3, 1, 10);
+    const int retry_delay_ms = env_int_or_default("RWKV_COREML_LOAD_RETRY_DELAY_MS", 500, 0, 10000);
+
+    for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+        __strong MLModel *model = nil;
+        __strong NSError *error = nil;
+        auto start = std::chrono::steady_clock::now();
+        @autoreleasepool {
+            model = [MLModel modelWithContentsOfURL:url_model configuration:configuration error:&error];
+        }
+        auto end = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+        if (error == nil && model != nil) {
+            if (attempt == 1) {
+                NSLog(@"Loaded chunk %d/%d (%@) %@: %.2f ms",
+                      chunk_idx + 1, num_chunks, model_name, function_name, ms);
+            } else {
+                NSLog(@"Loaded chunk %d/%d (%@) %@: %.2f ms (attempt %d/%d)",
+                      chunk_idx + 1, num_chunks, model_name, function_name, ms, attempt, max_attempts);
+            }
+            return model;
+        }
+
+        NSLog(@"Error loading %@ model %@ attempt %d/%d: %@ (%.2f ms)",
+              function_name, model_name, attempt, max_attempts, error, ms);
+        model = nil;
+        error = nil;
+
+        if (attempt < max_attempts && retry_delay_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
+        }
+    }
+
+    return nil;
 }
 
 static bool parse_coreml_config(NSString *config_path, NSString **basename_out, int *num_chunks_out, rwkv_coreml_state_mode *state_mode_out) {
@@ -226,6 +300,105 @@ static MLMultiArray * make_zero_multi_array_from_feature(NSDictionary *model_inp
         if (mutableBytes != nullptr && size > 0) std::memset(mutableBytes, 0, (size_t)size);
     }];
     return array;
+}
+
+static void set_retained_object(std::vector<const void *> &objects, int idx, id object) {
+    if (idx < 0) return;
+    if ((size_t)idx >= objects.size()) {
+        objects.resize((size_t)idx + 1, nullptr);
+    }
+    if (objects[(size_t)idx] != nullptr) {
+        CFRelease(objects[(size_t)idx]);
+        objects[(size_t)idx] = nullptr;
+    }
+    if (object != nil) {
+        objects[(size_t)idx] = CFBridgingRetain(object);
+    }
+}
+
+static bool install_decode_chunk(struct rwkv_coreml_context *ctx, MLModel *mlmodel_decode, int chunk_idx) {
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML && ctx->num_chunks == 1) {
+        rwkv_coreml_singlechunk_impl *model_decode = [[rwkv_coreml_singlechunk_impl alloc] initWithMLModel:mlmodel_decode];
+        set_retained_object(ctx->model_decode, chunk_idx, model_decode);
+        rwkv_coreml_singlechunk_implState *state = [model_decode newState];
+        set_retained_object(ctx->states, chunk_idx, state);
+        return true;
+    }
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML && chunk_idx == 0) {
+        rwkv_coreml_firstchunk_impl *model_decode = [[rwkv_coreml_firstchunk_impl alloc] initWithMLModel:mlmodel_decode];
+        set_retained_object(ctx->model_decode, chunk_idx, model_decode);
+        rwkv_coreml_firstchunk_implState *state = [model_decode newState];
+        set_retained_object(ctx->states, chunk_idx, state);
+        return true;
+    }
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML) {
+        rwkv_coreml_impl *model_decode = [[rwkv_coreml_impl alloc] initWithMLModel:mlmodel_decode];
+        set_retained_object(ctx->model_decode, chunk_idx, model_decode);
+        rwkv_coreml_implState *state = [model_decode newState];
+        set_retained_object(ctx->states, chunk_idx, state);
+        return true;
+    }
+
+    set_retained_object(ctx->model_decode, chunk_idx, mlmodel_decode);
+
+    NSDictionary *model_inputs_decode = mlmodel_decode.modelDescription.inputDescriptionsByName;
+    MLMultiArray *state_tokenshift = make_zero_multi_array_from_feature(model_inputs_decode, @"state_tokenshift_in");
+    if (state_tokenshift == nil) {
+        NSLog(@"Error getting state_tokenshift_in for state_mode %@", state_mode_name(ctx->state_mode));
+        return false;
+    }
+    set_retained_object(ctx->state_tokenshift_tensors, chunk_idx, state_tokenshift);
+
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_TENSOR) {
+        MLMultiArray *state_wkv = make_zero_multi_array_from_feature(model_inputs_decode, @"state_wkv_in");
+        if (state_wkv == nil) {
+            NSLog(@"Error getting state_wkv_in for state_mode tensor");
+            return false;
+        }
+        set_retained_object(ctx->state_wkv_tensors, chunk_idx, state_wkv);
+    } else {
+        MLState *state = [mlmodel_decode newState];
+        if (state == nil) {
+            NSLog(@"Error creating Core ML state for state_mode wkv-coreml");
+            return false;
+        }
+        set_retained_object(ctx->states, chunk_idx, state);
+    }
+    return true;
+}
+
+static bool install_prefill_chunk(struct rwkv_coreml_context *ctx, MLModel *mlmodel_prefill, int chunk_idx) {
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML && ctx->num_chunks == 1) {
+        rwkv_coreml_singlechunk_impl *model_prefill = [[rwkv_coreml_singlechunk_impl alloc] initWithMLModel:mlmodel_prefill];
+        set_retained_object(ctx->model_prefill, chunk_idx, model_prefill);
+        return true;
+    }
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML && chunk_idx == 0) {
+        rwkv_coreml_firstchunk_impl *model_prefill = [[rwkv_coreml_firstchunk_impl alloc] initWithMLModel:mlmodel_prefill];
+        set_retained_object(ctx->model_prefill, chunk_idx, model_prefill);
+        return true;
+    }
+    if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML) {
+        rwkv_coreml_impl *model_prefill = [[rwkv_coreml_impl alloc] initWithMLModel:mlmodel_prefill];
+        set_retained_object(ctx->model_prefill, chunk_idx, model_prefill);
+        return true;
+    }
+
+    set_retained_object(ctx->model_prefill, chunk_idx, mlmodel_prefill);
+    return true;
+}
+
+static bool read_prefill_seq_length(MLModel *mlmodel_prefill, int *prefill_seq_length_out) {
+    NSDictionary *model_inputs_prefill = mlmodel_prefill.modelDescription.inputDescriptionsByName;
+    NSArray<NSNumber *> *in_prefill_shape = get_shape_by_name(model_inputs_prefill, @"in0");
+    if (in_prefill_shape == nil || in_prefill_shape.count < 2) {
+        NSLog(@"Error getting in_prefill shape");
+        return false;
+    }
+    if (prefill_seq_length_out) {
+        *prefill_seq_length_out = [in_prefill_shape[1] intValue];
+    }
+    return true;
 }
 
 static MLMultiArray * external_state_wkv(struct rwkv_coreml_context *ctx, int chunk_idx) {
@@ -391,7 +564,7 @@ struct rwkv_coreml_context * rwkv_coreml_new_context(void) {
     return new rwkv_coreml_context;
 }
 
-int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) {
+int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model, int load_prefill_async, int async_prefill_decode_load_threshold_ms) {
     @autoreleasepool {
         if (!ctx || !path_model) {
             return -1;
@@ -407,6 +580,12 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
             return -1;
         }
         ctx->state_mode = state_mode;
+        const bool requested_async_prefill = load_prefill_async != 0;
+        const int async_prefill_threshold_ms = async_prefill_decode_load_threshold_ms == 0
+            ? kDefaultAsyncPrefillDecodeLoadThresholdMs
+            : async_prefill_decode_load_threshold_ms;
+        bool async_prefill = false;
+        ctx->load_prefill_async.store(false);
 
         // select which device to run the Core ML model on
         MLModelConfiguration *config_decode = [[MLModelConfiguration alloc] init];
@@ -417,14 +596,12 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
         config_prefill.computeUnits = MLComputeUnitsCPUAndNeuralEngine;
         config_prefill.functionName = @"prefill";
 
-        NSError *error = nil;
-
         ctx->num_chunks = num_chunks;
-        ctx->model_decode.reserve((size_t)num_chunks);
-        ctx->model_prefill.reserve((size_t)num_chunks);
-        ctx->states.reserve((size_t)num_chunks);
-        ctx->state_wkv_tensors.reserve((size_t)num_chunks);
-        ctx->state_tokenshift_tensors.reserve((size_t)num_chunks);
+        ctx->model_decode.resize((size_t)num_chunks, nullptr);
+        ctx->model_prefill.resize((size_t)num_chunks, nullptr);
+        ctx->states.resize((size_t)num_chunks, nullptr);
+        ctx->state_wkv_tensors.resize((size_t)num_chunks, nullptr);
+        ctx->state_tokenshift_tensors.resize((size_t)num_chunks, nullptr);
         ctx->state_wkv_bytes_per_chunk.resize((size_t)num_chunks, 0);
         ctx->state_tokenshift_bytes_per_chunk.resize((size_t)num_chunks, 0);
 
@@ -435,103 +612,44 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
         int vocab_size = 0;
 
         auto total_start = std::chrono::steady_clock::now();
-        ctx->load_done_chunks = 0;
+        ctx->load_done_chunks.store(0);
         ctx->load_progress_reported = 0.f;
+        ctx->prefill_ready.store(false);
+        ctx->prefill_failed.store(false);
         for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
             NSString *model_name = nil;
             model_name = [NSString stringWithFormat:@"%@_chunk%dof%d.mlmodelc", basename, chunk_idx + 1, num_chunks];
             NSString *model_path = [path_model_str stringByAppendingPathComponent:model_name];
             NSURL *url_model = [NSURL fileURLWithPath:model_path];
 
-            error = nil;
-            auto decode_start = std::chrono::steady_clock::now();
-            MLModel *mlmodel_decode = [MLModel modelWithContentsOfURL:url_model configuration:config_decode error:&error];
-            auto decode_end = std::chrono::steady_clock::now();
-            double decode_ms = std::chrono::duration<double, std::milli>(decode_end - decode_start).count();
-            NSLog(@"Loaded chunk %d/%d (%@) decode: %.2f ms",
-                  chunk_idx + 1, num_chunks, model_name, decode_ms);
-            if (error || !mlmodel_decode) {
-                NSLog(@"Error loading decode model %@: %@", model_name, error);
+            MLModel *mlmodel_decode = load_coreml_model_with_retry(url_model, config_decode, model_name, @"decode", chunk_idx, num_chunks);
+            if (!mlmodel_decode) {
+                NSLog(@"Error loading decode model %@ after retries", model_name);
                 rwkv_coreml_release_resources(ctx);
                 return -1;
             }
-            ctx->load_done_chunks = chunk_idx * 2 + 1;
-
-            error = nil;
-            auto prefill_start = std::chrono::steady_clock::now();
-            MLModel *mlmodel_prefill = [MLModel modelWithContentsOfURL:url_model configuration:config_prefill error:&error];
-            auto prefill_end = std::chrono::steady_clock::now();
-            double prefill_ms = std::chrono::duration<double, std::milli>(prefill_end - prefill_start).count();
-            NSLog(@"Loaded chunk %d/%d (%@) prefill: %.2f ms",
-                  chunk_idx + 1, num_chunks, model_name, prefill_ms);
-            if (error || !mlmodel_prefill) {
-                NSLog(@"Error loading prefill model %@: %@", model_name, error);
+            if (!install_decode_chunk(ctx, mlmodel_decode, chunk_idx)) {
                 rwkv_coreml_release_resources(ctx);
                 return -1;
             }
-            ctx->load_done_chunks = chunk_idx * 2 + 2;
-            if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML && num_chunks == 1) {
-                rwkv_coreml_singlechunk_impl *model_decode = [[rwkv_coreml_singlechunk_impl alloc] initWithMLModel:mlmodel_decode];
-                rwkv_coreml_singlechunk_impl *model_prefill = [[rwkv_coreml_singlechunk_impl alloc] initWithMLModel:mlmodel_prefill];
-                ctx->model_decode.push_back(CFBridgingRetain(model_decode));
-                ctx->model_prefill.push_back(CFBridgingRetain(model_prefill));
-                rwkv_coreml_singlechunk_implState *state = [model_decode newState];
-                ctx->states.push_back(CFBridgingRetain(state));
-            } else if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML && chunk_idx == 0) {
-                rwkv_coreml_firstchunk_impl *model_decode = [[rwkv_coreml_firstchunk_impl alloc] initWithMLModel:mlmodel_decode];
-                rwkv_coreml_firstchunk_impl *model_prefill = [[rwkv_coreml_firstchunk_impl alloc] initWithMLModel:mlmodel_prefill];
-                ctx->model_decode.push_back(CFBridgingRetain(model_decode));
-                ctx->model_prefill.push_back(CFBridgingRetain(model_prefill));
-                rwkv_coreml_firstchunk_implState *state = [model_decode newState];
-                ctx->states.push_back(CFBridgingRetain(state));
-            } else if (ctx->state_mode == RWKV_COREML_STATE_MODE_COREML) {
-                rwkv_coreml_impl *model_decode = [[rwkv_coreml_impl alloc] initWithMLModel:mlmodel_decode];
-                rwkv_coreml_impl *model_prefill = [[rwkv_coreml_impl alloc] initWithMLModel:mlmodel_prefill];
-                ctx->model_decode.push_back(CFBridgingRetain(model_decode));
-                ctx->model_prefill.push_back(CFBridgingRetain(model_prefill));
-                rwkv_coreml_implState *state = [model_decode newState];
-                ctx->states.push_back(CFBridgingRetain(state));
-            } else {
-                ctx->model_decode.push_back(CFBridgingRetain(mlmodel_decode));
-                ctx->model_prefill.push_back(CFBridgingRetain(mlmodel_prefill));
+            ctx->load_done_chunks.store(requested_async_prefill ? chunk_idx + 1 : chunk_idx * 2 + 1);
 
-                NSDictionary *model_inputs_decode = mlmodel_decode.modelDescription.inputDescriptionsByName;
-                MLMultiArray *state_tokenshift = make_zero_multi_array_from_feature(model_inputs_decode, @"state_tokenshift_in");
-                if (state_tokenshift == nil) {
-                    NSLog(@"Error getting state_tokenshift_in for state_mode %@", state_mode_name(ctx->state_mode));
+            if (!requested_async_prefill) {
+                MLModel *mlmodel_prefill = load_coreml_model_with_retry(url_model, config_prefill, model_name, @"prefill", chunk_idx, num_chunks);
+                if (!mlmodel_prefill) {
+                    NSLog(@"Error loading prefill model %@ after retries", model_name);
                     rwkv_coreml_release_resources(ctx);
                     return -1;
                 }
-                ctx->state_tokenshift_tensors.push_back(CFBridgingRetain(state_tokenshift));
-
-                if (ctx->state_mode == RWKV_COREML_STATE_MODE_TENSOR) {
-                    MLMultiArray *state_wkv = make_zero_multi_array_from_feature(model_inputs_decode, @"state_wkv_in");
-                    if (state_wkv == nil) {
-                        NSLog(@"Error getting state_wkv_in for state_mode tensor");
-                        rwkv_coreml_release_resources(ctx);
-                        return -1;
-                    }
-                    ctx->state_wkv_tensors.push_back(CFBridgingRetain(state_wkv));
-                } else {
-                    MLState *state = [mlmodel_decode newState];
-                    if (state == nil) {
-                        NSLog(@"Error creating Core ML state for state_mode wkv-coreml");
-                        rwkv_coreml_release_resources(ctx);
-                        return -1;
-                    }
-                    ctx->states.push_back(CFBridgingRetain(state));
-                }
-            }
-
-            if (chunk_idx == 0) {
-                NSDictionary *model_inputs_prefill = mlmodel_prefill.modelDescription.inputDescriptionsByName;
-                NSArray<NSNumber *> *in_prefill_shape = get_shape_by_name(model_inputs_prefill, @"in0");
-                if (in_prefill_shape == nil) {
-                    NSLog(@"Error getting in_prefill shape");
+                if (!install_prefill_chunk(ctx, mlmodel_prefill, chunk_idx)) {
                     rwkv_coreml_release_resources(ctx);
                     return -1;
                 }
-                prefill_seq_length = [in_prefill_shape[1] intValue];
+                if (chunk_idx == 0 && !read_prefill_seq_length(mlmodel_prefill, &prefill_seq_length)) {
+                    rwkv_coreml_release_resources(ctx);
+                    return -1;
+                }
+                ctx->load_done_chunks.store(chunk_idx * 2 + 2);
             }
 
             NSDictionary *model_outputs = mlmodel_decode.modelDescription.outputDescriptionsByName;
@@ -579,7 +697,54 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
             });
         }
 
-        ctx->prefill_seq_length = prefill_seq_length;
+        auto decode_end = std::chrono::steady_clock::now();
+        double decode_load_ms = std::chrono::duration<double, std::milli>(decode_end - total_start).count();
+        if (requested_async_prefill) {
+            async_prefill = async_prefill_threshold_ms < 0 || decode_load_ms >= async_prefill_threshold_ms;
+            ctx->load_prefill_async.store(async_prefill);
+            if (async_prefill) {
+                if (async_prefill_threshold_ms < 0) {
+                    NSLog(@"Decode model load time: %.2f ms (async prefill forced; threshold disabled)",
+                          decode_load_ms);
+                } else {
+                    NSLog(@"Decode model load time: %.2f ms >= %d ms threshold (prefill loading in background)",
+                          decode_load_ms, async_prefill_threshold_ms);
+                }
+            } else {
+                NSLog(@"Decode model load time: %.2f ms < %d ms threshold (loading prefill synchronously)",
+                      decode_load_ms, async_prefill_threshold_ms);
+                auto prefill_sync_start = std::chrono::steady_clock::now();
+                for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+                    NSString *model_name = [NSString stringWithFormat:@"%@_chunk%dof%d.mlmodelc", basename, chunk_idx + 1, num_chunks];
+                    NSString *model_path = [path_model_str stringByAppendingPathComponent:model_name];
+                    NSURL *url_model = [NSURL fileURLWithPath:model_path];
+                    MLModel *mlmodel_prefill = load_coreml_model_with_retry(url_model, config_prefill, model_name, @"prefill", chunk_idx, num_chunks);
+                    if (!mlmodel_prefill) {
+                        NSLog(@"Error loading prefill model %@ after retries", model_name);
+                        rwkv_coreml_release_resources(ctx);
+                        return -1;
+                    }
+                    if (!install_prefill_chunk(ctx, mlmodel_prefill, chunk_idx)) {
+                        rwkv_coreml_release_resources(ctx);
+                        return -1;
+                    }
+                    if (chunk_idx == 0 && !read_prefill_seq_length(mlmodel_prefill, &prefill_seq_length)) {
+                        rwkv_coreml_release_resources(ctx);
+                        return -1;
+                    }
+                    ctx->load_done_chunks.store(num_chunks + chunk_idx + 1);
+                }
+                auto prefill_sync_end = std::chrono::steady_clock::now();
+                double prefill_sync_ms = std::chrono::duration<double, std::milli>(prefill_sync_end - prefill_sync_start).count();
+                NSLog(@"CoreML async prefill skipped by threshold; synchronous prefill load time: %.2f ms",
+                      prefill_sync_ms);
+            }
+        }
+
+        if (async_prefill && prefill_seq_length <= 0) {
+            prefill_seq_length = 1;
+        }
+        ctx->prefill_seq_length.store(std::max(1, prefill_seq_length));
         ctx->n_layers = total_layers;
         ctx->num_heads = num_heads;
         ctx->head_dim = head_dim;
@@ -588,7 +753,11 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
 
         auto total_end = std::chrono::steady_clock::now();
         double total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
-        NSLog(@"Total model load time: %.2f ms", total_ms);
+        if (!requested_async_prefill) {
+            NSLog(@"Total model load time: %.2f ms", total_ms);
+        } else if (!async_prefill) {
+            NSLog(@"Total model load time: %.2f ms (async prefill skipped)", total_ms);
+        }
 
         ctx->state_wkv_bytes = 0;
         ctx->state_tokenshift_bytes = 0;
@@ -597,8 +766,57 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model) 
             ctx->state_tokenshift_bytes += ctx->state_tokenshift_bytes_per_chunk[i];
         }
 
+        if (async_prefill) {
+            const std::string model_dir(path_model);
+            const std::string basename_cstr([basename UTF8String]);
+            ctx->prefill_load_thread = std::thread([ctx, model_dir, basename_cstr, num_chunks]() {
+                @autoreleasepool {
+                    MLModelConfiguration *config_prefill_bg = [[MLModelConfiguration alloc] init];
+                    config_prefill_bg.computeUnits = MLComputeUnitsCPUAndNeuralEngine;
+                    config_prefill_bg.functionName = @"prefill";
+                    NSString *path_model_str_bg = [[NSString alloc] initWithUTF8String:model_dir.c_str()];
+                    NSString *basename_bg = [[NSString alloc] initWithUTF8String:basename_cstr.c_str()];
+                    int loaded_prefill_seq_length = 0;
+                    auto prefill_start = std::chrono::steady_clock::now();
+                    for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+                        NSString *model_name = [NSString stringWithFormat:@"%@_chunk%dof%d.mlmodelc", basename_bg, chunk_idx + 1, num_chunks];
+                        NSString *model_path = [path_model_str_bg stringByAppendingPathComponent:model_name];
+                        NSURL *url_model = [NSURL fileURLWithPath:model_path];
+                        MLModel *mlmodel_prefill = load_coreml_model_with_retry(url_model, config_prefill_bg, model_name, @"prefill", chunk_idx, num_chunks);
+                        if (!mlmodel_prefill) {
+                            NSLog(@"Error loading prefill model %@ after retries in background", model_name);
+                            ctx->prefill_failed.store(true);
+                            NSLog(@"CoreML async prefill load failed; prompt eval will continue using decode");
+                            return;
+                        }
+                        if (!install_prefill_chunk(ctx, mlmodel_prefill, chunk_idx)) {
+                            ctx->prefill_failed.store(true);
+                            NSLog(@"CoreML async prefill install failed; prompt eval will continue using decode");
+                            return;
+                        }
+                        if (chunk_idx == 0 && !read_prefill_seq_length(mlmodel_prefill, &loaded_prefill_seq_length)) {
+                            ctx->prefill_failed.store(true);
+                            NSLog(@"CoreML async prefill shape read failed; prompt eval will continue using decode");
+                            return;
+                        }
+                        ctx->load_done_chunks.store(num_chunks + chunk_idx + 1);
+                    }
+                    if (loaded_prefill_seq_length > 0) {
+                        ctx->prefill_seq_length.store(loaded_prefill_seq_length);
+                    }
+                    ctx->prefill_ready.store(true, std::memory_order_release);
+                    auto prefill_end = std::chrono::steady_clock::now();
+                    double prefill_ms = std::chrono::duration<double, std::milli>(prefill_end - prefill_start).count();
+                    NSLog(@"CoreML async prefill ready; switching future prompt eval to prefill. load_time: %.2f ms, prefill_seq_length: %d",
+                          prefill_ms, ctx->prefill_seq_length.load());
+                }
+            });
+        } else {
+            ctx->prefill_ready.store(true, std::memory_order_release);
+        }
+
         NSLog(@"state_mode: %@, num_chunks: %d, num_heads: %d, head_dim: %d, vocab_size: %d, n_layers: %d, prefill_seq_length: %d, state_wkv_bytes: %zu, state_tokenshift_bytes: %zu\n",
-            state_mode_name(ctx->state_mode), ctx->num_chunks, ctx->num_heads, ctx->head_dim, ctx->vocab_size, ctx->n_layers, ctx->prefill_seq_length, ctx->state_wkv_bytes, ctx->state_tokenshift_bytes);
+            state_mode_name(ctx->state_mode), ctx->num_chunks, ctx->num_heads, ctx->head_dim, ctx->vocab_size, ctx->n_layers, ctx->prefill_seq_length.load(), ctx->state_wkv_bytes, ctx->state_tokenshift_bytes);
         return 0;
     }
 }
@@ -612,8 +830,8 @@ void rwkv_coreml_free(struct rwkv_coreml_context * ctx) {
 
 float rwkv_coreml_get_load_progress(struct rwkv_coreml_context * ctx) {
     if (!ctx || ctx->num_chunks <= 0) return 1.0f;
-    int total_steps = std::max(1, ctx->num_chunks * 2);
-    int done_steps = std::max(0, std::min(total_steps, ctx->load_done_chunks));
+    int total_steps = std::max(1, ctx->load_prefill_async.load() ? ctx->num_chunks : ctx->num_chunks * 2);
+    int done_steps = std::max(0, std::min(total_steps, ctx->load_done_chunks.load()));
     float real = (float)done_steps / (float)total_steps;
     float ceiling = (done_steps + 1 <= total_steps)
         ? (float)(done_steps + 1) / (float)total_steps
@@ -629,6 +847,11 @@ float rwkv_coreml_get_load_progress(struct rwkv_coreml_context * ctx) {
     step = std::max(min_step, step);
     ctx->load_progress_reported = std::min(ceiling - 0.01f, ctx->load_progress_reported + step);
     return std::max(0.f, std::min(1.f, ctx->load_progress_reported));
+}
+
+int rwkv_coreml_is_prefill_ready(struct rwkv_coreml_context * ctx) {
+    if (!ctx) return 0;
+    return ctx->prefill_ready.load(std::memory_order_acquire) ? 1 : 0;
 }
 
 void* rwkv_coreml_decode(struct rwkv_coreml_context * ctx, int token) {
@@ -677,7 +900,12 @@ void* rwkv_coreml_decode(struct rwkv_coreml_context * ctx, int token) {
 void* rwkv_coreml_prefill(struct rwkv_coreml_context * ctx, std::vector<int> tokens) {
     // See rwkv_coreml_decode() for why we use autoreleasepool here.
     @autoreleasepool {
-        if (tokens.size() != ctx->prefill_seq_length) {
+        if (!ctx->prefill_ready.load(std::memory_order_acquire)) {
+            NSLog(@"Core ML prefill requested before prefill function is ready");
+            return NULL;
+        }
+        int prefill_seq_length = ctx->prefill_seq_length.load();
+        if (tokens.size() != (size_t)prefill_seq_length) {
             NSLog(@"Error: tokens size is not equal to prefill_seq_length");
             return NULL;
         }
@@ -741,7 +969,7 @@ int rwkv_coreml_get_hidden_dim(struct rwkv_coreml_context * ctx) {
 }
 
 int rwkv_coreml_get_prefill_seq_length(struct rwkv_coreml_context * ctx) {
-    return ctx->prefill_seq_length;
+    return ctx->prefill_seq_length.load();
 }
 
 int rwkv_coreml_get_state_wkv_bytes(struct rwkv_coreml_context * ctx) {

@@ -99,6 +99,16 @@ struct llama_cpp_args {
     int n_gpu_layers;
 };
 
+struct coreml_args {
+    // When non-zero, the CoreML backend may return after loading decode and
+    // continue loading prefill in the background.
+    int load_prefill_async;
+    // Used only when load_prefill_async is non-zero. 0 uses the default 5000 ms,
+    // a positive value overrides it, and a negative value always loads prefill
+    // asynchronously.
+    int async_prefill_decode_load_threshold_ms;
+};
+
 struct batch_tokens_count {
     int * counts;
     int batch_size;
