@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
     const std::string state_path = argv[2];
     const std::string model_path = argv[3];
     const std::string backend = argv[4];
-    const std::string prompt = argc > 5 ? argv[5] : "User: hello\n\nAssistant:";
+    const std::string prompt = argc > 5 ? argv[5] : "hello";
     const int max_tokens = argc > 6 ? std::stoi(argv[6]) : 64;
 
     rwkvmobile::Runtime runtime;
@@ -37,9 +37,9 @@ int main(int argc, char **argv) {
     const int ret = runtime.load_initial_state(model_id, state_path);
     ENSURE_SUCCESS_OR_LOG_EXIT(ret, "Failed to load pth initial state");
 
-    const std::string state_prompt = "<state src=\"" + state_path + "\">" + prompt;
+    const std::string state_prompt = "<state src=\"" + state_path + "\">";
     runtime.set_prompt(model_id, state_prompt);
-    runtime.chat(model_id, {}, max_tokens, nullptr);
+    runtime.chat(model_id, {prompt}, max_tokens, nullptr, false, false, true);
 
     std::cout << "Response: " << runtime.get_response_buffer_content(model_id) << std::endl;
     runtime.release();

@@ -68,6 +68,7 @@ public:
     int set_state_on_batch_slot(int slot, std::any state) override;
     int zero_state_on_batch_slot(int slot) override;
 
+    int load_raw_states(std::vector<std::vector<half_float::half>> states) override;
     int serialize_runtime_state(std::any state, std::vector<uint8_t> &data) override;
     int deserialize_runtime_state(std::vector<uint8_t> &data, std::any &state) override;
 

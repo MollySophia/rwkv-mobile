@@ -270,6 +270,55 @@ int web_rwkv_backend::free_state(std::any state) {
     return RWKV_SUCCESS;
 }
 
+int web_rwkv_backend::load_raw_states(std::vector<std::vector<half_float::half>> states) {
+    if ((int)states.size() != n_layers || num_heads <= 0 || hidden_size <= 0 || hidden_size % num_heads != 0) {
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    const int head_size = hidden_size / num_heads;
+    const size_t wkv_state_elems = (size_t)hidden_size * (size_t)head_size;
+    const size_t layer_state_elems = (size_t)hidden_size * (size_t)(head_size + 2);
+    const size_t total_state_elems = layer_state_elems * (size_t)n_layers;
+
+    zero_state();
+    StateRaw raw_state = ::get_state(0);
+    if (!raw_state.len || !raw_state.state) {
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    if (raw_state.len != total_state_elems) {
+        LOGE("web_rwkv_backend::load_raw_states: runtime state size mismatch, expected %zu, got %zu\n",
+             total_state_elems, (size_t)raw_state.len);
+        ::free_state(raw_state);
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    std::fill(raw_state.state, raw_state.state + raw_state.len, 0.0f);
+
+    for (int layer = 0; layer < n_layers; layer++) {
+        if (states[layer].size() != wkv_state_elems) {
+            LOGE("web_rwkv_backend::load_raw_states: layer %d size mismatch, expected %zu, got %zu\n",
+                 layer, wkv_state_elems, states[layer].size());
+            ::free_state(raw_state);
+            return RWKV_ERROR_BACKEND | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+
+        float *dst_layer = raw_state.state + (size_t)layer * layer_state_elems;
+        for (int head = 0; head < num_heads; head++) {
+            for (int row = 0; row < head_size; row++) {
+                float *dst_row = dst_layer + (size_t)(row + 1) * (size_t)hidden_size;
+                for (int col = 0; col < head_size; col++) {
+                    const size_t src_index = ((size_t)head * (size_t)head_size + (size_t)row) * (size_t)head_size + (size_t)col;
+                    const size_t dst_emb = (size_t)head * (size_t)head_size + (size_t)col;
+                    dst_row[dst_emb] = (float)states[layer][src_index];
+                }
+            }
+        }
+    }
+
+    ::set_state(raw_state, 0);
+    ::free_state(raw_state);
+    return RWKV_SUCCESS;
+}
+
 int web_rwkv_backend::release_model() {
     ::release();
     return RWKV_SUCCESS;
