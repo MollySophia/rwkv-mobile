@@ -13,6 +13,7 @@
 #include <cstring>
 #include <thread>
 #include "rmpack.h"
+#include "pth_loader.h"
 #include "utils.h"
 #ifdef ENABLE_WEBRWKV
 #include "web_rwkv_backend.h"
@@ -616,8 +617,10 @@ int Runtime::load_initial_state(int model_id, std::string state_path) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
     auto &model = _models.at(model_id);
-    if (state_path.find(".rmpack") == std::string::npos) {
-        LOGE("the specified state file is not a rmpack file\n");
+    const bool is_rmpack = state_path.size() >= 7 && state_path.compare(state_path.size() - 7, 7, ".rmpack") == 0;
+    const bool is_pth = state_path.size() >= 4 && state_path.compare(state_path.size() - 4, 4, ".pth") == 0;
+    if (!is_rmpack && !is_pth) {
+        LOGE("the specified state file is not a supported state file (.rmpack or .pth)\n");
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
     std::string initial_state_str = "<state src=\"" + state_path + "\">";
@@ -629,30 +632,42 @@ int Runtime::load_initial_state(int model_id, std::string state_path) {
         }
     }
 
-    std::any initial_state;
-    RMPackReader state_pack(state_path);
-    int hidden_size_config = state_pack.getConfig()["hidden_size"];
-    auto files = state_pack.getFiles();
-    if (files.size() != model->backend->n_layers) {
-        LOGE("state file has %d layers, but model has %d layers\n", (int)files.size(), model->backend->n_layers);
-        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
-    }
-    if (hidden_size_config != model->backend->hidden_size) {
-        LOGE("state file has hidden size %d, but model has hidden size %d\n", hidden_size_config, model->backend->hidden_size);
-        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
-    }
-
-    size_t state_size = state_pack.getFileSize(files[0].filename);
-
     std::vector<std::vector<half_float::half>> states(model->backend->n_layers);
-    for (int i = 0; i < model->backend->n_layers; i++) {
-        states[i].resize(state_size / sizeof(half_float::half));
-        auto data = state_pack.readFileToMemory(files[i].filename);
-        std::copy_n(reinterpret_cast<const uint8_t*>(data), state_size, reinterpret_cast<uint8_t*>(states[i].data()));
-        state_pack.freeFileMemory(files[i].filename);
+    if (is_rmpack) {
+        RMPackReader state_pack(state_path);
+        int hidden_size_config = state_pack.getConfig()["hidden_size"];
+        auto files = state_pack.getFiles();
+        if (files.size() != model->backend->n_layers) {
+            LOGE("state file has %d layers, but model has %d layers\n", (int)files.size(), model->backend->n_layers);
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+        if (hidden_size_config != model->backend->hidden_size) {
+            LOGE("state file has hidden size %d, but model has hidden size %d\n", hidden_size_config, model->backend->hidden_size);
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
+
+        size_t state_size = state_pack.getFileSize(files[0].filename);
+        for (int i = 0; i < model->backend->n_layers; i++) {
+            states[i].resize(state_size / sizeof(half_float::half));
+            auto data = state_pack.readFileToMemory(files[i].filename);
+            std::copy_n(reinterpret_cast<const uint8_t*>(data), state_size, reinterpret_cast<uint8_t*>(states[i].data()));
+            state_pack.freeFileMemory(files[i].filename);
+        }
+    } else {
+        try {
+            states = load_pth_time_states(state_path, model->backend->n_layers, model->backend->hidden_size);
+        } catch (const std::exception &e) {
+            LOGE("failed to load pth initial state: %s\n", e.what());
+            return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+        }
     }
 
-    model->backend->load_raw_states(states);
+    std::any initial_state;
+    int ret = model->backend->load_raw_states(states);
+    if (ret != RWKV_SUCCESS) {
+        LOGE("failed to load raw states into backend\n");
+        return ret;
+    }
     model->backend->get_state(initial_state);
     // make a new constant state node
     model->backend->state_root->children.push_back(std::make_unique<state_node>(initial_state, initial_state_ids, std::vector<float>(model->backend->vocab_size, 0), true));

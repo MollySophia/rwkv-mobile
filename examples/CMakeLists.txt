@@ -98,6 +98,9 @@ endif()
 add_executable(test_state_loading test_state_loading.cpp)
 target_link_libraries(test_state_loading PUBLIC rwkv_mobile_internal)
 
+add_executable(test_pth_state_loading test_pth_state_loading.cpp)
+target_link_libraries(test_pth_state_loading PUBLIC rwkv_mobile_internal)
+
 add_executable(test_multiple_models test_multiple_models.cpp ../src/c_api.cpp)
 target_link_libraries(test_multiple_models PUBLIC rwkv_mobile_internal)
 

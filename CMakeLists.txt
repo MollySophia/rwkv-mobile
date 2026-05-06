@@ -90,6 +90,7 @@ set(RWKV_MOBILE_SRCS
     src/logger.cpp
     src/soc_detect.cpp
     src/rmpack.cpp
+    src/pth_loader.cpp
     src/backend.cpp
 )
 
