@@ -611,8 +611,8 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model, 
         }
         ctx->state_mode = state_mode;
         const bool requested_async_prefill = load_prefill_async != 0;
-        COREML_LOGI("Initializing RWKV CoreML with model at %@, basename=%@, num_chunks=%d, state_mode=%@, requested_async_prefill=%d",
-              path_model_str, basename, num_chunks, state_mode_name(state_mode), requested_async_prefill);
+        COREML_LOGI(@"Initializing RWKV CoreML with model at %@, basename=%@, num_chunks=%d, state_mode=%@, requested_async_prefill=%d",
+              path_model_str, basename, num_chunks, state_mode_name(state_mode), requested_async_prefill ? 1 : 0);
         const int async_prefill_threshold_ms = async_prefill_decode_load_threshold_ms == 0
             ? kDefaultAsyncPrefillDecodeLoadThresholdMs
             : async_prefill_decode_load_threshold_ms;
