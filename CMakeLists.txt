@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 
+if(POLICY CMP0141)
+  cmake_policy(SET CMP0141 NEW)
+endif()
+
 project(rwkv-mobile C CXX)
 
 if(APPLE)
@@ -28,6 +32,7 @@ option(ENABLE_TTS "Enable TTS" OFF)
 option(BUILD_EXAMPLES "Build examples" ON)
 option(BUILD_STATIC_LIB "Build static library" OFF)
 option(ENABLE_SERVER "Enable built-in HTTP server" ON)
+option(RWKV_MOBILE_ENABLE_DEBUG_SYMBOLS "Build with debug symbols for external symbol uploads" OFF)
 
 if (ENABLE_TTS AND NOT ENABLE_MNN_BACKEND)
     message(FATAL_ERROR "TTS requires MNN backend")
@@ -37,7 +42,16 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 option(ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 
-if (ANDROID)
+if (RWKV_MOBILE_ENABLE_DEBUG_SYMBOLS)
+    if (MSVC)
+        set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "ProgramDatabase" CACHE STRING "MSVC debug information format" FORCE)
+    else()
+        add_compile_options("-g")
+    endif()
+    if (ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_link_options("-Wl,--build-id")
+    endif()
+elseif (ANDROID)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g0")
 endif()
 

@@ -19,6 +19,7 @@ jobs:
     runs-on: windows-latest
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-x64
+      SYMBOLS_PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-x64-symbols
     steps:
     - uses: actions/checkout@v4
     - name: setup-vulkan-sdk
@@ -35,51 +36,90 @@ jobs:
     - name: build
       run: |
         mkdir build && cd build
-        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_LLAMACPP_VULKAN=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=ON -DENABLE_VISION=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF
-        cmake --build . --config Release -j 8
+        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_LLAMACPP_VULKAN=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=ON -DENABLE_VISION=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON
+        cmake --build . --config RelWithDebInfo -j 8
     
     - name: package
       run: |
         cd build
-        7z a ../${{ env.PACKAGENAME }}.zip Release/rwkv_mobile.dll
+        if (!(Test-Path RelWithDebInfo\rwkv_mobile.dll)) { throw "rwkv_mobile.dll was not produced" }
+        if (!(Test-Path RelWithDebInfo\rwkv_mobile.pdb)) { throw "rwkv_mobile.pdb was not produced" }
+        New-Item -ItemType Directory -Force package\Release | Out-Null
+        Copy-Item RelWithDebInfo\rwkv_mobile.dll package\Release\rwkv_mobile.dll
+        Push-Location package
+        7z a ..\..\${{ env.PACKAGENAME }}.zip Release
+        Pop-Location
+    - name: package-symbols
+      run: |
+        cd build
+        New-Item -ItemType Directory -Force symbols\windows-x64 | Out-Null
+        Copy-Item RelWithDebInfo\rwkv_mobile.pdb symbols\windows-x64\rwkv_mobile.pdb
+        Push-Location symbols
+        7z a ..\..\${{ env.SYMBOLS_PACKAGENAME }}.zip windows-x64
+        Pop-Location
     
     - name: upload-zip
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.PACKAGENAME }}
         path: ${{ env.PACKAGENAME }}.zip
+    - name: upload-symbols-zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SYMBOLS_PACKAGENAME }}
+        path: ${{ env.SYMBOLS_PACKAGENAME }}.zip
   
   build-windows-library-arm64:
     needs: [setup]
     runs-on: windows-11-arm
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64
+      SYMBOLS_PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64-symbols
     steps:
     - uses: actions/checkout@v4
     - name: build
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
-        cmake -S . -B build -G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake\arm64-windows-llvm.cmake -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=OFF -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=OFF -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF
-        cmake --build build --config Release -j 8
+        cmake -S . -B build -G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake\arm64-windows-llvm.cmake -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=OFF -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=OFF -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON
+        cmake --build build --config RelWithDebInfo -j 8
 
     - name: package
       run: |
         cd build
-        move Release\rwkv_mobile.dll Release\rwkv_mobile-arm64.dll
-        7z a ../${{ env.PACKAGENAME }}.zip Release/rwkv_mobile-arm64.dll
+        if (!(Test-Path RelWithDebInfo\rwkv_mobile.dll)) { throw "rwkv_mobile.dll was not produced" }
+        if (!(Test-Path RelWithDebInfo\rwkv_mobile.pdb)) { throw "rwkv_mobile.pdb was not produced" }
+        New-Item -ItemType Directory -Force package\Release | Out-Null
+        Copy-Item RelWithDebInfo\rwkv_mobile.dll package\Release\rwkv_mobile-arm64.dll
+        Push-Location package
+        7z a ..\..\${{ env.PACKAGENAME }}.zip Release
+        Pop-Location
+    - name: package-symbols
+      run: |
+        cd build
+        New-Item -ItemType Directory -Force symbols\windows-arm64 | Out-Null
+        Copy-Item RelWithDebInfo\rwkv_mobile.pdb symbols\windows-arm64\rwkv_mobile-arm64.pdb
+        Push-Location symbols
+        7z a ..\..\${{ env.SYMBOLS_PACKAGENAME }}.zip windows-arm64
+        Pop-Location
     
     - name: upload-zip
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.PACKAGENAME }}
         path: ${{ env.PACKAGENAME }}.zip
+    - name: upload-symbols-zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SYMBOLS_PACKAGENAME }}
+        path: ${{ env.SYMBOLS_PACKAGENAME }}.zip
 
   build-ios-library:
     needs: [setup]
     runs-on: macos-15
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-ios-static
+      SYMBOLS_PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-ios-static-symbols
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
       IOS_DEPLOYMENT_TARGET: '13.0'
       ENABLE_BITCODE: OFF
@@ -97,11 +137,18 @@ jobs:
           -DENABLE_MLX_BACKEND=ON -DBUILD_STATIC_LIB=ON -DBUILD_EXAMPLES=OFF \
           -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_SERVER=OFF \
           -GXcode -DCMAKE_TOOLCHAIN_FILE=../cmake/ios.toolchain.cmake -DPLATFORM=OS64 -DARCHS="arm64" \
-          -DDEPLOYMENT_TARGET=$IOS_DEPLOYMENT_TARGET -DENABLE_BITCODE=$ENABLE_BITCODE -DENABLE_ARC=$ENABLE_ARC -DENABLE_VISIBILITY=$ENABLE_VISIBILITY -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          -DDEPLOYMENT_TARGET=$IOS_DEPLOYMENT_TARGET -DENABLE_BITCODE=$ENABLE_BITCODE -DENABLE_ARC=$ENABLE_ARC -DENABLE_VISIBILITY=$ENABLE_VISIBILITY -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         cmake --build . --config Release -j 8 -- CODE_SIGNING_ALLOWED=NO
-        mkdir ../release-build # ../debug-build
+        mkdir -p ../release-build ../symbols/ios-static # ../debug-build
         cp librwkv_mobile.a ../release-build/librwkv_mobile.a
         cp _deps/ncnn-build/src/Release-iphoneos/libncnn.a ../release-build/libncnn.a
+        cp librwkv_mobile.a ../symbols/ios-static/librwkv_mobile.a
+        cp _deps/ncnn-build/src/Release-iphoneos/libncnn.a ../symbols/ios-static/libncnn.a
+        strip -S ../release-build/librwkv_mobile.a
+        strip -S ../release-build/libncnn.a
+        cat > ../symbols/ios-static/README-ios-static-symbols.txt <<'EOF'
+        iOS is packaged as static libraries. The .a files in this archive are built with DWARF debug info and should be linked into the final Flutter app before the app dSYM is generated. Upload the final app dSYM to Sentry; a standalone static-library dSYM will not match the app's loaded image UUID.
+        EOF
         # rm librwkv_mobile.a
         # cmake --build . --config Debug -j 8 -- CODE_SIGNING_ALLOWED=NO
         # cp librwkv_mobile.a ../debug-build/librwkv_mobile.a
@@ -114,6 +161,11 @@ jobs:
         pushd release-build
         zip -9 -y -r ../${{ env.PACKAGENAME }}.zip *.a
         popd
+    - name: package-symbols
+      run: |
+        pushd symbols
+        zip -9 -y -r ../${{ env.SYMBOLS_PACKAGENAME }}.zip ios-static
+        popd
         # pushd debug-build
         # zip -9 -y -r ../${{ env.PACKAGENAME }}-debug.zip *.a
         # popd
@@ -122,6 +174,11 @@ jobs:
       with:
         name: ${{ env.PACKAGENAME }}
         path: ${{ env.PACKAGENAME }}.zip
+    - name: upload-symbols-zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SYMBOLS_PACKAGENAME }}
+        path: ${{ env.SYMBOLS_PACKAGENAME }}.zip
     # - name: upload-zip-debug
     #   uses: actions/upload-artifact@v4
     #   with:
@@ -133,6 +190,7 @@ jobs:
     runs-on: macos-15
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-macos-aarch64
+      SYMBOLS_PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-macos-aarch64-symbols
     steps:
     - uses: actions/checkout@v4
     - name: build-arm64
@@ -146,8 +204,11 @@ jobs:
         mkdir build-arm64 && cd build-arm64
         cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MLX_BACKEND=ON \
           -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_COREML_BACKEND=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         cmake --build . -j 8
+        mkdir -p ../symbols/macos-aarch64
+        dsymutil librwkv_mobile.dylib -o ../symbols/macos-aarch64/librwkv_mobile.dylib.dSYM
+        strip -S librwkv_mobile.dylib
         # cd ..
         # mkdir build-arm64-debug && cd build-arm64-debug
         # cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MLX_BACKEND=ON \
@@ -156,8 +217,16 @@ jobs:
         # cmake --build . -j 8
     - name: package
       run: |
-        pushd build-arm64
-        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip librwkv_mobile.dylib
+        rm -rf package
+        mkdir -p package
+        cp build-arm64/librwkv_mobile.dylib package/librwkv_mobile.dylib
+        pushd package
+        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip .
+        popd
+    - name: package-symbols
+      run: |
+        pushd symbols
+        zip -9 -y -r ../${{ env.SYMBOLS_PACKAGENAME }}.zip macos-aarch64
         popd
         # pushd build-arm64-debug
         # zip -9 -y -r ../${{ env.PACKAGENAME }}-debug.zip librwkv_mobile.dylib
@@ -167,6 +236,11 @@ jobs:
       with:
         name: ${{ env.PACKAGENAME }}
         path: ${{ env.PACKAGENAME }}.zip
+    - name: upload-symbols-zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SYMBOLS_PACKAGENAME }}
+        path: ${{ env.SYMBOLS_PACKAGENAME }}.zip
     # - name: upload-zip-debug
     #   uses: actions/upload-artifact@v4
     #   with:
@@ -178,6 +252,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-aarch64-android-ndk-r25c
+      SYMBOLS_PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-aarch64-android-ndk-r25c-symbols
     steps:
     - uses: actions/checkout@v4
     - name: Install Ninja
@@ -199,9 +274,14 @@ jobs:
         cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DENABLE_MTK_NP7_BACKEND=ON \
           -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF \
           -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r25c \
-          -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/android-ndk-r25c/build/cmake/android.toolchain.cmake -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/android-ndk-r25c/build/cmake/android.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON \
           -G Ninja
         ninja
+        mkdir -p "$GITHUB_WORKSPACE/symbols/android-arm64-v8a"
+        LLVM_TOOLCHAIN="$GITHUB_WORKSPACE/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin"
+        "$LLVM_TOOLCHAIN/llvm-objcopy" --only-keep-debug --compress-debug-sections=zlib librwkv_mobile.so "$GITHUB_WORKSPACE/symbols/android-arm64-v8a/librwkv_mobile.so.debug"
+        "$LLVM_TOOLCHAIN/llvm-strip" --strip-debug --strip-unneeded librwkv_mobile.so
+        "$LLVM_TOOLCHAIN/llvm-objcopy" --add-gnu-debuglink="$GITHUB_WORKSPACE/symbols/android-arm64-v8a/librwkv_mobile.so.debug" librwkv_mobile.so
         cd ..
         # mkdir build-debug && cd build-debug
         # cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DENABLE_MTK_NP7_BACKEND=ON \
@@ -212,8 +292,16 @@ jobs:
         # ninja
     - name: package
       run: |
-        pushd build
-        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip librwkv_mobile.so
+        rm -rf package
+        mkdir -p package
+        cp build/librwkv_mobile.so package/librwkv_mobile.so
+        pushd package
+        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip .
+        popd
+    - name: package-symbols
+      run: |
+        pushd symbols
+        zip -9 -y -r ../${{ env.SYMBOLS_PACKAGENAME }}.zip android-arm64-v8a
         popd
         # pushd build-debug
         # zip -9 -y -r ../${{ env.PACKAGENAME }}-debug.zip librwkv_mobile.so
@@ -223,6 +311,11 @@ jobs:
       with:
         name: ${{ env.PACKAGENAME }}
         path: ${{ env.PACKAGENAME }}.zip
+    - name: upload-symbols-zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SYMBOLS_PACKAGENAME }}
+        path: ${{ env.SYMBOLS_PACKAGENAME }}.zip
     # - name: upload-zip-debug
     #   uses: actions/upload-artifact@v4
     #   with:
@@ -234,6 +327,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-x86_64
+      SYMBOLS_PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-x86_64-symbols
     steps:
     - uses: actions/checkout@v4
     - name: setup-vulkan-sdk
@@ -251,47 +345,92 @@ jobs:
       run: |
         rm -rf build
         mkdir build && cd build
-        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_LLAMACPP_VULKAN=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_TTS=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF
+        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_LLAMACPP_VULKAN=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DENABLE_TTS=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF -DCMAKE_BUILD_TYPE=Release -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON
         cmake --build . -j 8
         mv librwkv_mobile.so librwkv_mobile-linux-x86_64.so
+        objcopy --only-keep-debug --compress-debug-sections=zlib librwkv_mobile-linux-x86_64.so librwkv_mobile-linux-x86_64.so.debug
+        strip --strip-debug --strip-unneeded librwkv_mobile-linux-x86_64.so
+        objcopy --add-gnu-debuglink=librwkv_mobile-linux-x86_64.so.debug librwkv_mobile-linux-x86_64.so
+        mkdir -p ../symbols/linux-x86_64
+        mv librwkv_mobile-linux-x86_64.so.debug ../symbols/linux-x86_64/librwkv_mobile-linux-x86_64.so.debug
     - name: package
       run: |
-        pushd build
-        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip librwkv_mobile-linux-x86_64.so
+        rm -rf package
+        mkdir -p package
+        cp build/librwkv_mobile-linux-x86_64.so package/librwkv_mobile-linux-x86_64.so
+        pushd package
+        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip .
+        popd
+    - name: package-symbols
+      run: |
+        pushd symbols
+        zip -9 -y -r ../${{ env.SYMBOLS_PACKAGENAME }}.zip linux-x86_64
         popd
     - name: upload-zip
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.PACKAGENAME }}
         path: ${{ env.PACKAGENAME }}.zip
+    - name: upload-symbols-zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SYMBOLS_PACKAGENAME }}
+        path: ${{ env.SYMBOLS_PACKAGENAME }}.zip
 
   build-linux-arm64-library:
     needs: [setup]
     runs-on: ubuntu-22.04-arm
     env:
       PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-aarch64
+      SYMBOLS_PACKAGENAME: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-aarch64-symbols
     steps:
     - uses: actions/checkout@v4
     - name: build
       run: |
         rm -rf build
         mkdir build && cd build
-        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF
+        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF -DCMAKE_BUILD_TYPE=Release -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON
         cmake --build . -j 8
         mv librwkv_mobile.so librwkv_mobile-linux-aarch64.so
+        objcopy --only-keep-debug --compress-debug-sections=zlib librwkv_mobile-linux-aarch64.so librwkv_mobile-linux-aarch64.so.debug
+        strip --strip-debug --strip-unneeded librwkv_mobile-linux-aarch64.so
+        objcopy --add-gnu-debuglink=librwkv_mobile-linux-aarch64.so.debug librwkv_mobile-linux-aarch64.so
+        mkdir -p ../symbols/linux-aarch64
+        mv librwkv_mobile-linux-aarch64.so.debug ../symbols/linux-aarch64/librwkv_mobile-linux-aarch64.so.debug
     - name: package
       run: |
-        pushd build
-        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip librwkv_mobile-linux-aarch64.so
+        rm -rf package
+        mkdir -p package
+        cp build/librwkv_mobile-linux-aarch64.so package/librwkv_mobile-linux-aarch64.so
+        pushd package
+        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip .
+        popd
+    - name: package-symbols
+      run: |
+        pushd symbols
+        zip -9 -y -r ../${{ env.SYMBOLS_PACKAGENAME }}.zip linux-aarch64
         popd
     - name: upload-zip
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.PACKAGENAME }}
         path: ${{ env.PACKAGENAME }}.zip
+    - name: upload-symbols-zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SYMBOLS_PACKAGENAME }}
+        path: ${{ env.SYMBOLS_PACKAGENAME }}.zip
 
   upload-dev-release:
-    needs: [setup, build-ios-library, build-android-library, build-macos-library-aarch64, build-windows-library-x64]
+    needs:
+      - setup
+      - build-ios-library
+      - build-android-library
+      - build-macos-library-aarch64
+      - build-windows-library-x64
+      - build-windows-library-arm64
+      - build-linux-x64-library
+      - build-linux-arm64-library
     runs-on: ubuntu-latest
     steps:
       - name: download-ios
@@ -341,6 +480,56 @@ jobs:
         with:
           name: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64
 
+      - name: download-ios-symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-ios-static-symbols
+
+      - name: download-macos-symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-macos-aarch64-symbols
+
+      - name: download-android-symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-aarch64-android-ndk-r25c-symbols
+
+      - name: download-linux-x64-symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-x86_64-symbols
+
+      - name: download-linux-arm64-symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-aarch64-symbols
+
+      - name: download-windows-x64-symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-x64-symbols
+
+      - name: download-windows-arm64-symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64-symbols
+
+      - name: package-symbols
+        run: |
+          rm -rf all-symbols
+          mkdir -p all-symbols
+          unzip -q librwkv_mobile-${{ needs.setup.outputs.VERSION }}-ios-static-symbols.zip -d all-symbols
+          unzip -q librwkv_mobile-${{ needs.setup.outputs.VERSION }}-macos-aarch64-symbols.zip -d all-symbols
+          unzip -q librwkv_mobile-${{ needs.setup.outputs.VERSION }}-aarch64-android-ndk-r25c-symbols.zip -d all-symbols
+          unzip -q librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-x86_64-symbols.zip -d all-symbols
+          unzip -q librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-aarch64-symbols.zip -d all-symbols
+          unzip -q librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-x64-symbols.zip -d all-symbols
+          unzip -q librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64-symbols.zip -d all-symbols
+          pushd all-symbols
+          zip -9 -y -r ../librwkv_mobile-${{ needs.setup.outputs.VERSION }}-symbols.zip .
+          popd
+
       - name: rename-dev-artifacts
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         run: |
@@ -354,6 +543,7 @@ jobs:
           mv librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-aarch64.zip librwkv_mobile-dev-latest-linux-aarch64.zip
           mv librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-x64.zip librwkv_mobile-dev-latest-windows-x64.zip
           mv librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64.zip librwkv_mobile-dev-latest-windows-arm64.zip
+          mv librwkv_mobile-${{ needs.setup.outputs.VERSION }}-symbols.zip librwkv_mobile-dev-latest-symbols.zip
       - uses: "marvinpinto/action-automatic-releases@latest"
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         with:
@@ -369,16 +559,19 @@ jobs:
             librwkv_mobile-dev-latest-linux-aarch64.zip
             librwkv_mobile-dev-latest-windows-x64.zip
             librwkv_mobile-dev-latest-windows-arm64.zip
+            librwkv_mobile-dev-latest-symbols.zip
       - uses: "marvinpinto/action-automatic-releases@latest"
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/tags/v' }}
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "${{ github.ref_name }}"
           prerelease: false
           files: |
-            librwkv_mobile-dev-latest-ios-static.zip
-            librwkv_mobile-dev-latest-macos.zip
-            librwkv_mobile-dev-latest-aarch64-android-ndk-r25c.zip
-            librwkv_mobile-dev-latest-linux-x86_64.zip
-            librwkv_mobile-dev-latest-linux-aarch64.zip
-            librwkv_mobile-dev-latest-windows-x64.zip
-            librwkv_mobile-dev-latest-windows-arm64.zip
+            librwkv_mobile-${{ needs.setup.outputs.VERSION }}-ios-static.zip
+            librwkv_mobile-${{ needs.setup.outputs.VERSION }}-macos-aarch64.zip
+            librwkv_mobile-${{ needs.setup.outputs.VERSION }}-aarch64-android-ndk-r25c.zip
+            librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-x86_64.zip
+            librwkv_mobile-${{ needs.setup.outputs.VERSION }}-linux-aarch64.zip
+            librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-x64.zip
+            librwkv_mobile-${{ needs.setup.outputs.VERSION }}-windows-arm64.zip
+            librwkv_mobile-${{ needs.setup.outputs.VERSION }}-symbols.zip
