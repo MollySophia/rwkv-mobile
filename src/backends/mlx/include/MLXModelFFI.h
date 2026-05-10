@@ -45,6 +45,18 @@ int mlx_model_eval(
     float *logits
 );
 
+// Evaluates one token per batch slot.
+// ids: array of token IDs, one per slot
+// batch_size: number of active batch slots
+// logits: output buffer for logits (must be pre-allocated with size >= batch_size * vocab_size)
+// Returns 0 on success, -1 on failure.
+int mlx_model_eval_batch_tokens(
+    void *handle,
+    const int32_t *ids,
+    int32_t batch_size,
+    float *logits
+);
+
 // Gets the total size of cache data in bytes (fp16 format).
 // Returns size in bytes on success, -1 on failure.
 int32_t mlx_cache_get_size(void *handle);
@@ -69,8 +81,32 @@ int mlx_cache_write(
     int32_t buffer_size
 );
 
+// Reads a single batch slot from the cache into the provided buffer (fp16 format).
+// Returns number of bytes read on success, -1 on failure.
+int32_t mlx_cache_read_slot(
+    void *handle,
+    int32_t slot,
+    void *buffer,
+    int32_t buffer_size
+);
+
+// Writes a single batch slot into the cache from the provided buffer (fp16 format).
+// Returns 0 on success, -1 on failure.
+int mlx_cache_write_slot(
+    void *handle,
+    int32_t slot,
+    const void *buffer,
+    int32_t buffer_size
+);
+
+// Clears a single batch slot in the cache.
+// Returns 0 on success, -1 on failure.
+int mlx_cache_zero_slot(
+    void *handle,
+    int32_t slot
+);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
 
