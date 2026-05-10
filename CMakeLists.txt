@@ -45,6 +45,12 @@ option(ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 if (RWKV_MOBILE_ENABLE_DEBUG_SYMBOLS)
     if (MSVC)
         set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "ProgramDatabase" CACHE STRING "MSVC debug information format" FORCE)
+        add_link_options(
+            "$<$<CONFIG:RelWithDebInfo>:/DEBUG:FULL>"
+            "$<$<CONFIG:RelWithDebInfo>:/OPT:REF>"
+            "$<$<CONFIG:RelWithDebInfo>:/OPT:ICF>"
+            "$<$<CONFIG:RelWithDebInfo>:/INCREMENTAL:NO>"
+        )
     else()
         add_compile_options("-g")
     endif()

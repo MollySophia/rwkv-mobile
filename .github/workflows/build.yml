@@ -208,7 +208,7 @@ jobs:
         cmake --build . -j 8
         mkdir -p ../symbols/macos-aarch64
         dsymutil librwkv_mobile.dylib -o ../symbols/macos-aarch64/librwkv_mobile.dylib.dSYM
-        strip -S librwkv_mobile.dylib
+        strip -Sx librwkv_mobile.dylib
         # cd ..
         # mkdir build-arm64-debug && cd build-arm64-debug
         # cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MLX_BACKEND=ON \
