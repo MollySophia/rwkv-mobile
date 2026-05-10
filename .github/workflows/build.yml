@@ -130,6 +130,12 @@ jobs:
     - name: build-arm64
       run: |
         rustup target add aarch64-apple-ios
+        git clone --single-branch --branch rwkv-mobile https://github.com/mollysophia/mlx-swift-examples.git --depth 1
+        cd mlx-swift-examples
+        xcodebuild -project mlx-swift-examples.xcodeproj -scheme MLXModelFFI -configuration Release -derivedDataPath build -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
+        cp build/Build/Products/Release-iphoneos/libMLXModelFFI.a ../src/backends/mlx/prebuilt/ios-arm64/libMLXModelFFI.a
+        cp build/Build/Products/Release-iphoneos/mlx-swift_Cmlx.bundle/default.metallib ../src/backends/mlx/prebuilt/ios-arm64/default.metallib
+        cd ..
         rm -rf build-arm64
         mkdir build-arm64 && cd build-arm64
         export LIBRARY_PATH="$LIBRARY_PATH:${{ env.DEVELOPER_DIR }}/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/usr/lib"
@@ -142,6 +148,7 @@ jobs:
         mkdir -p ../release-build ../symbols/ios-static # ../debug-build
         cp librwkv_mobile.a ../release-build/librwkv_mobile.a
         cp _deps/ncnn-build/src/Release-iphoneos/libncnn.a ../release-build/libncnn.a
+        cp ../src/backends/mlx/prebuilt/ios-arm64/default.metallib ../release-build/default.metallib
         cp librwkv_mobile.a ../symbols/ios-static/librwkv_mobile.a
         cp _deps/ncnn-build/src/Release-iphoneos/libncnn.a ../symbols/ios-static/libncnn.a
         strip -S ../release-build/librwkv_mobile.a
@@ -159,7 +166,7 @@ jobs:
     - name: package
       run: |
         pushd release-build
-        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip *.a
+        zip -9 -y -r ../${{ env.PACKAGENAME }}.zip *.a default.metallib
         popd
     - name: package-symbols
       run: |
