@@ -135,6 +135,17 @@ jobs:
         xcodebuild -project mlx-swift-examples.xcodeproj -scheme MLXModelFFI -configuration Release -derivedDataPath build -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
         cp build/Build/Products/Release-iphoneos/libMLXModelFFI.a ../src/backends/mlx/prebuilt/ios-arm64/libMLXModelFFI.a
         cp build/Build/Products/Release-iphoneos/mlx-swift_Cmlx.bundle/default.metallib ../src/backends/mlx/prebuilt/ios-arm64/default.metallib
+        mlx_archive="$GITHUB_WORKSPACE/src/backends/mlx/prebuilt/ios-arm64/libMLXModelFFI.a"
+        mlx_archive_tmp="$(mktemp -d)"
+        (
+          cd "$mlx_archive_tmp"
+          ar -x "$mlx_archive"
+          rm -f __.SYMDEF "__.SYMDEF SORTED"
+          libtool -static -o "$mlx_archive.deduped" *.o
+        )
+        mv "$mlx_archive.deduped" "$mlx_archive"
+        ranlib "$mlx_archive"
+        rm -rf "$mlx_archive_tmp"
         cd ..
         rm -rf build-arm64
         mkdir build-arm64 && cd build-arm64
