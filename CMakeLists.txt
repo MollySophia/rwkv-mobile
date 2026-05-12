@@ -505,6 +505,7 @@ if (ENABLE_MLX_BACKEND)
     target_include_directories(rwkv_mobile_internal PUBLIC src/backends/mlx src/backends/mlx/include)
     # Set MLX library path based on platform
     if (IOS)
+        target_compile_definitions(rwkv_mobile_internal PUBLIC RWKV_MOBILE_IOS_BUILD)
         set(MLX_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/mlx/prebuilt/ios-arm64/libMLXModelFFI.a)
         target_link_directories(rwkv_mobile_internal PUBLIC src/backends/mlx/prebuilt/ios-arm64)
     else()
