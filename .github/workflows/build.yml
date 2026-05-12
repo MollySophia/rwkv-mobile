@@ -148,11 +148,14 @@ jobs:
         mkdir -p ../release-build ../symbols/ios-static # ../debug-build
         cp librwkv_mobile.a ../release-build/librwkv_mobile.a
         cp _deps/ncnn-build/src/Release-iphoneos/libncnn.a ../release-build/libncnn.a
+        cp ../src/backends/mlx/prebuilt/ios-arm64/libMLXModelFFI.a ../release-build/libMLXModelFFI.a
         cp ../src/backends/mlx/prebuilt/ios-arm64/default.metallib ../release-build/default.metallib
         cp librwkv_mobile.a ../symbols/ios-static/librwkv_mobile.a
         cp _deps/ncnn-build/src/Release-iphoneos/libncnn.a ../symbols/ios-static/libncnn.a
+        cp ../src/backends/mlx/prebuilt/ios-arm64/libMLXModelFFI.a ../symbols/ios-static/libMLXModelFFI.a
         strip -S ../release-build/librwkv_mobile.a
         strip -S ../release-build/libncnn.a
+        strip -S ../release-build/libMLXModelFFI.a
         cat > ../symbols/ios-static/README-ios-static-symbols.txt <<'EOF'
         iOS is packaged as static libraries. The .a files in this archive are built with DWARF debug info and should be linked into the final Flutter app before the app dSYM is generated. Upload the final app dSYM to Sentry; a standalone static-library dSYM will not match the app's loaded image UUID.
         EOF
