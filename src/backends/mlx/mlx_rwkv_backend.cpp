@@ -4,10 +4,19 @@
 #include "logger.h"
 #include "MLXModelFFI.h"
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 namespace rwkvmobile {
 
 static bool mlx_initialized = false;
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+static constexpr int kMaxBatchSlots = 4;
+#else
 static constexpr int kMaxBatchSlots = 16;
+#endif
 
 int mlx_rwkv_backend::init(void * extra) {
     if (!mlx_initialized) {
