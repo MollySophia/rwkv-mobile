@@ -1,10 +1,13 @@
 #include "logger.h"
 #include "utils.h"
+#include <atomic>
+#include <cstdlib>
 #include <string>
 #include <cstdarg>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <cstdio>
 
 namespace rwkvmobile {
 
@@ -27,6 +30,29 @@ std::string get_timestamp() {
     return ss.str();
 }
 
+static bool env_flag_enabled(const char* name) {
+    const char* value = std::getenv(name);
+    if (value == nullptr) {
+        return false;
+    }
+
+    std::string normalized(value);
+    for (char& c : normalized) {
+        c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    }
+    return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on";
+}
+
+bool Logger::should_log_to_console() const {
+    static std::atomic<int> cached{-1};
+    int value = cached.load(std::memory_order_relaxed);
+    if (value == -1) {
+        value = env_flag_enabled("RWKV_LOG_TO_CONSOLE") ? 1 : 0;
+        cached.store(value, std::memory_order_relaxed);
+    }
+    return value == 1;
+}
+
 #if defined(__ANDROID__)
 #include <android/log.h>
 #define LOG_TAG "RWKV-MOBILE"
@@ -45,10 +71,20 @@ void Logger::log(const std::string &msg, const int level) {
 
     _log(log_msg);
 
+    auto print_console = [&](const std::string& line) {
+        if (!should_log_to_console() || level < _level) {
+            return;
+        }
+        FILE* stream = (level >= RWKV_LOG_LEVEL_WARN) ? stderr : stdout;
+        fprintf(stream, "%s\n", line.c_str());
+        fflush(stream);
+    };
+
     // split log_msg into splits if it's too long
     if (log_msg.size() > 1024) {
         auto splits = split_log_msg(log_msg, 1024);
         for (auto &split : splits) {
+            print_console(split);
             if (level >= _level) {
                 switch (level) {
                     case RWKV_LOG_LEVEL_DEBUG:
@@ -68,6 +104,7 @@ void Logger::log(const std::string &msg, const int level) {
             }
         }
     } else {
+        print_console(log_msg);
         if (level >= _level) {
             switch (level) {
                 case RWKV_LOG_LEVEL_DEBUG:
@@ -88,7 +125,6 @@ void Logger::log(const std::string &msg, const int level) {
     }
 }
 #else
-#include <cstdio>
 void Logger::log(const std::string &msg, const int level) {
     std::string log_msg = remove_endl(msg);
     auto timestamp = get_timestamp();

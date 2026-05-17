@@ -198,6 +198,11 @@ private:
     int execute_emb_decode_graph();
     int execute_emb_prefill_graph();
     int execute_batch_decode_graph(int bsz);
+    bool should_dump_execute_profile() const;
+    int create_execute_profile_handle(Qnn_ProfileHandle_t* profileHandle) const;
+    void dump_profile_events(Qnn_ProfileHandle_t profileHandle, const char* graphName) const;
+    void dump_profile_event_recursive(QnnProfile_EventId_t eventId, int depth) const;
+    const char* profile_unit_to_string(QnnProfile_EventUnit_t unit) const;
 
     int copy_deep_embedding_to_qnn_tensor_decode(int idx);
     int copy_deep_embedding_to_qnn_tensor_prefill(int idx, int token_offset);

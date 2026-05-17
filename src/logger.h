@@ -35,6 +35,7 @@ public:
     }
     ~Logger() = default;
     void log(const std::string &msg, const int level = RWKV_LOG_LEVEL_INFO);
+    bool should_log_to_console() const;
 
     std::string& get_log() {
         std::lock_guard<std::mutex> lock(_mutex);

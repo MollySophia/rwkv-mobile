@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <chrono>
 #include <any>
+#include <cstdlib>
 #include <mutex>
 
 #include "qnn_backend.h"
@@ -19,6 +20,7 @@
 #include <HTP/QnnHtpGraph.h>
 #include <HTP/QnnHtpContext.h>
 #include <QnnContext.h>
+#include <QnnProfile.h>
 #include <QnnSdkBuildId.h>
 
 #include "logger.h"
@@ -1749,16 +1751,133 @@ int qnn_backend::copy_qnn_tensor_to_float(Qnn_Tensor_t *qnn_tensor, float *buffe
     return RWKV_SUCCESS;
 }
 
+bool qnn_backend::should_dump_execute_profile() const {
+    static std::atomic<int> cached{-1};
+    int value = cached.load(std::memory_order_relaxed);
+    if (value == -1) {
+        const char* env = std::getenv("RWKV_QNN_PROFILE_EXEC");
+        value = (env != nullptr && std::string(env) == "1") ? 1 : 0;
+        cached.store(value, std::memory_order_relaxed);
+    }
+    return value == 1;
+}
+
+int qnn_backend::create_execute_profile_handle(Qnn_ProfileHandle_t* profileHandle) const {
+    if (profileHandle == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    *profileHandle = nullptr;
+
+    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
+    if (qnn.profileCreate == nullptr || qnn.profileSetConfig == nullptr) {
+        return RWKV_ERROR_UNSUPPORTED;
+    }
+
+    if (QNN_SUCCESS != qnn.profileCreate(
+            g_qnn_backend_context_ptr->qnnBackendHandle,
+            QNN_PROFILE_LEVEL_DETAILED,
+            profileHandle)) {
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_INIT;
+    }
+
+    QnnProfile_Config_t profileConfig = QNN_PROFILE_CONFIG_INIT;
+    profileConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
+    const QnnProfile_Config_t* profileConfigs[] = {&profileConfig, nullptr};
+    if (QNN_SUCCESS != qnn.profileSetConfig(*profileHandle, profileConfigs)) {
+        qnn.profileFree(*profileHandle);
+        *profileHandle = nullptr;
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_INIT;
+    }
+
+    return RWKV_SUCCESS;
+}
+
+const char* qnn_backend::profile_unit_to_string(QnnProfile_EventUnit_t unit) const {
+    switch (unit) {
+        case QNN_PROFILE_EVENTUNIT_MICROSEC:
+            return "us";
+        case QNN_PROFILE_EVENTUNIT_CYCLES:
+            return "cycles";
+        case QNN_PROFILE_EVENTUNIT_COUNT:
+            return "count";
+        case QNN_PROFILE_EVENTUNIT_OBJECT:
+            return "object";
+        default:
+            return "unknown";
+    }
+}
+
+void qnn_backend::dump_profile_event_recursive(QnnProfile_EventId_t eventId, int depth) const {
+    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
+    QnnProfile_EventData_t eventData = QNN_PROFILE_EVENT_DATA_INIT;
+    if (QNN_SUCCESS != qnn.profileGetEventData(eventId, &eventData)) {
+        LOGW("[PROFILE] failed to query event data");
+        return;
+    }
+
+    std::string indent(depth * 2, ' ');
+    LOGI("[PROFILE] %stype=%u unit=%s value=%llu id=%s",
+         indent.c_str(),
+         eventData.type,
+         profile_unit_to_string(eventData.unit),
+         static_cast<unsigned long long>(eventData.value),
+         eventData.identifier ? eventData.identifier : "<null>");
+
+    const QnnProfile_EventId_t* subEventIds = nullptr;
+    uint32_t numSubEvents = 0;
+    if (QNN_SUCCESS != qnn.profileGetSubEvents(eventId, &subEventIds, &numSubEvents) || subEventIds == nullptr) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < numSubEvents; ++i) {
+        dump_profile_event_recursive(subEventIds[i], depth + 1);
+    }
+}
+
+void qnn_backend::dump_profile_events(Qnn_ProfileHandle_t profileHandle, const char* graphName) const {
+    if (profileHandle == nullptr) {
+        return;
+    }
+
+    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
+    if (qnn.profileGetEvents == nullptr || qnn.profileGetEventData == nullptr || qnn.profileGetSubEvents == nullptr) {
+        return;
+    }
+
+    const QnnProfile_EventId_t* eventIds = nullptr;
+    uint32_t numEvents = 0;
+    if (QNN_SUCCESS != qnn.profileGetEvents(profileHandle, &eventIds, &numEvents) || eventIds == nullptr) {
+        LOGW("[PROFILE] failed to get events for graph=%s", graphName ? graphName : "<null>");
+        return;
+    }
+
+    LOGI("[PROFILE] graph=%s events=%u", graphName ? graphName : "<null>", numEvents);
+    for (uint32_t i = 0; i < numEvents; ++i) {
+        dump_profile_event_recursive(eventIds[i], 0);
+    }
+}
+
 int qnn_backend::execute_graph(GraphInfo_t** graphsInfo, int graphsCount, Qnn_Tensor_t** inputTensors, Qnn_Tensor_t** outputTensors) {
     for (int graph_id = 0; graph_id < graphsCount; graph_id++) {
         auto graphInfo     = (*graphsInfo)[graph_id];
+        Qnn_ProfileHandle_t profileHandle = nullptr;
+        if (should_dump_execute_profile()) {
+            if (RWKV_SUCCESS != create_execute_profile_handle(&profileHandle)) {
+                LOGW("[PROFILE] profiling disabled for graph=%s", graphInfo.graphName);
+                profileHandle = nullptr;
+            }
+        }
         auto executeStatus =
             g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.graphExecute(graphInfo.graph,
                                                             inputTensors[graph_id],
                                                             graphInfo.numInputTensors,
                                                             outputTensors[graph_id],
                                                             graphInfo.numOutputTensors,
-                                                            nullptr, nullptr);
+                                                            profileHandle, nullptr);
+        if (profileHandle != nullptr) {
+            dump_profile_events(profileHandle, graphInfo.graphName);
+            g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.profileFree(profileHandle);
+        }
         if (QNN_GRAPH_NO_ERROR != executeStatus) {
             return RWKV_ERROR_EVAL;
         }
