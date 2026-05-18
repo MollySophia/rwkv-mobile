@@ -1308,7 +1308,19 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
 
     bool history_ends_with_user_message = inputs.size() % 2 != 0;
     if (roles_map.size() == inputs.size()) {
-        history_ends_with_user_message = roles_map.back() == model->user_role;
+        auto normalize_role = [&](const std::string &role) -> std::string {
+            if (role == "user") {
+                return model->user_role;
+            }
+            if (role == "assistant") {
+                return model->response_role;
+            }
+            if (role == "system") {
+                return model->system_role;
+            }
+            return role;
+        };
+        history_ends_with_user_message = normalize_role(roles_map.back()) == model->user_role;
     }
     std::string role_for_parsing;
     if (!add_generation_prompt) {
@@ -1466,6 +1478,9 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
             return ret;
         }
         LOGI("registered state for text: \"%s\"", escape_special_chars(model->tokenizer->decode(node->ids)).c_str());
+        if (model->response_buffer.size() > 0 && model->response_buffer[0] == ' ') {
+            model->response_buffer = model->response_buffer.substr(1);
+        }
         model->response_buffer = remove_endl(model->response_buffer);
         model->response_buffer = remove_ending_char(model->response_buffer, '\x17');
     }
@@ -1600,7 +1615,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
 
         bool history_ends_with_user_message = input.size() % 2 != 0;
         if (batch_roles.size() == input.size()) {
-            history_ends_with_user_message = batch_roles.back() == model->user_role;
+            history_ends_with_user_message = normalize_role(batch_roles.back()) == model->user_role;
         }
         std::string role_for_parsing;
         if (!add_generation_prompt) {
@@ -3809,6 +3824,9 @@ std::string Runtime::get_response_buffer_content(int model_id) {
     const int total = (int)model->response_buffer_ids.size();
     for (int i = model->response_buffer_decoded_tokens; i < total; i++) {
         model->response_buffer += model->tokenizer->decode(model->response_buffer_ids[i]);
+    }
+    if (model->response_buffer.size() > 0 && model->response_buffer[0] == ' ') {
+        model->response_buffer = model->response_buffer.substr(1);
     }
     model->response_buffer_decoded_tokens = total;
     return model->response_buffer;
