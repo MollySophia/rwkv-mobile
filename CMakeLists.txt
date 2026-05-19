@@ -31,7 +31,7 @@ option(ENABLE_TTS "Enable TTS" OFF)
 
 option(BUILD_EXAMPLES "Build examples" ON)
 option(BUILD_STATIC_LIB "Build static library" OFF)
-option(ENABLE_SERVER "Enable built-in HTTP server" ON)
+option(ENABLE_SERVER "Enable built-in HTTP server" OFF)
 option(RWKV_MOBILE_ENABLE_DEBUG_SYMBOLS "Build with debug symbols for external symbol uploads" OFF)
 
 if (ENABLE_TTS AND NOT ENABLE_MNN_BACKEND)
