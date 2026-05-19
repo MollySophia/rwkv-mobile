@@ -81,7 +81,7 @@ jobs:
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
-        cmake -S . -B build -G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake\arm64-windows-llvm.cmake -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=OFF -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=OFF -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON
+        cmake -S . -B build -G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake\arm64-windows-llvm.cmake -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=OFF -DENABLE_LLAMACPP_BACKEND=ON -DENABLE_MNN_BACKEND=ON -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_QNN_BACKEND=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON
         cmake --build build --config RelWithDebInfo -j 8
 
     - name: package
