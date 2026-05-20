@@ -337,7 +337,7 @@ if (ENABLE_WHISPER OR ENABLE_TTS)
     set(EIGEN_BUILD_PKGCONFIG OFF)
     set(EIGEN_BUILD_DOC OFF)
     FetchContent_MakeAvailable(Eigen)
-
+    
     # FetchContent_Declare(
     #     kaldi_native_fbank
     #     GIT_REPOSITORY https://github.com/csukuangfj/kaldi-native-fbank/
@@ -693,9 +693,31 @@ if (DEFINED ANDROID_NDK)
     target_link_libraries(rwkv_mobile_internal PUBLIC ${log-lib} ${android-lib})
 endif()
 
+function(rwkv_mobile_apply_c_api_feature_definitions target_name)
+    if (ENABLE_SERVER)
+        target_compile_definitions(${target_name} PRIVATE ENABLE_SERVER)
+    endif()
+    if (ENABLE_WEBRWKV_BACKEND)
+        target_compile_definitions(${target_name} PRIVATE ENABLE_WEBRWKV)
+    endif()
+    if (ENABLE_LLAMACPP_BACKEND)
+        target_compile_definitions(${target_name} PRIVATE ENABLE_LLAMACPP)
+    endif()
+    if (ENABLE_VISION)
+        target_compile_definitions(${target_name} PRIVATE ENABLE_VISION)
+    endif()
+    if (ENABLE_WHISPER)
+        target_compile_definitions(${target_name} PRIVATE ENABLE_WHISPER)
+    endif()
+    if (ENABLE_TTS)
+        target_compile_definitions(${target_name} PRIVATE ENABLE_TTS)
+    endif()
+endfunction()
+
 if (BUILD_STATIC_LIB)
     add_library(rwkv_mobile_static STATIC src/c_api.cpp)
     target_include_directories(rwkv_mobile_static PUBLIC src PRIVATE "${RWKV_MOBILE_GENERATED_INCLUDE_DIR}")
+    rwkv_mobile_apply_c_api_feature_definitions(rwkv_mobile_static)
     target_link_libraries(rwkv_mobile_static PRIVATE rwkv_mobile_internal)
 
     if (IOS)
@@ -756,6 +778,7 @@ if (BUILD_STATIC_LIB)
 else()
     add_library(rwkv_mobile SHARED src/c_api.cpp)
     target_include_directories(rwkv_mobile PRIVATE "${RWKV_MOBILE_GENERATED_INCLUDE_DIR}")
+    rwkv_mobile_apply_c_api_feature_definitions(rwkv_mobile)
     if (CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
         target_link_options(rwkv_mobile PRIVATE
             "-Wl,-z,max-page-size=16384"
