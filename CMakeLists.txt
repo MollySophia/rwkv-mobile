@@ -336,6 +336,11 @@ if (ENABLE_WHISPER OR ENABLE_TTS)
     set(EIGEN_MPL2_ONLY ON)
     set(EIGEN_BUILD_PKGCONFIG OFF)
     set(EIGEN_BUILD_DOC OFF)
+    if (WIN32)
+        # Eigen 3.3 can mis-detect the standard math library when configured
+        # through clang-cl/MSVC toolchains, especially on Windows ARM64.
+        set(standard_math_library_linked_to_automatically ON CACHE BOOL "Eigen standard math library check result" FORCE)
+    endif()
     FetchContent_MakeAvailable(Eigen)
     
     # FetchContent_Declare(
