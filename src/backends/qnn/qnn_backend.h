@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <vector>
 
 #ifdef ENABLE_MNN
 #include <MNN/Interpreter.hpp>
@@ -151,6 +152,23 @@ private:
 
     IOTensor* qnnIOTensorUtils = nullptr;
 
+    struct ReRegisteredSharedInputMemHandle {
+        Qnn_ContextHandle_t contextHandle = nullptr;
+        int fd = -1;
+        size_t offset = 0;
+        size_t totalBufferSize = 0;
+        Qnn_MemHandle_t memHandle = nullptr;
+    };
+    std::vector<ReRegisteredSharedInputMemHandle> reRegisteredSharedInputMemHandles;
+
+    struct CrossContextTensorCopy {
+        Qnn_Tensor_t* source = nullptr;
+        void* destinationBuffer = nullptr;
+        size_t destinationSize = 0;
+        std::string tensorName;
+    };
+    std::unordered_map<Qnn_Tensor_t*, CrossContextTensorCopy> forcedCrossContextInputCopies;
+
     size_t logitsOutputTensorSize = 0;
 
     // TODO: simplify this
@@ -183,26 +201,67 @@ private:
                                        Qnn_Tensor_t* vFirstTensorRef, Qnn_Tensor_t* hiddenStateTensorRef,
                                        bool isPrefill);
 
+    void refresh_carry_output_tensors_after_input_setup(
+        const GraphInfo_t& graphInfo,
+        int graph_id,
+        int total_graphs_count,
+        std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
+        bool isPrefill);
+
     void populate_input_shared_tensor_map(const GraphInfo_t& graphInfo, int graph_id,
                                           std::unordered_map<std::string, Qnn_Tensor_t*>& sharedTensorMap,
                                           Qnn_Tensor_t* vFirstTensorRef, Qnn_Tensor_t* hiddenStateTensorRef,
                                           bool isPrefill);
+
+    int re_register_cross_context_shared_inputs(
+        int graph_id,
+        const std::unordered_map<std::string, Qnn_Tensor_t*>& sharedTensorMap,
+        std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
+        Qnn_ContextHandle_t contextHandle,
+        Qnn_Tensor_t* vFirstTensorRef,
+        Qnn_Tensor_t* hiddenStateTensorRef);
+
+    int re_register_cross_context_shared_outputs(
+        int graph_id,
+        const GraphInfo_t& graphInfo,
+        std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
+        Qnn_ContextHandle_t contextHandle,
+        Qnn_Tensor_t* vFirstTensorRef,
+        Qnn_Tensor_t* hiddenStateTensorRef);
+
+    std::unordered_map<std::string, Qnn_Tensor_t*> prepare_input_shared_tensor_map(
+        int graph_id,
+        const std::unordered_map<std::string, Qnn_Tensor_t*>& sharedTensorMap,
+        Qnn_Tensor_t* vFirstTensorRef,
+        Qnn_Tensor_t* hiddenStateTensorRef);
+
+    int register_forced_cross_context_input_copies(
+        int graph_id,
+        const std::unordered_map<std::string, Qnn_Tensor_t*>& sharedTensorMap,
+        std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
+        Qnn_ContextHandle_t contextHandle,
+        Qnn_Tensor_t* vFirstTensorRef,
+        Qnn_Tensor_t* hiddenStateTensorRef);
+
+    int copy_forced_cross_context_inputs(const GraphInfo_t& graphInfo, Qnn_Tensor_t* inputTensors);
 
     void map_deep_embedding_tensors(const GraphInfo_t& graphInfo, int graph_id,
                                     std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
                                     std::unordered_map<int, Qnn_Tensor_t*>& deepEmbeddingTensorsRef,
                                     bool isPrefill);
 
+    int maybe_dump_debug_input_tensors(const GraphInfo_t& graphInfo, int graph_id, Qnn_Tensor_t* inputTensors);
+    int maybe_dump_debug_output_tensors(const GraphInfo_t& graphInfo, int graph_id, Qnn_Tensor_t* outputTensors);
+
     int execute_graph(GraphInfo_t** graphInfo, int graphsCount, Qnn_Tensor_t** inputTensors, Qnn_Tensor_t** outputTensors);
+    int create_execute_profile_handle(Qnn_ProfileHandle_t* profileHandle);
+    void dump_profile_events(Qnn_ProfileHandle_t profileHandle, const char* graphName);
+    void dump_profile_event_recursive(QnnProfile_EventId_t eventId, int depth);
+    const char* profile_unit_to_string(QnnProfile_EventUnit_t unit) const;
     int execute_prefill_graph();
     int execute_emb_decode_graph();
     int execute_emb_prefill_graph();
     int execute_batch_decode_graph(int bsz);
-    bool should_dump_execute_profile() const;
-    int create_execute_profile_handle(Qnn_ProfileHandle_t* profileHandle) const;
-    void dump_profile_events(Qnn_ProfileHandle_t profileHandle, const char* graphName) const;
-    void dump_profile_event_recursive(QnnProfile_EventId_t eventId, int depth) const;
-    const char* profile_unit_to_string(QnnProfile_EventUnit_t unit) const;
 
     int copy_deep_embedding_to_qnn_tensor_decode(int idx);
     int copy_deep_embedding_to_qnn_tensor_prefill(int idx, int token_offset);
@@ -213,7 +272,7 @@ private:
     std::shared_ptr<uint8_t> external_deep_embeddings = nullptr;
     int deep_embeddings_elembytes = 2;
     std::string external_lmhead_filetype = "None";
-
+    int debug_dump_tensor_counter = 0;
 #ifdef ENABLE_MNN
     MNN::Interpreter *external_lmhead_interpretor = nullptr;
     MNN::Session *external_lmhead_mnn_session = nullptr;

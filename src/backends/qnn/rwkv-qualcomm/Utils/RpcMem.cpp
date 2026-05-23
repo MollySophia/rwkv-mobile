@@ -119,6 +119,11 @@ size_t RpcMem::getTotalBufferSize(Qnn_Tensor_t* tensor) {
 }
 
 bool RpcMem::allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tensorDataSize) {
+  return allocateTensorBufferForContext(tensor, tensorDataSize, m_contextHandle);
+}
+
+bool RpcMem::allocateTensorBufferForContext(
+    Qnn_Tensor_t* tensor, size_t tensorDataSize, Qnn_ContextHandle_t contextHandle) {
   if (m_libCdspRpc == nullptr) {
     rwkvmobile::LOGE("RpcMem not initialized");
     return false;
@@ -158,9 +163,9 @@ bool RpcMem::allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tensorDataSize) {
 
     Qnn_MemHandle_t memHandle = QNN_TENSOR_GET_MEM_HANDLE(tensor);
     if (QNN_SUCCESS !=
-        m_qnnInterface->memRegister(m_contextHandle, &memDescriptor, 1, &(memHandle))) {
+        m_qnnInterface->memRegister(contextHandle, &memDescriptor, 1, &(memHandle))) {
       const char* tname = QNN_TENSOR_GET_NAME(tensor);
-      rwkvmobile::LOGE("memRegister fail %s (ctx=%p fd=%d)", tname, m_contextHandle, memfd);
+      rwkvmobile::LOGE("memRegister fail %s (ctx=%p fd=%d)", tname, contextHandle, memfd);
       status = false;
     }
     QNN_TENSOR_SET_MEM_HANDLE(tensor, memHandle);

@@ -247,7 +247,7 @@ bool IOTensor::setupInputWithSharedTensors(
         size_t tensorDataSize = tensorsSize[wrapperTensorName];
         rwkvmobile::LOGD("IoTensor :: Create Buffer for Tensor %s Size: %zu", wrapperTensorName.c_str(), tensorDataSize);
         returnStatus =
-            m_bufferManager->allocateTensorBuffer(((*tensors) + tensorIdx), tensorDataSize);
+            m_bufferManager->allocateTensorBufferForContext(((*tensors) + tensorIdx), tensorDataSize, contextHandle);
       } else {
         std::string inputName = QNN_TENSOR_GET_NAME(sharedTensorMap[wrapperTensorName]);
         rwkvmobile::LOGD("IoTensor :: Reuse Buffer %s for Tensor %s",
@@ -308,7 +308,7 @@ bool IOTensor::setupOutputWithSharedTensors(
         size_t tensorDataSize = tensorsSize[wrapperTensorName];
         rwkvmobile::LOGD("IoTensor :: Create Buffer for Tensor %s Size: %zu", wrapperTensorName.c_str(), tensorDataSize);
         returnStatus =
-            m_bufferManager->allocateTensorBuffer(((*tensors) + tensorIdx), tensorDataSize);
+            m_bufferManager->allocateTensorBufferForContext(((*tensors) + tensorIdx), tensorDataSize, contextHandle);
       } else {
         std::string outputName = QNN_TENSOR_GET_NAME(sharedTensorMap[wrapperTensorName]);
         rwkvmobile::LOGD("IoTensor :: Reuse Buffer %s for Tensor %s",

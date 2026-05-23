@@ -5,6 +5,10 @@
 #include <any>
 #include <cstdlib>
 #include <mutex>
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <cstdlib>
 
 #include "qnn_backend.h"
 #include "commondef.h"
@@ -19,6 +23,7 @@
 #include <HTP/QnnHtpDevice.h>
 #include <HTP/QnnHtpGraph.h>
 #include <HTP/QnnHtpContext.h>
+#include <HTP/QnnHtpMem.h>
 #include <QnnContext.h>
 #include <QnnProfile.h>
 #include <QnnSdkBuildId.h>
@@ -45,6 +50,205 @@ using namespace qnn::tools;
 
 // global qnn backend context pointer
 std::shared_ptr<qnn_backend_context> g_qnn_backend_context_ptr = nullptr;
+
+static std::atomic<int> qnnLogLevelCache{-1};
+static std::atomic<int> forceCrossContextCopyCache{-1};
+static std::atomic<int> reRegisterCarryOutputsCache{-1};
+static std::atomic<int> qnnProfileEnabledCache{-1};
+
+static std::string normalizeEnvValue(const char* value) {
+    if (value == nullptr) {
+        return "";
+    }
+
+    std::string normalized(value);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return normalized;
+}
+
+static bool envValueIsTruthy(const char* value) {
+    const auto normalized = normalizeEnvValue(value);
+    return !normalized.empty() &&
+           normalized != "0" &&
+           normalized != "false" &&
+           normalized != "off" &&
+           normalized != "no";
+}
+
+static const char* qnnLogLevelToString(QnnLog_Level_t level) {
+    switch (level) {
+        case QNN_LOG_LEVEL_ERROR:
+            return "error";
+        case QNN_LOG_LEVEL_WARN:
+            return "warn";
+        case QNN_LOG_LEVEL_INFO:
+            return "info";
+        case QNN_LOG_LEVEL_VERBOSE:
+            return "verbose";
+        case QNN_LOG_LEVEL_DEBUG:
+            return "debug";
+        default:
+            return "unknown";
+    }
+}
+
+static QnnLog_Level_t parseQnnLogLevel(const char* value, bool& parsed) {
+    const auto normalized = normalizeEnvValue(value);
+    parsed = true;
+
+    if (normalized == "error" || normalized == "1") {
+        return QNN_LOG_LEVEL_ERROR;
+    }
+    if (normalized == "warn" || normalized == "warning" || normalized == "2") {
+        return QNN_LOG_LEVEL_WARN;
+    }
+    if (normalized == "info" || normalized == "3") {
+        return QNN_LOG_LEVEL_INFO;
+    }
+    if (normalized == "verbose" || normalized == "4" || normalized == "true" || normalized == "on" ||
+        normalized == "yes") {
+        return QNN_LOG_LEVEL_VERBOSE;
+    }
+    if (normalized == "debug" || normalized == "5") {
+        return QNN_LOG_LEVEL_DEBUG;
+    }
+
+    parsed = false;
+    return DEFAULT_QNN_LOGLEVEL;
+}
+
+static QnnLog_Level_t getQnnLogLevel() {
+    int cached = qnnLogLevelCache.load(std::memory_order_acquire);
+    if (cached >= 0) {
+        return static_cast<QnnLog_Level_t>(cached);
+    }
+
+    bool overridden = false;
+    bool invalidOverride = false;
+    QnnLog_Level_t logLevel = DEFAULT_QNN_LOGLEVEL;
+
+    if (const char* logLevelEnv = std::getenv("RWKV_QNN_LOG_LEVEL")) {
+        bool parsed = false;
+        const auto parsedLevel = parseQnnLogLevel(logLevelEnv, parsed);
+        if (parsed) {
+            logLevel = parsedLevel;
+            overridden = true;
+        } else {
+            invalidOverride = true;
+        }
+    } else if (envValueIsTruthy(std::getenv("RWKV_QNN_VERBOSE_LOG"))) {
+        logLevel = QNN_LOG_LEVEL_VERBOSE;
+        overridden = true;
+    }
+
+    const int resolvedLevel = static_cast<int>(logLevel);
+    int expected = -1;
+    if (qnnLogLevelCache.compare_exchange_strong(
+            expected, resolvedLevel, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        if (invalidOverride) {
+            LOGW("Ignoring invalid RWKV_QNN_LOG_LEVEL; using QNN log level %s",
+                 qnnLogLevelToString(logLevel));
+        } else if (overridden) {
+            LOGI("QNN log level set to %s", qnnLogLevelToString(logLevel));
+        }
+        return logLevel;
+    }
+
+    return static_cast<QnnLog_Level_t>(qnnLogLevelCache.load(std::memory_order_acquire));
+}
+
+static bool forceCrossContextCopy() {
+    int cached = forceCrossContextCopyCache.load(std::memory_order_acquire);
+    if (cached >= 0) {
+        return cached == 1;
+    }
+
+    const bool enabled = envValueIsTruthy(std::getenv("RWKV_QNN_FORCE_CROSS_CONTEXT_COPY"));
+    int expected = -1;
+    if (forceCrossContextCopyCache.compare_exchange_strong(
+            expected, enabled ? 1 : 0, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        if (enabled) {
+            LOGI("QNN cross-context carry tensors will be copied through CPU buffers");
+        }
+        return enabled;
+    }
+
+    return forceCrossContextCopyCache.load(std::memory_order_acquire) == 1;
+}
+
+static bool reRegisterCarryOutputs() {
+    int cached = reRegisterCarryOutputsCache.load(std::memory_order_acquire);
+    if (cached >= 0) {
+        return cached == 1;
+    }
+
+    const char* overrideValue = std::getenv("RWKV_QNN_REREGISTER_CARRY_OUTPUTS");
+    const bool enabled = overrideValue == nullptr || envValueIsTruthy(overrideValue);
+    int expected = -1;
+    if (reRegisterCarryOutputsCache.compare_exchange_strong(
+            expected, enabled ? 1 : 0, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        if (enabled) {
+            LOGI("QNN cross-context carry outputs will be re-registered with each graph context");
+        } else {
+            LOGW("QNN cross-context carry output re-registration is disabled");
+        }
+        return enabled;
+    }
+
+    return reRegisterCarryOutputsCache.load(std::memory_order_acquire) == 1;
+}
+
+static bool qnnProfileEnabled() {
+    int cached = qnnProfileEnabledCache.load(std::memory_order_acquire);
+    if (cached >= 0) {
+        return cached == 1;
+    }
+
+    const bool enabled = envValueIsTruthy(std::getenv("RWKV_QNN_PROFILE")) ||
+                         envValueIsTruthy(std::getenv("RWKV_QNN_ENABLE_PROFILE")) ||
+                         envValueIsTruthy(std::getenv("RWKV_QNN_PROFILE_EXEC"));
+    int expected = -1;
+    if (qnnProfileEnabledCache.compare_exchange_strong(
+            expected, enabled ? 1 : 0, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        if (enabled) {
+            LOGI("QNN execute profiling is enabled");
+        }
+        return enabled;
+    }
+
+    return qnnProfileEnabledCache.load(std::memory_order_acquire) == 1;
+}
+
+static std::string sanitizeFilenameComponent(const std::string& value) {
+    std::string sanitized;
+    sanitized.reserve(value.size());
+    for (char c : value) {
+        const auto uc = static_cast<unsigned char>(c);
+        if (std::isalnum(uc) || c == '.' || c == '_' || c == '-') {
+            sanitized.push_back(c);
+        } else {
+            sanitized.push_back('_');
+        }
+    }
+    return sanitized.empty() ? "unnamed" : sanitized;
+}
+
+static bool isCrossContextCarryTensor(
+    const std::string& tensorName,
+    Qnn_Tensor_t* sourceTensor,
+    Qnn_Tensor_t* vFirstTensorRef,
+    Qnn_Tensor_t* hiddenStateTensorRef) {
+    const bool isVFirstCarry = sourceTensor != nullptr &&
+                               sourceTensor == vFirstTensorRef &&
+                               tensorName.find("v_first") != std::string::npos;
+    const bool isActivationCarry = sourceTensor != nullptr &&
+                                   sourceTensor == hiddenStateTensorRef &&
+                                   (tensorName.rfind("in_chunk", 0) == 0 ||
+                                    tensorName.rfind("in_prefill_chunk", 0) == 0);
+    return isVFirstCarry || isActivationCarry;
+}
 
 static void logCallback(const char* fmt,
     QnnLog_Level_t level,
@@ -140,6 +344,16 @@ int qnn_backend::initialize_batch_decode_graphs(
         if (result != RWKV_SUCCESS) {
             return result;
         }
+        result = re_register_cross_context_shared_outputs(
+            graph_id,
+            graphInfo,
+            tensorNameToTensorPointer[graph_id],
+            qnnContextHandles[graph_id],
+            vFirstTensor,
+            hiddenStateTensor);
+        if (result != RWKV_SUCCESS) {
+            return result;
+        }
 
         // input sizes
         result = populate_tensor_name_to_size_map(graphInfo, tensorNameToSize[graph_id], true);
@@ -150,15 +364,46 @@ int qnn_backend::initialize_batch_decode_graphs(
         // shared inputs
         populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
 
+        auto inputSharedTensorMap = prepare_input_shared_tensor_map(
+            graph_id,
+            sharedTensorMap,
+            vFirstTensor,
+            hiddenStateTensor);
         if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsArr[graph_id], tensorNameToTensorPointer[graph_id], graphInfo,
-                                        tensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
+                                        tensorNameToSize[graph_id], qnnContextHandles[graph_id], inputSharedTensorMap)) {
             LOGE("Error in setting up Input Tensors for Batch%d Decode", batchSize);
             return RWKV_ERROR_IO;
+        }
+        if (forceCrossContextCopy()) {
+            result = register_forced_cross_context_input_copies(
+                graph_id,
+                sharedTensorMap,
+                tensorNameToTensorPointer[graph_id],
+                qnnContextHandles[graph_id],
+                vFirstTensor,
+                hiddenStateTensor);
+        } else {
+            result = re_register_cross_context_shared_inputs(
+                graph_id,
+                sharedTensorMap,
+                tensorNameToTensorPointer[graph_id],
+                qnnContextHandles[graph_id],
+                vFirstTensor,
+                hiddenStateTensor);
+        }
+        if (result != RWKV_SUCCESS) {
+            return result;
         }
 
         // deep embedding mapping
         map_deep_embedding_tensors(graphInfo, graph_id, tensorNameToTensorPointer[graph_id], 
                                    deepEmbeddingTensors, false);
+        refresh_carry_output_tensors_after_input_setup(
+            graphInfo,
+            graph_id,
+            graphsCount,
+            tensorNameToTensorPointer[graph_id],
+            false);
     }
 
     // find input tensor name
@@ -217,7 +462,7 @@ qnn_backend_context::qnn_backend_context(std::string qnnBackendPath) : qnnBacken
     }
 
     // initialize QNN logging
-    auto logLevel = DEFAULT_QNN_LOGLEVEL;
+    auto logLevel = getQnnLogLevel();
     if (QNN_SUCCESS !=
         qnnFunctionPointers.qnnInterface.logCreate(logCallback, logLevel, &qnnLogHandle)) {
         LOGW("Unable to initialize logging in the backend.");
@@ -915,6 +1160,9 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
             returnStatus = RWKV_ERROR_MODEL;
         }
         LOGI("qnnPrefillGraphsCount: %d, qnnEmbdGraphsCount: %d, qnnEmbdPrefillGraphsCount: %d", qnnPrefillGraphsCount, qnnEmbdGraphsCount, qnnEmbdPrefillGraphsCount);
+        if (supported_batch_sizes.empty() && (qnnEmbdGraphsCount > 0 || qnnPrefillGraphsCount > 0 || qnnEmbdPrefillGraphsCount > 0)) {
+            supported_batch_sizes.push_back(1);
+        }
         std::string debug_message = "supported_batch_sizes: ";
         std::sort(supported_batch_sizes.begin(), supported_batch_sizes.end());
         for (auto bsz : supported_batch_sizes) {
@@ -1024,7 +1272,7 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
                 &tmpGraphsCount,
                 false,
                 logCallback,
-                DEFAULT_QNN_LOGLEVEL)) {
+                getQnnLogLevel())) {
           LOGE("Failed in composeGraphs()");
           return RWKV_ERROR_MODEL;
         }
@@ -1291,13 +1539,14 @@ int qnn_backend::setup_output_tensors_for_graph(int graph_id, int total_graphs_c
     std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
     Qnn_Tensor_t* vFirstTensorToUse = isPrefill ? vFirstTensorPrefill : vFirstTensor;
     Qnn_Tensor_t* hiddenStateTensorToUse = isPrefill ? hiddenStateTensorPrefill : hiddenStateTensor;
+    const bool forceCarryCopy = forceCrossContextCopy();
 
     if ((logitsOutputTensor != nullptr && graph_id == total_graphs_count - 1) || (hiddenStateTensorToUse != nullptr && graph_id != total_graphs_count - 1)) {
         // tensors initialized previously; set up with shared tensors
         for (size_t i = 0; i < graphInfo.numOutputTensors; i++) {
             auto tensorName = std::string(QNN_TENSOR_GET_NAME(graphInfo.outputTensors[i]));
             if (tensorName.find("v_first") != std::string::npos) {
-                if (vFirstTensorToUse != nullptr) {
+                if (!forceCarryCopy && vFirstTensorToUse != nullptr) {
                     sharedTensorMap[tensorName] = vFirstTensorToUse;
                 }
             } else if (tensorName.find("state") != std::string::npos) {
@@ -1307,7 +1556,7 @@ int qnn_backend::setup_output_tensors_for_graph(int graph_id, int total_graphs_c
             } else if (tensorName.find("out") != std::string::npos) {
                 if (graph_id == total_graphs_count - 1) {
                     sharedTensorMap[tensorName] = logitsOutputTensor;
-                } else if (hiddenStateTensorToUse != nullptr) {
+                } else if (!forceCarryCopy && hiddenStateTensorToUse != nullptr) {
                     sharedTensorMap[tensorName] = hiddenStateTensorToUse;
                 }
             }
@@ -1319,12 +1568,6 @@ int qnn_backend::setup_output_tensors_for_graph(int graph_id, int total_graphs_c
             return RWKV_ERROR_IO;
         }
 
-        for (size_t i = 0; i < graphInfo.numOutputTensors; i++) {
-            auto tensorName = std::string(QNN_TENSOR_GET_NAME(graphInfo.outputTensors[i]));
-            if (tensorName.find("state") != std::string::npos && stateTensorsNameToTensorPointer.find(tensorName) == stateTensorsNameToTensorPointer.end()) {
-                stateTensorsNameToTensorPointer[tensorName] = (Qnn_Tensor_t*)tensorNameToTensorPointer[tensorName];
-            }
-        }
     } else {
         // allocate output tensors
         if (!qnnIOTensorUtils->setupOutputTensors(&outputTensors[graph_id], tensorNameToTensorPointer, graphInfo,
@@ -1332,32 +1575,79 @@ int qnn_backend::setup_output_tensors_for_graph(int graph_id, int total_graphs_c
             LOGE("Error in setting up Output Tensors for graph %d", graph_id);
             return RWKV_ERROR_IO;
         }
+    }
 
-        for (size_t i = 0; i < graphInfo.numOutputTensors; i++) {
-            auto tensorName = std::string(QNN_TENSOR_GET_NAME(graphInfo.outputTensors[i]));
-            if (tensorName.find("v_first") != std::string::npos) {
-                if (isPrefill && vFirstTensorPrefill == nullptr) {
-                    vFirstTensorPrefill = (Qnn_Tensor_t*)tensorNameToTensorPointer[tensorName];
-                } else if (!isPrefill && vFirstTensor == nullptr) {
-                    vFirstTensor = (Qnn_Tensor_t*)tensorNameToTensorPointer[tensorName];
+    for (size_t i = 0; i < graphInfo.numOutputTensors; i++) {
+        auto tensorName = std::string(QNN_TENSOR_GET_NAME(graphInfo.outputTensors[i]));
+        auto tensorIt = tensorNameToTensorPointer.find(tensorName);
+        if (tensorIt == tensorNameToTensorPointer.end() || tensorIt->second == nullptr) {
+            continue;
+        }
+        Qnn_Tensor_t* tensor = (Qnn_Tensor_t*)tensorIt->second;
+        if (tensorName.find("v_first") != std::string::npos) {
+            if (isPrefill) {
+                if (vFirstTensorPrefill == nullptr) {
+                    vFirstTensorPrefill = tensor;
                 }
-            } else if (tensorName.find("state") != std::string::npos) {
-                stateTensorsNameToTensorPointer[tensorName] = (Qnn_Tensor_t*)tensorNameToTensorPointer[tensorName];
-            } else if (tensorName.find("out") != std::string::npos) {
-                if (graph_id == total_graphs_count - 1) {
-                    logitsOutputTensor = (Qnn_Tensor_t*)tensorNameToTensorPointer[tensorName];
-                } else {
-                    if (isPrefill && hiddenStateTensorPrefill == nullptr) {
-                        hiddenStateTensorPrefill = (Qnn_Tensor_t*)tensorNameToTensorPointer[tensorName];
-                    } else if (!isPrefill && hiddenStateTensor == nullptr) {
-                        hiddenStateTensor = (Qnn_Tensor_t*)tensorNameToTensorPointer[tensorName];
-                    }
+            } else if (vFirstTensor == nullptr) {
+                vFirstTensor = tensor;
+            }
+        } else if (tensorName.find("state") != std::string::npos) {
+            if (stateTensorsNameToTensorPointer.find(tensorName) == stateTensorsNameToTensorPointer.end()) {
+                stateTensorsNameToTensorPointer[tensorName] = tensor;
+            }
+        } else if (tensorName.find("out") != std::string::npos) {
+            if (graph_id == total_graphs_count - 1) {
+                if (logitsOutputTensor == nullptr) {
+                    logitsOutputTensor = tensor;
                 }
+            } else if (isPrefill) {
+                if (hiddenStateTensorPrefill == nullptr) {
+                    hiddenStateTensorPrefill = tensor;
+                }
+            } else if (hiddenStateTensor == nullptr) {
+                hiddenStateTensor = tensor;
             }
         }
     }
 
     return RWKV_SUCCESS;
+}
+
+void qnn_backend::refresh_carry_output_tensors_after_input_setup(
+    const GraphInfo_t& graphInfo,
+    int graph_id,
+    int total_graphs_count,
+    std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
+    bool isPrefill) {
+    if (!forceCrossContextCopy()) {
+        return;
+    }
+
+    for (size_t i = 0; i < graphInfo.numOutputTensors; i++) {
+        auto tensorName = std::string(QNN_TENSOR_GET_NAME(graphInfo.outputTensors[i]));
+        auto tensorIt = tensorNameToTensorPointer.find(tensorName);
+        if (tensorIt == tensorNameToTensorPointer.end() || tensorIt->second == nullptr) {
+            continue;
+        }
+
+        Qnn_Tensor_t* tensor = (Qnn_Tensor_t*)tensorIt->second;
+        if (tensorName.find("v_first") != std::string::npos) {
+            if (isPrefill) {
+                vFirstTensorPrefill = tensor;
+            } else {
+                vFirstTensor = tensor;
+            }
+        } else if (tensorName.find("state") == std::string::npos &&
+                   tensorName.find("out") != std::string::npos &&
+                   graph_id != total_graphs_count - 1) {
+            if (isPrefill) {
+                hiddenStateTensorPrefill = tensor;
+            } else {
+                hiddenStateTensor = tensor;
+            }
+        }
+    }
 }
 
 void qnn_backend::populate_input_shared_tensor_map(const GraphInfo_t& graphInfo, int graph_id,
@@ -1382,6 +1672,276 @@ void qnn_backend::populate_input_shared_tensor_map(const GraphInfo_t& graphInfo,
             }
         }
     }
+}
+
+int qnn_backend::re_register_cross_context_shared_inputs(
+    int graph_id,
+    const std::unordered_map<std::string, Qnn_Tensor_t*>& sharedTensorMap,
+    std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
+    Qnn_ContextHandle_t contextHandle,
+    Qnn_Tensor_t* vFirstTensorRef,
+    Qnn_Tensor_t* hiddenStateTensorRef) {
+    if (graph_id == 0 || sharedTensorMap.empty()) {
+        return RWKV_SUCCESS;
+    }
+
+    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
+    if (qnn.memRegister == nullptr) {
+        LOGE("QNN memRegister is unavailable");
+        return RWKV_ERROR_BACKEND;
+    }
+
+    for (const auto& [tensorName, sourceTensor] : sharedTensorMap) {
+        if (!isCrossContextCarryTensor(tensorName, sourceTensor, vFirstTensorRef, hiddenStateTensorRef)) {
+            continue;
+        }
+
+        auto tensorIt = tensorNameToTensorPointer.find(tensorName);
+        if (tensorIt == tensorNameToTensorPointer.end() || tensorIt->second == nullptr) {
+            LOGE("Shared input tensor %s is missing after setupInputWithSharedTensors", tensorName.c_str());
+            return RWKV_ERROR_IO;
+        }
+
+        Qnn_Tensor_t* tensor = static_cast<Qnn_Tensor_t*>(tensorIt->second);
+        const int fd = qnnIOTensorUtils->getFd(tensor);
+        if (fd < 0) {
+            LOGE("Could not get fd for shared input tensor %s", tensorName.c_str());
+            return RWKV_ERROR_IO;
+        }
+
+        const size_t totalBufferSize = qnnIOTensorUtils->getTotalBufferSize(tensor);
+        const size_t offset = qnnIOTensorUtils->getOffset(tensor);
+
+        Qnn_MemHandle_t newHandle = nullptr;
+        for (const auto& registered : reRegisteredSharedInputMemHandles) {
+            if (registered.contextHandle == contextHandle &&
+                registered.fd == fd &&
+                registered.offset == offset &&
+                registered.totalBufferSize == totalBufferSize) {
+                newHandle = registered.memHandle;
+                break;
+            }
+        }
+
+        if (newHandle == nullptr) {
+            QnnMemHtp_Descriptor_t htpMemDesc = {QNN_HTP_MEM_SHARED_BUFFER, totalBufferSize, {0}};
+            htpMemDesc.sharedBufferConfig.fd = fd;
+            htpMemDesc.sharedBufferConfig.offset = static_cast<uint32_t>(offset);
+
+            Qnn_MemDescriptor_t memDesc = {
+                {QNN_TENSOR_GET_RANK(*tensor), QNN_TENSOR_GET_DIMENSIONS(*tensor), nullptr},
+                QNN_TENSOR_GET_DATA_TYPE(*tensor),
+                QNN_MEM_TYPE_CUSTOM,
+                {{-1}}};
+            memDesc.customInfo = &htpMemDesc;
+
+            if (QNN_SUCCESS != qnn.memRegister(contextHandle, &memDesc, 1, &newHandle)) {
+                LOGE("Failed to re-register shared input tensor %s for graph %d", tensorName.c_str(), graph_id);
+                return RWKV_ERROR_IO;
+            }
+
+            reRegisteredSharedInputMemHandles.push_back(
+                {contextHandle, fd, offset, totalBufferSize, newHandle});
+            LOGI("Re-registered shared input tensor %s for graph %d with its context", tensorName.c_str(), graph_id);
+        }
+
+        QNN_TENSOR_SET_MEM_TYPE(*tensor, QNN_TENSORMEMTYPE_MEMHANDLE);
+        QNN_TENSOR_SET_MEM_HANDLE(*tensor, newHandle);
+    }
+
+    return RWKV_SUCCESS;
+}
+
+int qnn_backend::re_register_cross_context_shared_outputs(
+    int graph_id,
+    const GraphInfo_t& graphInfo,
+    std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
+    Qnn_ContextHandle_t contextHandle,
+    Qnn_Tensor_t* vFirstTensorRef,
+    Qnn_Tensor_t* hiddenStateTensorRef) {
+    if (!reRegisterCarryOutputs() || forceCrossContextCopy() || graph_id == 0) {
+        return RWKV_SUCCESS;
+    }
+
+    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
+    if (qnn.memRegister == nullptr) {
+        LOGE("QNN memRegister is unavailable");
+        return RWKV_ERROR_BACKEND;
+    }
+
+    for (size_t tensorIdx = 0; tensorIdx < graphInfo.numOutputTensors; tensorIdx++) {
+        const std::string tensorName = QNN_TENSOR_GET_NAME(graphInfo.outputTensors[tensorIdx]);
+        auto tensorIt = tensorNameToTensorPointer.find(tensorName);
+        if (tensorIt == tensorNameToTensorPointer.end() || tensorIt->second == nullptr) {
+            continue;
+        }
+
+        Qnn_Tensor_t* tensor = static_cast<Qnn_Tensor_t*>(tensorIt->second);
+        const bool isVFirstCarry = vFirstTensorRef != nullptr &&
+                                   QNN_TENSOR_GET_MEM_HANDLE(*tensor) == QNN_TENSOR_GET_MEM_HANDLE(*vFirstTensorRef) &&
+                                   tensorName.find("v_first") != std::string::npos;
+        const bool isActivationCarry = hiddenStateTensorRef != nullptr &&
+                                       QNN_TENSOR_GET_MEM_HANDLE(*tensor) == QNN_TENSOR_GET_MEM_HANDLE(*hiddenStateTensorRef) &&
+                                       tensorName.find("out") != std::string::npos &&
+                                       tensorName.find("state") == std::string::npos;
+        if (!isVFirstCarry && !isActivationCarry) {
+            continue;
+        }
+
+        const int fd = qnnIOTensorUtils->getFd(tensor);
+        if (fd < 0) {
+            LOGE("Could not get fd for shared output tensor %s", tensorName.c_str());
+            return RWKV_ERROR_IO;
+        }
+
+        const size_t totalBufferSize = qnnIOTensorUtils->getTotalBufferSize(tensor);
+        const size_t offset = qnnIOTensorUtils->getOffset(tensor);
+
+        Qnn_MemHandle_t newHandle = nullptr;
+        for (const auto& registered : reRegisteredSharedInputMemHandles) {
+            if (registered.contextHandle == contextHandle &&
+                registered.fd == fd &&
+                registered.offset == offset &&
+                registered.totalBufferSize == totalBufferSize) {
+                newHandle = registered.memHandle;
+                break;
+            }
+        }
+
+        if (newHandle == nullptr) {
+            QnnMemHtp_Descriptor_t htpMemDesc = {QNN_HTP_MEM_SHARED_BUFFER, totalBufferSize, {0}};
+            htpMemDesc.sharedBufferConfig.fd = fd;
+            htpMemDesc.sharedBufferConfig.offset = static_cast<uint32_t>(offset);
+
+            Qnn_MemDescriptor_t memDesc = {
+                {QNN_TENSOR_GET_RANK(*tensor), QNN_TENSOR_GET_DIMENSIONS(*tensor), nullptr},
+                QNN_TENSOR_GET_DATA_TYPE(*tensor),
+                QNN_MEM_TYPE_CUSTOM,
+                {{-1}}};
+            memDesc.customInfo = &htpMemDesc;
+
+            if (QNN_SUCCESS != qnn.memRegister(contextHandle, &memDesc, 1, &newHandle)) {
+                LOGE("Failed to re-register shared output tensor %s for graph %d", tensorName.c_str(), graph_id);
+                return RWKV_ERROR_IO;
+            }
+
+            reRegisteredSharedInputMemHandles.push_back(
+                {contextHandle, fd, offset, totalBufferSize, newHandle});
+            LOGI("Re-registered shared output tensor %s for graph %d with its context",
+                 tensorName.c_str(),
+                 graph_id);
+        }
+
+        QNN_TENSOR_SET_MEM_TYPE(*tensor, QNN_TENSORMEMTYPE_MEMHANDLE);
+        QNN_TENSOR_SET_MEM_HANDLE(*tensor, newHandle);
+    }
+
+    return RWKV_SUCCESS;
+}
+
+std::unordered_map<std::string, Qnn_Tensor_t*> qnn_backend::prepare_input_shared_tensor_map(
+    int graph_id,
+    const std::unordered_map<std::string, Qnn_Tensor_t*>& sharedTensorMap,
+    Qnn_Tensor_t* vFirstTensorRef,
+    Qnn_Tensor_t* hiddenStateTensorRef) {
+    auto inputSharedTensorMap = sharedTensorMap;
+    if (!forceCrossContextCopy() || graph_id == 0) {
+        return inputSharedTensorMap;
+    }
+
+    for (auto it = inputSharedTensorMap.begin(); it != inputSharedTensorMap.end();) {
+        if (isCrossContextCarryTensor(it->first, it->second, vFirstTensorRef, hiddenStateTensorRef)) {
+            it = inputSharedTensorMap.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return inputSharedTensorMap;
+}
+
+int qnn_backend::register_forced_cross_context_input_copies(
+    int graph_id,
+    const std::unordered_map<std::string, Qnn_Tensor_t*>& sharedTensorMap,
+    std::unordered_map<std::string, void*>& tensorNameToTensorPointer,
+    Qnn_ContextHandle_t contextHandle,
+    Qnn_Tensor_t* vFirstTensorRef,
+    Qnn_Tensor_t* hiddenStateTensorRef) {
+    (void)contextHandle;
+    if (!forceCrossContextCopy() || graph_id == 0) {
+        return RWKV_SUCCESS;
+    }
+
+    for (const auto& [tensorName, sourceTensor] : sharedTensorMap) {
+        if (!isCrossContextCarryTensor(tensorName, sourceTensor, vFirstTensorRef, hiddenStateTensorRef)) {
+            continue;
+        }
+
+        auto tensorIt = tensorNameToTensorPointer.find(tensorName);
+        if (tensorIt == tensorNameToTensorPointer.end() || tensorIt->second == nullptr) {
+            LOGE("Forced copy input tensor %s is missing after setupInputWithSharedTensors", tensorName.c_str());
+            return RWKV_ERROR_IO;
+        }
+
+        Qnn_Tensor_t* destinationTensor = static_cast<Qnn_Tensor_t*>(tensorIt->second);
+        void* destinationBuffer = qnnIOTensorUtils->getBuffer(destinationTensor);
+        if (destinationBuffer == nullptr) {
+            LOGE("Forced copy destination tensor %s has no host buffer", tensorName.c_str());
+            return RWKV_ERROR_IO;
+        }
+
+        const size_t destinationSize = qnnIOTensorUtils->getBufferSize(destinationTensor);
+        forcedCrossContextInputCopies[destinationTensor] = {
+            sourceTensor,
+            destinationBuffer,
+            destinationSize,
+            tensorName};
+        LOGI("Will copy cross-context input tensor %s for graph %d through CPU buffer",
+             tensorName.c_str(),
+             graph_id);
+    }
+
+    return RWKV_SUCCESS;
+}
+
+int qnn_backend::copy_forced_cross_context_inputs(const GraphInfo_t& graphInfo, Qnn_Tensor_t* inputTensors) {
+    if (forcedCrossContextInputCopies.empty()) {
+        return RWKV_SUCCESS;
+    }
+
+    for (size_t tensorIdx = 0; tensorIdx < graphInfo.numInputTensors; tensorIdx++) {
+        Qnn_Tensor_t* destinationTensor = inputTensors + tensorIdx;
+        auto copyIt = forcedCrossContextInputCopies.find(destinationTensor);
+        if (copyIt == forcedCrossContextInputCopies.end()) {
+            continue;
+        }
+
+        Qnn_Tensor_t* sourceTensor = copyIt->second.source;
+        if (sourceTensor == nullptr) {
+            LOGE("Forced copy source tensor for %s is null", copyIt->second.tensorName.c_str());
+            return RWKV_ERROR_IO;
+        }
+
+        void* sourceBuffer = qnnIOTensorUtils->getBuffer(sourceTensor);
+        void* destinationBuffer = copyIt->second.destinationBuffer;
+        if (sourceBuffer == nullptr || destinationBuffer == nullptr) {
+            LOGE("Forced copy buffer lookup failed for %s", copyIt->second.tensorName.c_str());
+            return RWKV_ERROR_IO;
+        }
+
+        const size_t sourceSize = qnnIOTensorUtils->getBufferSize(sourceTensor);
+        const size_t destinationSize = copyIt->second.destinationSize;
+        if (sourceSize == 0 || destinationSize == 0) {
+            LOGE("Forced copy tensor %s has invalid size src=%zu dst=%zu",
+                 copyIt->second.tensorName.c_str(),
+                 sourceSize,
+                 destinationSize);
+            return RWKV_ERROR_IO;
+        }
+
+        memcpy(destinationBuffer, sourceBuffer, std::min(sourceSize, destinationSize));
+    }
+
+    return RWKV_SUCCESS;
 }
 
 void qnn_backend::map_deep_embedding_tensors(const GraphInfo_t& graphInfo, int graph_id,
@@ -1563,6 +2123,16 @@ int qnn_backend::qnn_initialize_tensors() {
                 if (result != RWKV_SUCCESS) {
                     return result;
                 }
+                result = re_register_cross_context_shared_outputs(
+                    graph_id,
+                    graphInfo,
+                    embdGraphsTensorNameToTensorPointer[graph_id],
+                    qnnContextHandles[graph_id],
+                    vFirstTensor,
+                    hiddenStateTensor);
+                if (result != RWKV_SUCCESS) {
+                    return result;
+                }
 
                 // Populate input tensor name to size map for embedding graphs
                 result = populate_tensor_name_to_size_map(graphInfo, embdGraphsTensorNameToSize[graph_id], true);
@@ -1573,15 +2143,46 @@ int qnn_backend::qnn_initialize_tensors() {
                 // Populate input shared tensor map using helper function
                 populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensor, hiddenStateTensor, false);
 
+                auto inputSharedTensorMap = prepare_input_shared_tensor_map(
+                    graph_id,
+                    sharedTensorMap,
+                    vFirstTensor,
+                    hiddenStateTensor);
                 if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsEmbd[graph_id], embdGraphsTensorNameToTensorPointer[graph_id], graphInfo,
-                                                embdGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
+                                                embdGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], inputSharedTensorMap)) {
                     LOGE("Error in setting up Input Tensors");
                     return RWKV_ERROR_IO;
+                }
+                if (forceCrossContextCopy()) {
+                    result = register_forced_cross_context_input_copies(
+                        graph_id,
+                        sharedTensorMap,
+                        embdGraphsTensorNameToTensorPointer[graph_id],
+                        qnnContextHandles[graph_id],
+                        vFirstTensor,
+                        hiddenStateTensor);
+                } else {
+                    result = re_register_cross_context_shared_inputs(
+                        graph_id,
+                        sharedTensorMap,
+                        embdGraphsTensorNameToTensorPointer[graph_id],
+                        qnnContextHandles[graph_id],
+                        vFirstTensor,
+                        hiddenStateTensor);
+                }
+                if (result != RWKV_SUCCESS) {
+                    return result;
                 }
 
                 // Map deep embedding tensors using helper function
                 map_deep_embedding_tensors(graphInfo, graph_id, embdGraphsTensorNameToTensorPointer[graph_id], 
                                          deepEmbeddingTensors, false);
+                refresh_carry_output_tensors_after_input_setup(
+                    graphInfo,
+                    graph_id,
+                    qnnEmbdGraphsCount,
+                    embdGraphsTensorNameToTensorPointer[graph_id],
+                    false);
             }
 
             if (embdGraphsTensorNameToTensorPointer[0].find("in_embedding") != embdGraphsTensorNameToTensorPointer[0].end()) {
@@ -1595,6 +2196,7 @@ int qnn_backend::qnn_initialize_tensors() {
             for (int graph_id = 0; graph_id < qnnEmbdPrefillGraphsCount; graph_id++) {
                 std::unordered_map<std::string, Qnn_Tensor_t*> sharedTensorMap;
                 auto graphInfo     = (*qnnEmbdPrefillGraphsInfo)[graph_id];
+                const bool forceCarryCopy = forceCrossContextCopy();
                 LOGI("Graph %d : %s", graph_id, graphInfo.graphName);
 
                 // Populate output tensor name to size map for embedding prefill graphs
@@ -1607,14 +2209,14 @@ int qnn_backend::qnn_initialize_tensors() {
                 for (size_t i = 0; i < graphInfo.numOutputTensors; i++) {
                     auto tensorName = std::string(QNN_TENSOR_GET_NAME(graphInfo.outputTensors[i]));
 
-                    if (tensorName.find("v_first") != std::string::npos && vFirstTensorPrefill != nullptr) {
+                    if (tensorName.find("v_first") != std::string::npos && !forceCarryCopy && vFirstTensorPrefill != nullptr) {
                         sharedTensorMap[tensorName] = vFirstTensorPrefill;
                     } else if (tensorName.find("state") != std::string::npos) {
                         sharedTensorMap[tensorName] = (Qnn_Tensor_t*)stateTensorsNameToTensorPointer[tensorName];
                     } else if (tensorName.find("out") != std::string::npos) {
                         if (graph_id == qnnEmbdPrefillGraphsCount - 1) {
                             sharedTensorMap[tensorName] = logitsOutputTensor;
-                        } else if (hiddenStateTensorPrefill != nullptr) {
+                        } else if (!forceCarryCopy && hiddenStateTensorPrefill != nullptr) {
                             sharedTensorMap[tensorName] = hiddenStateTensorPrefill;
                         }
                     }
@@ -1624,6 +2226,16 @@ int qnn_backend::qnn_initialize_tensors() {
                         embdPrefillGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
                     LOGE("Error in setting up Output Tensors");
                     return RWKV_ERROR_IO;
+                }
+                result = re_register_cross_context_shared_outputs(
+                    graph_id,
+                    graphInfo,
+                    embdPrefillGraphsTensorNameToTensorPointer[graph_id],
+                    qnnContextHandles[graph_id],
+                    vFirstTensorPrefill,
+                    hiddenStateTensorPrefill);
+                if (result != RWKV_SUCCESS) {
+                    return result;
                 }
 
                 // Handle tensor assignments for embedding prefill graphs
@@ -1647,15 +2259,46 @@ int qnn_backend::qnn_initialize_tensors() {
                 // Populate input shared tensor map using helper function
                 populate_input_shared_tensor_map(graphInfo, graph_id, sharedTensorMap, vFirstTensorPrefill, hiddenStateTensorPrefill, true);
 
+                auto inputSharedTensorMap = prepare_input_shared_tensor_map(
+                    graph_id,
+                    sharedTensorMap,
+                    vFirstTensorPrefill,
+                    hiddenStateTensorPrefill);
                 if (!qnnIOTensorUtils->setupInputWithSharedTensors(&inputTensorsEmbdPrefill[graph_id], embdPrefillGraphsTensorNameToTensorPointer[graph_id], graphInfo,
-                                                embdPrefillGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], sharedTensorMap)) {
+                                                embdPrefillGraphsTensorNameToSize[graph_id], qnnContextHandles[graph_id], inputSharedTensorMap)) {
                     LOGE("Error in setting up Input Tensors");
                     return RWKV_ERROR_IO;
+                }
+                if (forceCrossContextCopy()) {
+                    result = register_forced_cross_context_input_copies(
+                        graph_id,
+                        sharedTensorMap,
+                        embdPrefillGraphsTensorNameToTensorPointer[graph_id],
+                        qnnContextHandles[graph_id],
+                        vFirstTensorPrefill,
+                        hiddenStateTensorPrefill);
+                } else {
+                    result = re_register_cross_context_shared_inputs(
+                        graph_id,
+                        sharedTensorMap,
+                        embdPrefillGraphsTensorNameToTensorPointer[graph_id],
+                        qnnContextHandles[graph_id],
+                        vFirstTensorPrefill,
+                        hiddenStateTensorPrefill);
+                }
+                if (result != RWKV_SUCCESS) {
+                    return result;
                 }
 
                 // Map deep embedding tensors using helper function
                 map_deep_embedding_tensors(graphInfo, graph_id, embdPrefillGraphsTensorNameToTensorPointer[graph_id], 
                                          deepEmbeddingPrefillTensors, true);
+                refresh_carry_output_tensors_after_input_setup(
+                    graphInfo,
+                    graph_id,
+                    qnnEmbdPrefillGraphsCount,
+                    embdPrefillGraphsTensorNameToTensorPointer[graph_id],
+                    true);
             }
 
             if (embdPrefillGraphsTensorNameToTensorPointer[0].find("in_embedding_prefill") != embdPrefillGraphsTensorNameToTensorPointer[0].end()) {
@@ -1693,7 +2336,13 @@ int qnn_backend::copy_float_to_qnn_tensor(Qnn_Tensor_t *qnn_tensor, const float 
         return RWKV_ERROR_IO;
     }
 
-    void *qnn_buffer = qnnIOTensorUtils->getBuffer(qnn_tensor);
+    void *qnn_buffer = nullptr;
+    try {
+        qnn_buffer = qnnIOTensorUtils->getBuffer(qnn_tensor);
+    } catch (const std::exception& e) {
+        LOGE("%s: Failed to get buffer for tensor %s: %s", __func__, QNN_TENSOR_GET_NAME(qnn_tensor), e.what());
+        return RWKV_ERROR_IO;
+    }
     if (QNN_TENSOR_GET_DATA_TYPE(qnn_tensor) == QNN_DATATYPE_FLOAT_32) {
         memcpy(qnn_buffer, buffer, element_count * sizeof(float));
     } else if (QNN_TENSOR_GET_DATA_TYPE(qnn_tensor) == QNN_DATATYPE_FLOAT_16) {
@@ -1726,7 +2375,13 @@ int qnn_backend::copy_qnn_tensor_to_float(Qnn_Tensor_t *qnn_tensor, float *buffe
         return RWKV_ERROR_IO;
     }
 
-    void *qnn_buffer = qnnIOTensorUtils->getBuffer(qnn_tensor);
+    void *qnn_buffer = nullptr;
+    try {
+        qnn_buffer = qnnIOTensorUtils->getBuffer(qnn_tensor);
+    } catch (const std::exception& e) {
+        LOGE("%s: Failed to get buffer for tensor %s: %s", __func__, QNN_TENSOR_GET_NAME(qnn_tensor), e.what());
+        return RWKV_ERROR_IO;
+    }
     if (qnn_buffer == nullptr) {
         LOGE("%s: Failed to get buffer for tensor %s", __func__, QNN_TENSOR_GET_NAME(qnn_tensor));
         return RWKV_ERROR_IO;
@@ -1751,121 +2406,192 @@ int qnn_backend::copy_qnn_tensor_to_float(Qnn_Tensor_t *qnn_tensor, float *buffe
     return RWKV_SUCCESS;
 }
 
-bool qnn_backend::should_dump_execute_profile() const {
-    static std::atomic<int> cached{-1};
-    int value = cached.load(std::memory_order_relaxed);
-    if (value == -1) {
-        const char* env = std::getenv("RWKV_QNN_PROFILE_EXEC");
-        value = (env != nullptr && std::string(env) == "1") ? 1 : 0;
-        cached.store(value, std::memory_order_relaxed);
-    }
-    return value == 1;
-}
-
-int qnn_backend::create_execute_profile_handle(Qnn_ProfileHandle_t* profileHandle) const {
-    if (profileHandle == nullptr) {
-        return RWKV_ERROR_INVALID_PARAMETERS;
-    }
-    *profileHandle = nullptr;
-
-    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
-    if (qnn.profileCreate == nullptr || qnn.profileSetConfig == nullptr) {
-        return RWKV_ERROR_UNSUPPORTED;
+int qnn_backend::maybe_dump_debug_output_tensors(const GraphInfo_t& graphInfo, int graph_id, Qnn_Tensor_t* outputTensors) {
+    const char* dumpDirEnv = std::getenv("RWKV_QNN_DUMP_TENSORS_DIR");
+    if (dumpDirEnv == nullptr || dumpDirEnv[0] == '\0' || outputTensors == nullptr) {
+        return RWKV_SUCCESS;
     }
 
-    if (QNN_SUCCESS != qnn.profileCreate(
-            g_qnn_backend_context_ptr->qnnBackendHandle,
-            QNN_PROFILE_LEVEL_DETAILED,
-            profileHandle)) {
-        return RWKV_ERROR_BACKEND | RWKV_ERROR_INIT;
+    const std::filesystem::path dumpDir(dumpDirEnv);
+    std::error_code ec;
+    std::filesystem::create_directories(dumpDir, ec);
+    if (ec) {
+        LOGE("Failed to create RWKV_QNN_DUMP_TENSORS_DIR %s: %s", dumpDirEnv, ec.message().c_str());
+        return RWKV_ERROR_IO;
     }
 
-    QnnProfile_Config_t profileConfig = QNN_PROFILE_CONFIG_INIT;
-    profileConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
-    const QnnProfile_Config_t* profileConfigs[] = {&profileConfig, nullptr};
-    if (QNN_SUCCESS != qnn.profileSetConfig(*profileHandle, profileConfigs)) {
-        qnn.profileFree(*profileHandle);
-        *profileHandle = nullptr;
-        return RWKV_ERROR_BACKEND | RWKV_ERROR_INIT;
+    const std::string graphName = graphInfo.graphName != nullptr ? graphInfo.graphName : ("graph" + std::to_string(graph_id));
+    const bool dumpStates = envValueIsTruthy(std::getenv("RWKV_QNN_DUMP_STATE_TENSORS"));
+    const bool dumpAllOutputs = envValueIsTruthy(std::getenv("RWKV_QNN_DUMP_ALL_OUTPUT_TENSORS"));
+    for (size_t tensorIdx = 0; tensorIdx < graphInfo.numOutputTensors; tensorIdx++) {
+        Qnn_Tensor_t* tensor = outputTensors + tensorIdx;
+        const char* rawTensorName = QNN_TENSOR_GET_NAME(*tensor);
+        std::string tensorName = rawTensorName != nullptr ? std::string(rawTensorName) : ("output" + std::to_string(tensorIdx));
+
+        const bool isStateTensor = tensorName.find("state") != std::string::npos;
+        if (!dumpAllOutputs) {
+            if (isStateTensor && !dumpStates) {
+                continue;
+            }
+            if (!isStateTensor &&
+                tensorName.find("out") == std::string::npos &&
+                tensorName.find("v_first") == std::string::npos) {
+                continue;
+            }
+        }
+
+        std::vector<size_t> dims;
+        getTensorDims(dims, QNN_TENSOR_GET_DIMENSIONS(*tensor), QNN_TENSOR_GET_RANK(*tensor));
+        const size_t elementCount = datautil::calculateElementCount(dims);
+        if (elementCount == 0) {
+            continue;
+        }
+
+        std::vector<float> values(elementCount);
+        if (RWKV_SUCCESS != copy_qnn_tensor_to_float(tensor, values.data(), elementCount)) {
+            LOGE("Failed to dump tensor %s from graph %d", tensorName.c_str(), graph_id);
+            return RWKV_ERROR_IO;
+        }
+
+        const int dumpIndex = debug_dump_tensor_counter++;
+        const std::string baseName =
+            "exec" + std::to_string(dumpIndex) +
+            "_graph" + std::to_string(graph_id) +
+            "_" + sanitizeFilenameComponent(graphName) +
+            "_" + sanitizeFilenameComponent(tensorName);
+        const auto dataPath = dumpDir / (baseName + ".f32");
+        std::ofstream dataOut(dataPath, std::ios::binary);
+        if (!dataOut) {
+            LOGE("Failed to open tensor dump file %s", dataPath.string().c_str());
+            return RWKV_ERROR_IO;
+        }
+        dataOut.write(reinterpret_cast<const char*>(values.data()), static_cast<std::streamsize>(values.size() * sizeof(float)));
+        if (!dataOut) {
+            LOGE("Failed to write tensor dump file %s", dataPath.string().c_str());
+            return RWKV_ERROR_IO;
+        }
+
+        const auto metaPath = dumpDir / (baseName + ".txt");
+        std::ofstream metaOut(metaPath);
+        if (metaOut) {
+            const auto quantParams = QNN_TENSOR_GET_QUANT_PARAMS(*tensor);
+            metaOut << "graph_id=" << graph_id << "\n";
+            metaOut << "graph_name=" << graphName << "\n";
+            metaOut << "tensor_name=" << tensorName << "\n";
+            metaOut << "dtype=" << QNN_TENSOR_GET_DATA_TYPE(*tensor) << "\n";
+            metaOut << "quant_encoding_definition=" << quantParams.encodingDefinition << "\n";
+            metaOut << "quantization_encoding=" << quantParams.quantizationEncoding << "\n";
+            metaOut << "scale_offset_scale=" << quantParams.scaleOffsetEncoding.scale << "\n";
+            metaOut << "scale_offset_offset=" << quantParams.scaleOffsetEncoding.offset << "\n";
+            metaOut << "shape=";
+            for (size_t i = 0; i < dims.size(); i++) {
+                metaOut << (i == 0 ? "" : ",") << dims[i];
+            }
+            metaOut << "\n";
+            metaOut << "element_count=" << elementCount << "\n";
+        }
+        LOGI("Dumped QNN tensor %s from graph %d to %s", tensorName.c_str(), graph_id, dataPath.string().c_str());
     }
 
     return RWKV_SUCCESS;
 }
 
-const char* qnn_backend::profile_unit_to_string(QnnProfile_EventUnit_t unit) const {
-    switch (unit) {
-        case QNN_PROFILE_EVENTUNIT_MICROSEC:
-            return "us";
-        case QNN_PROFILE_EVENTUNIT_CYCLES:
-            return "cycles";
-        case QNN_PROFILE_EVENTUNIT_COUNT:
-            return "count";
-        case QNN_PROFILE_EVENTUNIT_OBJECT:
-            return "object";
-        default:
-            return "unknown";
+int qnn_backend::maybe_dump_debug_input_tensors(const GraphInfo_t& graphInfo, int graph_id, Qnn_Tensor_t* inputTensors) {
+    const char* dumpDirEnv = std::getenv("RWKV_QNN_DUMP_TENSORS_DIR");
+    if (dumpDirEnv == nullptr || dumpDirEnv[0] == '\0' || inputTensors == nullptr) {
+        return RWKV_SUCCESS;
     }
-}
-
-void qnn_backend::dump_profile_event_recursive(QnnProfile_EventId_t eventId, int depth) const {
-    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
-    QnnProfile_EventData_t eventData = QNN_PROFILE_EVENT_DATA_INIT;
-    if (QNN_SUCCESS != qnn.profileGetEventData(eventId, &eventData)) {
-        LOGW("[PROFILE] failed to query event data");
-        return;
+    const bool dumpAllInputs = envValueIsTruthy(std::getenv("RWKV_QNN_DUMP_ALL_INPUT_TENSORS"));
+    if (!dumpAllInputs && (graph_id != 0 || tokenInputTensorEmbd == nullptr)) {
+        return RWKV_SUCCESS;
     }
 
-    std::string indent(depth * 2, ' ');
-    LOGI("[PROFILE] %stype=%u unit=%s value=%llu id=%s",
-         indent.c_str(),
-         eventData.type,
-         profile_unit_to_string(eventData.unit),
-         static_cast<unsigned long long>(eventData.value),
-         eventData.identifier ? eventData.identifier : "<null>");
-
-    const QnnProfile_EventId_t* subEventIds = nullptr;
-    uint32_t numSubEvents = 0;
-    if (QNN_SUCCESS != qnn.profileGetSubEvents(eventId, &subEventIds, &numSubEvents) || subEventIds == nullptr) {
-        return;
+    const std::filesystem::path dumpDir(dumpDirEnv);
+    std::error_code ec;
+    std::filesystem::create_directories(dumpDir, ec);
+    if (ec) {
+        LOGE("Failed to create RWKV_QNN_DUMP_TENSORS_DIR %s: %s", dumpDirEnv, ec.message().c_str());
+        return RWKV_ERROR_IO;
     }
 
-    for (uint32_t i = 0; i < numSubEvents; ++i) {
-        dump_profile_event_recursive(subEventIds[i], depth + 1);
-    }
-}
+    const std::string graphName = graphInfo.graphName != nullptr ? graphInfo.graphName : ("graph" + std::to_string(graph_id));
+    const size_t tensorCount = dumpAllInputs ? graphInfo.numInputTensors : 1;
+    for (size_t tensorIdx = 0; tensorIdx < tensorCount; tensorIdx++) {
+        Qnn_Tensor_t* tensor = dumpAllInputs ? (inputTensors + tensorIdx) : tokenInputTensorEmbd;
+        const char* rawTensorName = QNN_TENSOR_GET_NAME(*tensor);
+        std::string tensorName = rawTensorName != nullptr ? std::string(rawTensorName) : ("input" + std::to_string(tensorIdx));
 
-void qnn_backend::dump_profile_events(Qnn_ProfileHandle_t profileHandle, const char* graphName) const {
-    if (profileHandle == nullptr) {
-        return;
-    }
+        std::vector<size_t> dims;
+        getTensorDims(dims, QNN_TENSOR_GET_DIMENSIONS(*tensor), QNN_TENSOR_GET_RANK(*tensor));
+        const size_t elementCount = datautil::calculateElementCount(dims);
+        if (elementCount == 0) {
+            continue;
+        }
 
-    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
-    if (qnn.profileGetEvents == nullptr || qnn.profileGetEventData == nullptr || qnn.profileGetSubEvents == nullptr) {
-        return;
-    }
+        std::vector<float> values(elementCount);
+        if (RWKV_SUCCESS != copy_qnn_tensor_to_float(tensor, values.data(), elementCount)) {
+            LOGE("Failed to dump input tensor %s from graph %d", tensorName.c_str(), graph_id);
+            if (dumpAllInputs) {
+                continue;
+            }
+            return RWKV_ERROR_IO;
+        }
 
-    const QnnProfile_EventId_t* eventIds = nullptr;
-    uint32_t numEvents = 0;
-    if (QNN_SUCCESS != qnn.profileGetEvents(profileHandle, &eventIds, &numEvents) || eventIds == nullptr) {
-        LOGW("[PROFILE] failed to get events for graph=%s", graphName ? graphName : "<null>");
-        return;
-    }
+        const int dumpIndex = debug_dump_tensor_counter++;
+        const std::string baseName =
+            "exec" + std::to_string(dumpIndex) +
+            "_graph" + std::to_string(graph_id) +
+            "_" + sanitizeFilenameComponent(graphName) +
+            "_input_" + sanitizeFilenameComponent(tensorName);
+        const auto dataPath = dumpDir / (baseName + ".f32");
+        std::ofstream dataOut(dataPath, std::ios::binary);
+        if (!dataOut) {
+            LOGE("Failed to open tensor dump file %s", dataPath.string().c_str());
+            return RWKV_ERROR_IO;
+        }
+        dataOut.write(reinterpret_cast<const char*>(values.data()), static_cast<std::streamsize>(values.size() * sizeof(float)));
+        if (!dataOut) {
+            LOGE("Failed to write tensor dump file %s", dataPath.string().c_str());
+            return RWKV_ERROR_IO;
+        }
 
-    LOGI("[PROFILE] graph=%s events=%u", graphName ? graphName : "<null>", numEvents);
-    for (uint32_t i = 0; i < numEvents; ++i) {
-        dump_profile_event_recursive(eventIds[i], 0);
+        const auto metaPath = dumpDir / (baseName + ".txt");
+        std::ofstream metaOut(metaPath);
+        if (metaOut) {
+            const auto quantParams = QNN_TENSOR_GET_QUANT_PARAMS(*tensor);
+            metaOut << "graph_id=" << graph_id << "\n";
+            metaOut << "graph_name=" << graphName << "\n";
+            metaOut << "tensor_name=" << tensorName << "\n";
+            metaOut << "dtype=" << QNN_TENSOR_GET_DATA_TYPE(*tensor) << "\n";
+            metaOut << "quant_encoding_definition=" << quantParams.encodingDefinition << "\n";
+            metaOut << "quantization_encoding=" << quantParams.quantizationEncoding << "\n";
+            metaOut << "scale_offset_scale=" << quantParams.scaleOffsetEncoding.scale << "\n";
+            metaOut << "scale_offset_offset=" << quantParams.scaleOffsetEncoding.offset << "\n";
+            metaOut << "shape=";
+            for (size_t i = 0; i < dims.size(); i++) {
+                metaOut << (i == 0 ? "" : ",") << dims[i];
+            }
+            metaOut << "\n";
+            metaOut << "element_count=" << elementCount << "\n";
+        }
+        LOGI("Dumped QNN input tensor %s from graph %d to %s", tensorName.c_str(), graph_id, dataPath.string().c_str());
     }
+    return RWKV_SUCCESS;
 }
 
 int qnn_backend::execute_graph(GraphInfo_t** graphsInfo, int graphsCount, Qnn_Tensor_t** inputTensors, Qnn_Tensor_t** outputTensors) {
     for (int graph_id = 0; graph_id < graphsCount; graph_id++) {
         auto graphInfo     = (*graphsInfo)[graph_id];
+        if (RWKV_SUCCESS != copy_forced_cross_context_inputs(graphInfo, inputTensors[graph_id])) {
+            return RWKV_ERROR_IO;
+        }
+        if (RWKV_SUCCESS != maybe_dump_debug_input_tensors(graphInfo, graph_id, inputTensors[graph_id])) {
+            return RWKV_ERROR_IO;
+        }
         Qnn_ProfileHandle_t profileHandle = nullptr;
-        if (should_dump_execute_profile()) {
-            if (RWKV_SUCCESS != create_execute_profile_handle(&profileHandle)) {
-                LOGW("[PROFILE] profiling disabled for graph=%s", graphInfo.graphName);
-                profileHandle = nullptr;
-            }
+        if (qnnProfileEnabled() && RWKV_SUCCESS != create_execute_profile_handle(&profileHandle)) {
+            LOGW("Profiling disabled for graph %s", graphInfo.graphName);
+            profileHandle = nullptr;
         }
         auto executeStatus =
             g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.graphExecute(graphInfo.graph,
@@ -1876,13 +2602,150 @@ int qnn_backend::execute_graph(GraphInfo_t** graphsInfo, int graphsCount, Qnn_Te
                                                             profileHandle, nullptr);
         if (profileHandle != nullptr) {
             dump_profile_events(profileHandle, graphInfo.graphName);
-            g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.profileFree(profileHandle);
         }
         if (QNN_GRAPH_NO_ERROR != executeStatus) {
             return RWKV_ERROR_EVAL;
         }
+        if (RWKV_SUCCESS != maybe_dump_debug_output_tensors(graphInfo, graph_id, outputTensors[graph_id])) {
+            return RWKV_ERROR_IO;
+        }
     }
     return RWKV_SUCCESS;
+}
+
+int qnn_backend::create_execute_profile_handle(Qnn_ProfileHandle_t* profileHandle) {
+    if (profileHandle == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    *profileHandle = nullptr;
+
+    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
+    if (qnn.profileCreate == nullptr || qnn.profileSetConfig == nullptr || qnn.profileFree == nullptr) {
+        return RWKV_ERROR_UNSUPPORTED;
+    }
+
+    auto status = qnn.profileCreate(
+        g_qnn_backend_context_ptr->qnnBackendHandle,
+        QNN_PROFILE_LEVEL_DETAILED,
+        profileHandle);
+    if (status != QNN_SUCCESS) {
+        LOGW("profileCreate failed: %u", status);
+        *profileHandle = nullptr;
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_INIT;
+    }
+
+    QnnProfile_Config_t optraceConfig = QNN_PROFILE_CONFIG_INIT;
+    optraceConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
+    optraceConfig.enableOptrace = 1;
+    const QnnProfile_Config_t* configs[] = {&optraceConfig, nullptr};
+    status = qnn.profileSetConfig(*profileHandle, configs);
+    if (status != QNN_SUCCESS) {
+        LOGW("profileSetConfig failed: %u", status);
+        qnn.profileFree(*profileHandle);
+        *profileHandle = nullptr;
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_INIT;
+    }
+
+    return RWKV_SUCCESS;
+}
+
+void qnn_backend::dump_profile_events(Qnn_ProfileHandle_t profileHandle, const char* graphName) {
+    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
+    if (profileHandle == nullptr || qnn.profileGetEvents == nullptr || qnn.profileFree == nullptr) {
+        return;
+    }
+
+    const QnnProfile_EventId_t* eventIds = nullptr;
+    uint32_t numEvents = 0;
+    auto status = qnn.profileGetEvents(profileHandle, &eventIds, &numEvents);
+    if (status != QNN_SUCCESS) {
+        LOGW("profileGetEvents failed for %s: %u", graphName, status);
+        qnn.profileFree(profileHandle);
+        return;
+    }
+
+    LOGI("[PROFILE] graph=%s events=%u", graphName, numEvents);
+    for (uint32_t i = 0; i < numEvents; ++i) {
+        dump_profile_event_recursive(eventIds[i], 0);
+    }
+
+    status = qnn.profileFree(profileHandle);
+    if (status != QNN_SUCCESS) {
+        LOGW("profileFree failed for %s: %u", graphName, status);
+    }
+}
+
+void qnn_backend::dump_profile_event_recursive(QnnProfile_EventId_t eventId, int depth) {
+    auto& qnn = g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface;
+    std::string indent(depth * 2, ' ');
+
+    QnnProfile_EventData_t eventData = QNN_PROFILE_EVENT_DATA_INIT;
+    auto status = qnn.profileGetEventData ? qnn.profileGetEventData(eventId, &eventData)
+                                          : QNN_PROFILE_ERROR_UNSUPPORTED;
+    if (status == QNN_SUCCESS) {
+        LOGI("[PROFILE] %stype=%u unit=%s value=%llu id=%s",
+             indent.c_str(),
+             eventData.type,
+             profile_unit_to_string(eventData.unit),
+             static_cast<unsigned long long>(eventData.value),
+             eventData.identifier ? eventData.identifier : "(null)");
+    } else if (qnn.profileGetExtendedEventData != nullptr) {
+        QnnProfile_ExtendedEventData_t extendedData = QNN_PROFILE_EXTENDED_EVENT_DATA_INIT;
+        auto extendedStatus = qnn.profileGetExtendedEventData(eventId, &extendedData);
+        if (extendedStatus == QNN_SUCCESS) {
+            auto& v1 = extendedData.v1;
+            unsigned long long value = 0;
+            if (v1.unit != QNN_PROFILE_EVENTUNIT_OBJECT) {
+                value = static_cast<unsigned long long>(v1.value.uint64Value);
+            }
+            LOGI("[PROFILE] %stype=%u unit=%s value=%llu ts=%llu id=%s",
+                 indent.c_str(),
+                 v1.type,
+                 profile_unit_to_string(v1.unit),
+                 value,
+                 static_cast<unsigned long long>(v1.timestamp),
+                 v1.identifier ? v1.identifier : "(null)");
+        } else {
+            LOGW("[PROFILE] %sfailed to read event data: base=%u extended=%u",
+                 indent.c_str(),
+                 status,
+                 extendedStatus);
+        }
+    }
+
+    if (qnn.profileGetSubEvents == nullptr) {
+        return;
+    }
+
+    const QnnProfile_EventId_t* subEventIds = nullptr;
+    uint32_t numSubEvents = 0;
+    status = qnn.profileGetSubEvents(eventId, &subEventIds, &numSubEvents);
+    if (status != QNN_SUCCESS || subEventIds == nullptr) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < numSubEvents; ++i) {
+        dump_profile_event_recursive(subEventIds[i], depth + 1);
+    }
+}
+
+const char* qnn_backend::profile_unit_to_string(QnnProfile_EventUnit_t unit) const {
+    switch (unit) {
+        case QNN_PROFILE_EVENTUNIT_MICROSEC:
+            return "us";
+        case QNN_PROFILE_EVENTUNIT_BYTES:
+            return "bytes";
+        case QNN_PROFILE_EVENTUNIT_CYCLES:
+            return "cycles";
+        case QNN_PROFILE_EVENTUNIT_COUNT:
+            return "count";
+        case QNN_PROFILE_EVENTUNIT_OBJECT:
+            return "object";
+        case QNN_PROFILE_EVENTUNIT_NONE:
+            return "none";
+        default:
+            return "unknown";
+    }
 }
 
 int qnn_backend::execute_prefill_graph() {
@@ -2422,32 +3285,127 @@ int qnn_backend::zero_state_on_batch_slot(int slot) {
         return RWKV_ERROR_IO;
     }
 
-    for (auto &[tensorName, tensor] : stateTensorsNameToTensorPointer) {
+    auto fillZeroTensorSlot = [&](Qnn_Tensor_t *qnntensor, const std::string &tensorName) -> int {
         size_t element_count = 1;
-        Qnn_Tensor_t *qnntensor = (Qnn_Tensor_t*)tensor;
+        std::vector<size_t> dims;
         for (int j = 0; j < QNN_TENSOR_GET_RANK(qnntensor); j++) {
-            element_count *= *(QNN_TENSOR_GET_DIMENSIONS(qnntensor) + j);
+            const size_t dim = *(QNN_TENSOR_GET_DIMENSIONS(qnntensor) + j);
+            dims.push_back(dim);
+            element_count *= dim;
         }
-        uint8_t *buffer = (uint8_t*)qnnIOTensorUtils->getBuffer(qnntensor);
+        uint8_t *buffer = nullptr;
+        try {
+            buffer = (uint8_t*)qnnIOTensorUtils->getBuffer(qnntensor);
+        } catch (const std::exception& e) {
+            LOGE("%s: Failed to get buffer for tensor %s: %s", __func__, tensorName.c_str(), e.what());
+            return RWKV_ERROR_IO;
+        }
         if (buffer == nullptr) {
             LOGE("%s: Failed to get buffer for tensor %s", __func__, tensorName.c_str());
             return RWKV_ERROR_IO;
         }
-        size_t total_size = qnnIOTensorUtils->getBufferSize(qnntensor);
-        size_t size_per_slot = total_size / max_supported_bsz;
-        size_t offset = size_per_slot * slot;
-        if (QNN_TENSOR_GET_DATA_TYPE(qnntensor) == QNN_DATATYPE_FLOAT_16 || QNN_TENSOR_GET_DATA_TYPE(qnntensor) == QNN_DATATYPE_FLOAT_32)
+
+        size_t total_size = 0;
+        try {
+            total_size = qnnIOTensorUtils->getBufferSize(qnntensor);
+        } catch (const std::exception& e) {
+            LOGE("%s: Failed to get buffer size for tensor %s: %s", __func__, tensorName.c_str(), e.what());
+            return RWKV_ERROR_IO;
+        }
+
+        int tensor_bsz = max_supported_bsz;
+        if (!dims.empty() && dims[0] > 0 && dims[0] < static_cast<size_t>(max_supported_bsz)) {
+            tensor_bsz = static_cast<int>(dims[0]);
+        }
+        if (slot >= tensor_bsz) {
+            return RWKV_SUCCESS;
+        }
+
+        const size_t size_per_slot = total_size / tensor_bsz;
+        const size_t elements_per_slot = element_count / tensor_bsz;
+        const size_t offset = size_per_slot * slot;
+        const auto dtype = QNN_TENSOR_GET_DATA_TYPE(qnntensor);
+        if (dtype == QNN_DATATYPE_FLOAT_16 || dtype == QNN_DATATYPE_FLOAT_32) {
             memset(buffer + offset, 0, size_per_slot);
-        else {
+        } else if (dtype == QNN_DATATYPE_UFIXED_POINT_8) {
+            float fpzero = 0.0;
+            uint8_t qtzero = 0;
+            datautil::floatToTfN<uint8_t>(&qtzero, &fpzero,
+                QNN_TENSOR_GET_QUANT_PARAMS(qnntensor).scaleOffsetEncoding.offset,
+                QNN_TENSOR_GET_QUANT_PARAMS(qnntensor).scaleOffsetEncoding.scale,
+                1);
+            for (size_t j = 0; j < elements_per_slot; j++) {
+                ((uint8_t*)(buffer + offset))[j] = qtzero;
+            }
+        } else if (dtype == QNN_DATATYPE_UFIXED_POINT_16) {
             float fpzero = 0.0;
             uint16_t qtzero = 0;
             datautil::floatToTfN<uint16_t>(&qtzero, &fpzero,
                 QNN_TENSOR_GET_QUANT_PARAMS(qnntensor).scaleOffsetEncoding.offset,
                 QNN_TENSOR_GET_QUANT_PARAMS(qnntensor).scaleOffsetEncoding.scale,
                 1);
-            for (int j = 0; j < element_count / max_supported_bsz; j++) {
+            for (size_t j = 0; j < elements_per_slot; j++) {
                 ((uint16_t*)(buffer + offset))[j] = qtzero;
             }
+        } else {
+            LOGE("%s: Unsupported state tensor dtype %d for tensor %s",
+                 __func__,
+                 dtype,
+                 tensorName.c_str());
+            return RWKV_ERROR_IO;
+        }
+        return RWKV_SUCCESS;
+    };
+
+    for (auto &[tensorName, tensor] : stateTensorsNameToTensorPointer) {
+        Qnn_Tensor_t *qnntensor = (Qnn_Tensor_t*)tensor;
+        if (RWKV_SUCCESS != fillZeroTensorSlot(qnntensor, tensorName)) {
+            return RWKV_ERROR_IO;
+        }
+    }
+
+    auto fillStateInputs = [&](GraphInfo_t **graphsInfo, uint32_t graphsCount, Qnn_Tensor_t **inputTensors) -> int {
+        if (graphsInfo == nullptr || inputTensors == nullptr) {
+            return RWKV_SUCCESS;
+        }
+        for (uint32_t graph_id = 0; graph_id < graphsCount; graph_id++) {
+            if (inputTensors[graph_id] == nullptr) {
+                continue;
+            }
+            auto graphInfo = (*graphsInfo)[graph_id];
+            for (size_t tensorIdx = 0; tensorIdx < graphInfo.numInputTensors; tensorIdx++) {
+                Qnn_Tensor_t *tensor = inputTensors[graph_id] + tensorIdx;
+                const char *rawTensorName = QNN_TENSOR_GET_NAME(*tensor);
+                const std::string tensorName =
+                    rawTensorName != nullptr ? std::string(rawTensorName) : ("input" + std::to_string(tensorIdx));
+                if (tensorName.find("state") == std::string::npos ||
+                    tensorName.find("_in") == std::string::npos) {
+                    continue;
+                }
+                if (RWKV_SUCCESS != fillZeroTensorSlot(tensor, tensorName)) {
+                    return RWKV_ERROR_IO;
+                }
+            }
+        }
+        return RWKV_SUCCESS;
+    };
+
+    if (RWKV_SUCCESS != fillStateInputs(qnnPrefillGraphsInfo, qnnPrefillGraphsCount, inputTensorsPrefill)) {
+        return RWKV_ERROR_IO;
+    }
+    if (RWKV_SUCCESS != fillStateInputs(qnnEmbdGraphsInfo, qnnEmbdGraphsCount, inputTensorsEmbd)) {
+        return RWKV_ERROR_IO;
+    }
+    if (RWKV_SUCCESS != fillStateInputs(qnnEmbdPrefillGraphsInfo, qnnEmbdPrefillGraphsCount, inputTensorsEmbdPrefill)) {
+        return RWKV_ERROR_IO;
+    }
+    for (auto &[batchSize, inputTensorArray] : inputTensorsBatchDecode) {
+        const auto countIt = qnnBatchDecodeGraphsCount.find(batchSize);
+        if (countIt == qnnBatchDecodeGraphsCount.end()) {
+            continue;
+        }
+        if (RWKV_SUCCESS != fillStateInputs(qnnBatchDecodeGraphsInfo[batchSize], countIt->second, inputTensorArray)) {
+            return RWKV_ERROR_IO;
         }
     }
     return RWKV_SUCCESS;
@@ -2510,6 +3468,24 @@ int qnn_backend::deserialize_runtime_state(std::vector<uint8_t> &data, std::any 
 int qnn_backend::release_model() {
     LOGI("[QNN] release_model");
     // free graphs
+
+    if (!reRegisteredSharedInputMemHandles.empty() &&
+        g_qnn_backend_context_ptr != nullptr &&
+        g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.memDeRegister != nullptr) {
+        std::vector<Qnn_MemHandle_t> handles;
+        handles.reserve(reRegisteredSharedInputMemHandles.size());
+        for (const auto& registered : reRegisteredSharedInputMemHandles) {
+            handles.push_back(registered.memHandle);
+        }
+        if (QNN_SUCCESS != g_qnn_backend_context_ptr->qnnFunctionPointers.qnnInterface.memDeRegister(
+                handles.data(),
+                static_cast<uint32_t>(handles.size()))) {
+            LOGE("Could not deregister re-registered shared input memory handles");
+        }
+        reRegisteredSharedInputMemHandles.clear();
+    }
+    forcedCrossContextInputCopies.clear();
+
     if (qnnPrefillGraphsCount > 0) {
         for (int i = 0; i < qnnPrefillGraphsCount; i++) {
             auto graphInfo     = (*qnnPrefillGraphsInfo)[i];

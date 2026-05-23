@@ -24,9 +24,9 @@ struct RpcMemTensorData {
   size_t size;
   size_t totalBufferSize;
   size_t offset;
-  RpcMemTensorData() : fd(-1), memPointer(nullptr), size(0) {}
+  RpcMemTensorData() : fd(-1), memPointer(nullptr), size(0), totalBufferSize(0), offset(0) {}
   RpcMemTensorData(int fdIn, void* memPointerIn, size_t sizeIn)
-      : fd(fdIn), memPointer(memPointerIn), size(sizeIn) {}
+      : fd(fdIn), memPointer(memPointerIn), size(sizeIn), totalBufferSize(sizeIn), offset(0) {}
   RpcMemTensorData(
       int fdIn, void* memPointerIn, size_t sizeIn, size_t totalBufferSizeIn, size_t offsetIn)
       : fd(fdIn),
@@ -55,6 +55,8 @@ class RpcMem final : public IBufferAlloc {
   size_t getTotalBufferSize(Qnn_Tensor_t* tensor) override;
 
   bool allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tensorDataSize) override;
+  bool allocateTensorBufferForContext(
+      Qnn_Tensor_t* tensor, size_t tensorDataSize, Qnn_ContextHandle_t contextHandle) override;
 
   bool freeTensorBuffer(Qnn_Tensor_t* tensor) override;
   bool useSameMemory(Qnn_Tensor_t* dest, Qnn_Tensor_t* src) override;

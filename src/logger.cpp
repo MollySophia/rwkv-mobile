@@ -7,6 +7,8 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 
 namespace rwkvmobile {
@@ -47,7 +49,8 @@ bool Logger::should_log_to_console() const {
     static std::atomic<int> cached{-1};
     int value = cached.load(std::memory_order_relaxed);
     if (value == -1) {
-        value = env_flag_enabled("RWKV_LOG_TO_CONSOLE") ? 1 : 0;
+        value = (env_flag_enabled("RWKV_LOG_TO_CONSOLE") ||
+                 env_flag_enabled("RWKV_ANDROID_LOG_TO_CONSOLE")) ? 1 : 0;
         cached.store(value, std::memory_order_relaxed);
     }
     return value == 1;
@@ -56,6 +59,7 @@ bool Logger::should_log_to_console() const {
 #if defined(__ANDROID__)
 #include <android/log.h>
 #define LOG_TAG "RWKV-MOBILE"
+
 void Logger::log(const std::string &msg, const int level) {
     std::string log_msg = remove_endl(msg);
     auto timestamp = get_timestamp();

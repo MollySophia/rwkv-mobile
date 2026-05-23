@@ -26,6 +26,11 @@ class IBufferAlloc {
   virtual size_t getBufferSize(Qnn_Tensor_t* tensor)                                          = 0;
   virtual size_t getTotalBufferSize(Qnn_Tensor_t* tensor)                                     = 0;
   virtual bool allocateTensorBuffer(Qnn_Tensor_t* tensor, size_t tensorDataSize)              = 0;
+  virtual bool allocateTensorBufferForContext(
+      Qnn_Tensor_t* tensor, size_t tensorDataSize, Qnn_ContextHandle_t contextHandle) {
+    (void)contextHandle;
+    return allocateTensorBuffer(tensor, tensorDataSize);
+  }
   virtual bool freeTensorBuffer(Qnn_Tensor_t* tensor)                                         = 0;
   virtual bool useSameMemory(Qnn_Tensor_t* dest, Qnn_Tensor_t* src)                           = 0;
   virtual bool useSameMemory(Qnn_Tensor_t* dest, Qnn_Tensor_t* src, int offset)               = 0;
