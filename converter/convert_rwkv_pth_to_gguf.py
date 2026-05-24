@@ -438,11 +438,10 @@ class Model:
 {%- endfor -%}
 {%- if add_generation_prompt -%}
     {{- 'Assistant:' -}}
-    {%- if enable_thinking is defined and enable_thinking is false %}
-        {{- ' <think>\\n</think>' }}
-    {%- endif %}
     {%- if enable_thinking is defined and enable_thinking is true %}
         {{- ' <think>' }}
+    {%- else %}
+        {{- ' <think>\\n</think>' }}
     {%- endif %}
 {%- endif -%}"""
         # hack: Add '\n\n' as the EOT token to make it chat normally
