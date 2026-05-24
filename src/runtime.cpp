@@ -3437,6 +3437,15 @@ double Runtime::get_avg_prefill_speed(int model_id) {
             _prefill_speed = speed_from_backend;
             return speed_from_backend;
         }
+        double speed = 0.0;
+        {
+            std::lock_guard<std::mutex> lock(model->speed_samples_mutex);
+            speed = _compute_weighted_average_speed_tokens_per_s(model->prefill_samples_us);
+        }
+        if (speed > 0.0) {
+            _prefill_speed = speed;
+            return speed;
+        }
         return (_prefill_speed < 0) ? 0.0 : _prefill_speed;
     }
 

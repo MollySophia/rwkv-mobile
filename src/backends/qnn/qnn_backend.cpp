@@ -2903,6 +2903,7 @@ int qnn_backend::debug_dump_state() {
 }
 
 int qnn_backend::eval(int id, Tensor1D & logits) {
+    auto start = std::chrono::high_resolution_clock::now();
     {
         std::lock_guard<std::mutex> lock(g_qnn_backend_context_ptr->qnnMutex);
         if (!isTensorInitialized) {
@@ -2958,6 +2959,11 @@ int qnn_backend::eval(int id, Tensor1D & logits) {
             }
         }
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    if (duration_us > 0) {
+        decode_speed = 1000000.0 / (double)duration_us;
+    }
 
     // debug_dump_state();
     return post_graph_execute(logits);
@@ -2983,6 +2989,8 @@ int qnn_backend::eval(std::vector<int> ids, Tensor1D & logits) {
         int idx = 0;
         uint16_t *buffer;
         uint16_t *emb_ptr = (uint16_t*)external_embeddings.get();
+        int prefilling_tokens = 0;
+        auto prefill_start = std::chrono::high_resolution_clock::now();
 
         if (embdPrefillSequenceLength > 0 && tokenInputTensorEmbdPrefill != nullptr) {
             buffer = (uint16_t*)qnnIOTensorUtils->getBuffer(tokenInputTensorEmbdPrefill);
@@ -3008,7 +3016,13 @@ int qnn_backend::eval(std::vector<int> ids, Tensor1D & logits) {
                     LOGE("Failed to execute emb prefill graph");
                     return RWKV_ERROR_EVAL;
                 }
+                prefilling_tokens += embdPrefillSequenceLength;
             }
+        }
+        auto prefill_end = std::chrono::high_resolution_clock::now();
+        const int64_t prefill_duration_us = std::chrono::duration_cast<std::chrono::microseconds>(prefill_end - prefill_start).count();
+        if (prefilling_tokens > 0 && prefill_duration_us > 0) {
+            prefill_speed = (double)prefilling_tokens * 1000000.0 / (double)prefill_duration_us;
         }
 
         buffer = (uint16_t*)qnnIOTensorUtils->getBuffer(tokenInputTensorEmbd);
@@ -3145,6 +3159,7 @@ int qnn_backend::eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits
         return RWKV_ERROR_UNSUPPORTED;
     }
     int batch_size = ids.size();
+    auto start = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < batch_size; i++) {
         if (ids[i].size() != 1) {
@@ -3174,6 +3189,11 @@ int qnn_backend::eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits
             LOGE("QNN: failed to execute batch decode graph");
             return RWKV_ERROR_EVAL;
         }
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    if (duration_us > 0) {
+        decode_speed = (double)batch_size * 1000000.0 / (double)duration_us;
     }
 
     // return post_graph_execute_batch(logits);

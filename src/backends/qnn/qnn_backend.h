@@ -71,8 +71,12 @@ public:
     double get_prefill_speed() override {
         return prefill_speed;
     }
+    double get_decode_speed() override {
+        return decode_speed;
+    }
     void reset_speed_stats() override {
         prefill_speed = -1;
+        decode_speed = -1;
     }
 
     int debug_dump_state();
@@ -96,6 +100,7 @@ public:
 
 private:
     double prefill_speed = -1;
+    double decode_speed = -1;
     void *qnnModelHandle = nullptr;
 
     bool isTensorInitialized = false;
