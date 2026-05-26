@@ -103,6 +103,28 @@ inline void mask_chinese_tokens(Tensor1D &logits, int num_vocab) {
     }
 }
 
+static std::string resolve_chat_log_role(const ModelInstance &model, const std::string &role) {
+    if (role == "user") {
+        return model.user_role;
+    }
+    if (role == "assistant") {
+        return model.response_role;
+    }
+    if (role == "system") {
+        return model.system_role;
+    }
+    return role;
+}
+
+static void log_chat_inputs_once(int model_id, const ModelInstance &model, const std::vector<std::string> &inputs, const std::vector<std::string> &roles_map) {
+    LOGI("chat input: model_id: %d, num_inputs: %zu, roles_map_size: %zu", model_id, inputs.size(), roles_map.size());
+    for (size_t i = 0; i < inputs.size(); i++) {
+        std::string role = (roles_map.size() == inputs.size()) ? roles_map[i] : ((i % 2 == 0) ? "user" : "assistant");
+        role = resolve_chat_log_role(model, role);
+        LOGI("chat input[%zu]: role: \"%s\", content: \"%s\"", i, role.c_str(), escape_special_chars(inputs[i]).c_str());
+    }
+}
+
 void Runtime::_record_speed_sample(ModelInstance& model, bool is_prefill, int tokens, int64_t duration_us) {
     if (tokens <= 0 || duration_us <= 0) {
         return;
@@ -839,7 +861,7 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         if (i != inputs.size() - 1) {
             text += model->eos_token;
         }
-        LOGI("message[%zu]: role: \"%s\", content: \"%s\"", i, role.c_str(), escape_special_chars(content).c_str());
+        // LOGI("message[%zu]: role: \"%s\", content: \"%s\"", i, role.c_str(), escape_special_chars(content).c_str());
     }
 
     if (!inputs.empty() && add_generation_prompt) {
@@ -1224,6 +1246,8 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     } else if (force_lang == 2) {
         LOGI("forcing output language to English\n");
     }
+
+    log_chat_inputs_once(model_id, *model, inputs, roles_map);
 
     auto input_text = apply_chat_template(model_id, inputs, enable_reasoning, add_generation_prompt, roles_map);
     LOGD("Applied chat template: \"%s\"\n", input_text.c_str());
