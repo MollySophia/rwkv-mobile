@@ -3700,7 +3700,7 @@ void Runtime::set_eos_token(int model_id, std::string token) {
     auto &model = _models.at(model_id);
     model->eos_token = token;
     if (token == "\n\n") {
-        model->stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}, {5585}};
+        model->stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}, {5585}, {11, 24281}};
     } else if (token == "\n") {
         model->stop_token_seqs = {{11}, {28329}, {28324}, {28331}, {261}, {5585}};
     } else {
