@@ -316,6 +316,23 @@ int qnn_backend::parse_bsz_from_graph_name(const std::string &graphName) {
     return val;
 }
 
+int qnn_backend::select_batch_decode_graph_size(int requested_bsz) const {
+    if (requested_bsz <= 1) {
+        return 1;
+    }
+
+    int selected_bsz = 0;
+    for (const auto &[graph_bsz, count] : qnnBatchDecodeGraphsCount) {
+        if (count == 0 || graph_bsz < requested_bsz) {
+            continue;
+        }
+        if (selected_bsz == 0 || graph_bsz < selected_bsz) {
+            selected_bsz = graph_bsz;
+        }
+    }
+    return selected_bsz;
+}
+
 int qnn_backend::initialize_batch_decode_graphs(
         uint32_t graphsCount,
         GraphInfo_t **graphsInfo,
@@ -1078,8 +1095,9 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
                         if (effectiveBsz == 2) {
                             supported_batch_sizes.push_back(2);
                         } else if (effectiveBsz > 2) {
-                            supported_batch_sizes.push_back(effectiveBsz - 1);
-                            supported_batch_sizes.push_back(effectiveBsz);
+                            for (int bsz = 2; bsz <= effectiveBsz; bsz++) {
+                                supported_batch_sizes.push_back(bsz);
+                            }
                         } else {
                             supported_batch_sizes.push_back(1);
                         }
@@ -1165,6 +1183,7 @@ int qnn_backend::load_model(std::string model_path, void * extra) {
         }
         std::string debug_message = "supported_batch_sizes: ";
         std::sort(supported_batch_sizes.begin(), supported_batch_sizes.end());
+        supported_batch_sizes.erase(std::unique(supported_batch_sizes.begin(), supported_batch_sizes.end()), supported_batch_sizes.end());
         for (auto bsz : supported_batch_sizes) {
             debug_message += std::to_string(bsz) + " ";
         }
@@ -2423,6 +2442,7 @@ int qnn_backend::maybe_dump_debug_output_tensors(const GraphInfo_t& graphInfo, i
     const std::string graphName = graphInfo.graphName != nullptr ? graphInfo.graphName : ("graph" + std::to_string(graph_id));
     const bool dumpStates = envValueIsTruthy(std::getenv("RWKV_QNN_DUMP_STATE_TENSORS"));
     const bool dumpAllOutputs = envValueIsTruthy(std::getenv("RWKV_QNN_DUMP_ALL_OUTPUT_TENSORS"));
+    const bool dumpWkvStateAsFp16 = envValueIsTruthy(std::getenv("RWKV_QNN_DUMP_WKV_STATE_AS_FP16"));
     for (size_t tensorIdx = 0; tensorIdx < graphInfo.numOutputTensors; tensorIdx++) {
         Qnn_Tensor_t* tensor = outputTensors + tensorIdx;
         const char* rawTensorName = QNN_TENSOR_GET_NAME(*tensor);
@@ -2448,9 +2468,37 @@ int qnn_backend::maybe_dump_debug_output_tensors(const GraphInfo_t& graphInfo, i
         }
 
         std::vector<float> values(elementCount);
-        if (RWKV_SUCCESS != copy_qnn_tensor_to_float(tensor, values.data(), elementCount)) {
-            LOGE("Failed to dump tensor %s from graph %d", tensorName.c_str(), graph_id);
-            return RWKV_ERROR_IO;
+        bool copied = false;
+        if (dumpWkvStateAsFp16 && QNN_TENSOR_GET_DATA_TYPE(*tensor) == QNN_DATATYPE_UFIXED_POINT_16) {
+            bool isWkvStateTensor = false;
+            if (tensorName.rfind("state", 0) == 0) {
+                char* end = nullptr;
+                const long stateIndex = std::strtol(tensorName.c_str() + 5, &end, 10);
+                isWkvStateTensor =
+                    end != nullptr &&
+                    std::string(end) == "_out" &&
+                    stateIndex >= 0 &&
+                    stateIndex % 3 == 1;
+            }
+            if (isWkvStateTensor) {
+                void* qnnBuffer = nullptr;
+                try {
+                    qnnBuffer = qnnIOTensorUtils->getBuffer(tensor);
+                } catch (const std::exception& e) {
+                    LOGW("Skipping fp16 debug dump tensor %s from graph %d: %s", tensorName.c_str(), graph_id, e.what());
+                }
+                if (qnnBuffer != nullptr) {
+                    half_float::half* ptr = reinterpret_cast<half_float::half*>(qnnBuffer);
+                    for (size_t i = 0; i < elementCount; i++) {
+                        values[i] = ptr[i];
+                    }
+                    copied = true;
+                }
+            }
+        }
+        if (!copied && RWKV_SUCCESS != copy_qnn_tensor_to_float(tensor, values.data(), elementCount)) {
+            LOGW("Skipping debug dump tensor %s from graph %d", tensorName.c_str(), graph_id);
+            continue;
         }
 
         const int dumpIndex = debug_dump_tensor_counter++;
@@ -2761,7 +2809,11 @@ int qnn_backend::execute_emb_prefill_graph() {
 }
 
 int qnn_backend::execute_batch_decode_graph(int bsz) {
-    int needed_bsz = (bsz == 1) ? 1 : ((bsz + 1) & ~1);
+    int needed_bsz = select_batch_decode_graph_size(bsz);
+    if (needed_bsz == 0) {
+        LOGE("QNN: no batch decode graph can cover requested batch size: %d", bsz);
+        return RWKV_ERROR_EVAL;
+    }
     if (qnnBatchDecodeGraphsCount.find(needed_bsz) == qnnBatchDecodeGraphsCount.end() ||
         qnnBatchDecodeGraphsCount[needed_bsz] == 0) {
         LOGE("QNN: no graphs available for batch size: %d", needed_bsz);
@@ -3175,14 +3227,21 @@ int qnn_backend::eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits
             return RWKV_ERROR_EVAL;
         }
 
-        int needed_bsz = (batch_size == 1) ? 1 : ((batch_size + 1) & ~1);
-        int *token_input = (int*)qnnIOTensorUtils->getBuffer(tokenInputTensorBatchDecode[needed_bsz]); // ceil to nearest even number (except bsz=1)
+        int needed_bsz = select_batch_decode_graph_size(batch_size);
+        if (needed_bsz == 0) {
+            LOGE("No batch decode graph can cover requested batch size %d", batch_size);
+            return RWKV_ERROR_UNSUPPORTED;
+        }
+        int *token_input = (int*)qnnIOTensorUtils->getBuffer(tokenInputTensorBatchDecode[needed_bsz]);
         if (token_input == nullptr) {
             LOGE("Failed to get tokenInputTensor for batch size %d", needed_bsz);
             return RWKV_ERROR_IO;
         }
         for (int b = 0; b < ids.size(); b++) {
             token_input[b] = ids[b][0];
+        }
+        for (int b = batch_size; b < needed_bsz; b++) {
+            token_input[b] = 0;
         }
 
         if (RWKV_SUCCESS != execute_batch_decode_graph(batch_size)) {

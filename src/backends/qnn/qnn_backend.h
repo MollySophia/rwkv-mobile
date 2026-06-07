@@ -294,6 +294,7 @@ private:
 
     // Helpers for dynamic batch decode processing
     static int parse_bsz_from_graph_name(const std::string &graphName);
+    int select_batch_decode_graph_size(int requested_bsz) const;
     int initialize_batch_decode_graphs(
         uint32_t graphsCount,
         GraphInfo_t **graphsInfo,

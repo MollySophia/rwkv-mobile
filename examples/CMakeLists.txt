@@ -84,6 +84,9 @@ target_link_libraries(test_soc_detect PUBLIC rwkv_mobile_internal)
 add_executable(simple_benchmark simple_benchmark.cpp)
 target_link_libraries(simple_benchmark PUBLIC rwkv_mobile_internal)
 
+add_executable(long_context_loss long_context_loss.cpp)
+target_link_libraries(long_context_loss PUBLIC rwkv_mobile_internal)
+
 add_executable(benchmark_app benchmark_app.cpp)
 target_link_libraries(benchmark_app PUBLIC rwkv_mobile_internal)
 
