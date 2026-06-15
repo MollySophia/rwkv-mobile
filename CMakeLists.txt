@@ -331,6 +331,9 @@ if (ENABLE_WHISPER OR ENABLE_TTS)
     endif()
 
     message(CHECK_START "Fetching Eigen3")
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL "4.0" AND NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    endif()
     FetchContent_Declare(
         Eigen
         GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
