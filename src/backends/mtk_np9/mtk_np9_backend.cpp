@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 
 namespace rwkvmobile {
@@ -70,6 +71,20 @@ static TypedMtkRwkvApi mtk_api(MtkRwkvDlopen& library) {
         cast_symbol<TypedMtkRwkvApi::SetStateFn>(raw.set_wkv_state),
         cast_symbol<TypedMtkRwkvApi::SetStateFn>(raw.set_ffn_state),
     };
+}
+
+static bool is_hot_path_sdk_debug_log(const char* tag, const char* msg) {
+    if (!tag || !msg) {
+        return false;
+    }
+    if (std::strcmp(tag, "llm_sdk_latency") == 0) {
+        return std::strstr(msg, "runInferenceImpl:") != nullptr;
+    }
+    if (std::strcmp(tag, "llm_sdk") != 0) {
+        return false;
+    }
+    return std::strstr(msg, "[requiresInit] done") != nullptr ||
+           std::strstr(msg, "[runInferenceImpl] done") != nullptr;
 }
 
 struct LoadedRMPackModel {
@@ -178,6 +193,9 @@ static LoadedRMPackModel loadFromRMPack(const std::string& rmpackPath) {
 static void mtk_np9_librwkv_mtk_log_cb(void* /*user_data*/, int severity, const char* tag, const char* msg) {
     const char* safe_tag = tag ? tag : "librwkv_mtk";
     const char* safe_msg = msg ? msg : "";
+    if (severity == 0 && is_hot_path_sdk_debug_log(tag, msg)) {
+        return;
+    }
     switch (severity) {
         case 0: // DEBUG
             LOGD("[mtk_np9][%s] %s", safe_tag, safe_msg);
