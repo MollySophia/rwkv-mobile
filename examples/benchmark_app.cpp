@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <random>
 #include <thread>
@@ -30,6 +32,50 @@ void cooldown_if_needed(int seconds) {
     std::this_thread::sleep_for(std::chrono::seconds(seconds));
 }
 
+bool env_enabled(const char *name) {
+    const char *value = std::getenv(name);
+    return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
+
+uint32_t benchmark_seed() {
+    const char *value = std::getenv("RWKV_BENCHMARK_SEED");
+    if (value == nullptr || value[0] == '\0') {
+        std::random_device rd;
+        return rd();
+    }
+    return static_cast<uint32_t>(std::strtoul(value, nullptr, 10));
+}
+
+void print_logits_checksum(const char *label, const rwkvmobile::Tensor1D &logits) {
+    if (!env_enabled("RWKV_BENCHMARK_CHECKSUM") || !logits.valid()) {
+        return;
+    }
+    double sum = 0.0;
+    double sum_abs = 0.0;
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < logits.count; ++i) {
+        const float v = rwkvmobile::tensor1d_get_f32(logits, i);
+        sum += v;
+        sum_abs += std::abs(v);
+        uint32_t bits = 0;
+        static_assert(sizeof(bits) == sizeof(v), "float hash expects 32-bit float");
+        std::memcpy(&bits, &v, sizeof(bits));
+        hash ^= bits;
+        hash *= 16777619u;
+    }
+    std::cout << label << " checksum: count=" << logits.count
+              << " sum=" << sum
+              << " sum_abs=" << sum_abs
+              << " fnv32=" << hash
+              << " first=";
+    const size_t n = std::min<size_t>(8, logits.count);
+    for (size_t i = 0; i < n; ++i) {
+        if (i != 0) std::cout << ",";
+        std::cout << rwkvmobile::tensor1d_get_f32(logits, i);
+    }
+    std::cout << std::endl;
+}
+
 int benchmark_prefill(
     rwkvmobile::Runtime &runtime,
     int model_id,
@@ -47,6 +93,7 @@ int benchmark_prefill(
     ENSURE_SUCCESS_OR_LOG_EXIT(runtime.eval_logits(model_id, prompt_ids, logits), "Prefill benchmark failed");
     std::cout << "Prefill speed (prompt_len=" << prompt_ids.size()
               << "): " << runtime.get_avg_prefill_speed(model_id) << " tokens/s" << std::endl;
+    print_logits_checksum("Prefill", logits);
     return 0;
 }
 
@@ -87,6 +134,7 @@ int benchmark_decode_for_batch_size(
     std::cout << "Decode speed (bsz=" << batch_size
               << ", steps=" << decode_steps << "): "
               << runtime.get_avg_decode_speed(model_id) << " tokens/s" << std::endl;
+    print_logits_checksum("Decode", logits);
     return 0;
 }
 
@@ -117,8 +165,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    std::random_device rd;
-    std::mt19937 rng(rd());
+    const uint32_t seed = benchmark_seed();
+    std::mt19937 rng(seed);
     rwkvmobile::Tensor1D logits;
 
     std::vector<int> prompt_ids = make_random_tokens(prompt_len, vocab_size, rng);
@@ -144,6 +192,7 @@ int main(int argc, char **argv) {
     std::cout << "Prompt length: " << prompt_len << std::endl;
     std::cout << "Decode steps: " << decode_steps << std::endl;
     std::cout << "Cooldown seconds: " << cooldown_seconds << std::endl;
+    std::cout << "Seed: " << seed << std::endl;
     std::cout << "Decode batch sizes:";
     for (int bsz : supported_batch_sizes) {
         std::cout << " " << bsz;

@@ -1,4 +1,4 @@
-#include "mtk_np7_backend.h"
+#include "mtk_np9_backend.h"
 
 #include "commondef.h"
 #include "logger.h"
@@ -87,6 +87,9 @@ struct LoadedRMPackModel {
         if (use_shared_weights) {
             reader->unmapFile("shared_weights");
         }
+        if (reader->hasFile("lmhead")) {
+            reader->unmapFile("lmhead");
+        }
         for (int i = 0; i < n_chunks; ++i) {
             reader->unmapFile("decode_chunk" + std::to_string(i));
             if (has_prefill) {
@@ -164,45 +167,50 @@ static LoadedRMPackModel loadFromRMPack(const std::string& rmpackPath) {
         }
     }
 
+    if (out.reader->hasFile("lmhead")) {
+        out.runtimeOptions.lmheadBuffer = out.reader->mmapFile("lmhead");
+        out.runtimeOptions.lmheadBufferSize = out.reader->getFileSize("lmhead");
+    }
+
     return out;
 }
 
-static void mtk_np7_librwkv_mtk_log_cb(void* /*user_data*/, int severity, const char* tag, const char* msg) {
+static void mtk_np9_librwkv_mtk_log_cb(void* /*user_data*/, int severity, const char* tag, const char* msg) {
     const char* safe_tag = tag ? tag : "librwkv_mtk";
     const char* safe_msg = msg ? msg : "";
     switch (severity) {
         case 0: // DEBUG
-            LOGD("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            LOGD("[mtk_np9][%s] %s", safe_tag, safe_msg);
             break;
         case 1: // INFO
-            LOGI("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            LOGI("[mtk_np9][%s] %s", safe_tag, safe_msg);
             break;
         case 2: // WARN
-            LOGW("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            LOGW("[mtk_np9][%s] %s", safe_tag, safe_msg);
             break;
         case 3: // ERROR
-            LOGE("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            LOGE("[mtk_np9][%s] %s", safe_tag, safe_msg);
             break;
         case 4: // FATAL
         default:
-            LOGE("[mtk_np7][%s] %s", safe_tag, safe_msg);
+            LOGE("[mtk_np9][%s] %s", safe_tag, safe_msg);
             break;
     }
 }
 
 } // namespace
 
-int mtk_np7_backend::init(void * extra) {
-    const int ret = _library.open("mtk_np7", "RWKV_MTK_NP7_LIB", "librwkv_mtk_np7.so", extra);
+int mtk_np9_backend::init(void * extra) {
+    const int ret = _library.open("mtk_np9", "RWKV_MTK_NP9_LIB", "librwkv_mtk_np9.so", extra);
     if (ret != RWKV_SUCCESS) {
         return ret;
     }
     // Route librwkv_mtk logs through rwkv-mobile logger.
-    mtk_api(_library).set_log_callback(mtk_np7_librwkv_mtk_log_cb, nullptr);
+    mtk_api(_library).set_log_callback(mtk_np9_librwkv_mtk_log_cb, nullptr);
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::load_model(std::string model_path, void * extra) {
+int mtk_np9_backend::load_model(std::string model_path, void * extra) {
     if (!std::filesystem::exists(model_path)) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
@@ -214,10 +222,10 @@ int mtk_np7_backend::load_model(std::string model_path, void * extra) {
         LoadedRMPackModel loaded = loadFromRMPack(model_path);
 
         // Ensure callback is set before runtime init so init-time logs are captured.
-        mtk_api(_library).set_log_callback(mtk_np7_librwkv_mtk_log_cb, nullptr);
+        mtk_api(_library).set_log_callback(mtk_np9_librwkv_mtk_log_cb, nullptr);
 
         if (!mtk_api(_library).init(&_runtime, loaded.modelOptions, loaded.runtimeOptions)) {
-            LOGE("[mtk_np7] neuron_rwkv_init failed\n");
+            LOGE("[mtk_np9] neuron_rwkv_init failed\n");
             loaded.unmapAfterInit();
             _runtime = nullptr;
             return RWKV_ERROR_INIT | RWKV_ERROR_BACKEND;
@@ -235,7 +243,7 @@ int mtk_np7_backend::load_model(std::string model_path, void * extra) {
         num_heads   = loaded.num_heads;
         supported_batch_sizes = {1};
     } catch (const std::exception& e) {
-        LOGE("[mtk_np7] Failed to load rmpack: %s\n", e.what());
+        LOGE("[mtk_np9] Failed to load rmpack: %s\n", e.what());
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
 
@@ -245,7 +253,7 @@ int mtk_np7_backend::load_model(std::string model_path, void * extra) {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::eval(int id, Tensor1D & logits) {
+int mtk_np9_backend::eval(int id, Tensor1D & logits) {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -263,7 +271,7 @@ int mtk_np7_backend::eval(int id, Tensor1D & logits) {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::eval(std::vector<int> ids, Tensor1D & logits) {
+int mtk_np9_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -281,7 +289,7 @@ int mtk_np7_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) {
+int mtk_np9_backend::eval_with_embeddings(const float *embeddings, int n_tokens, Tensor1D & logits) {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -299,11 +307,11 @@ int mtk_np7_backend::eval_with_embeddings(const float *embeddings, int n_tokens,
     return RWKV_SUCCESS;
 }
 
-bool mtk_np7_backend::is_available() {
+bool mtk_np9_backend::is_available() {
     return true;
 }
 
-int mtk_np7_backend::get_state(std::any &state) {
+int mtk_np9_backend::get_state(std::any &state) {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -337,7 +345,7 @@ int mtk_np7_backend::get_state(std::any &state) {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::set_state(std::any state) {
+int mtk_np9_backend::set_state(std::any state) {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -377,12 +385,12 @@ int mtk_np7_backend::set_state(std::any state) {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::free_state(std::any state) {
+int mtk_np9_backend::free_state(std::any state) {
     state.reset();
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::zero_state() {
+int mtk_np9_backend::zero_state() {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
@@ -390,7 +398,7 @@ int mtk_np7_backend::zero_state() {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::load_raw_states(std::vector<std::vector<half_float::half>> states) {
+int mtk_np9_backend::load_raw_states(std::vector<std::vector<half_float::half>> states) {
     // Used by rwkv-mobile rmpack state loader (one file per layer).
     // Interpret it as WKV state per layer, and zero ATTN/FFN states.
     if (_runtime == nullptr) {
@@ -418,7 +426,7 @@ int mtk_np7_backend::load_raw_states(std::vector<std::vector<half_float::half>> 
         const auto& wkv_half = states[layer];
         const size_t bytes = wkv_half.size() * sizeof(half_float::half);
         if (bytes != wkv_sz) {
-            LOGE("[mtk_np7] load_raw_states: layer %d size mismatch: got=%zu, want=%zu\n", layer, bytes, wkv_sz);
+            LOGE("[mtk_np9] load_raw_states: layer %d size mismatch: got=%zu, want=%zu\n", layer, bytes, wkv_sz);
             return RWKV_ERROR_INVALID_PARAMETERS;
         }
         if (!mtk_api(_library).set_wkv_state(_runtime, layer, wkv_half.data(), bytes)) return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
@@ -427,7 +435,7 @@ int mtk_np7_backend::load_raw_states(std::vector<std::vector<half_float::half>> 
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::release_model() {
+int mtk_np9_backend::release_model() {
     if (_runtime && _library.is_loaded()) {
         mtk_api(_library).release(_runtime);
         _runtime = nullptr;
@@ -435,7 +443,7 @@ int mtk_np7_backend::release_model() {
     return RWKV_SUCCESS;
 }
 
-int mtk_np7_backend::release() {
+int mtk_np9_backend::release() {
     release_model();
     _library.close();
     return RWKV_SUCCESS;

@@ -297,7 +297,7 @@ jobs:
         rustup target add --toolchain 1.89.0-x86_64-unknown-linux-gnu aarch64-linux-android
         rm -rf build
         mkdir build && cd build
-        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DENABLE_MTK_NP7_BACKEND=ON \
+        cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DENABLE_MTK_NP7_BACKEND=ON -DENABLE_MTK_NP9_BACKEND=ON \
           -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF \
           -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r25c \
           -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/android-ndk-r25c/build/cmake/android.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DRWKV_MOBILE_ENABLE_DEBUG_SYMBOLS=ON \
@@ -306,11 +306,17 @@ jobs:
         mkdir -p "$GITHUB_WORKSPACE/symbols/android-arm64-v8a"
         LLVM_TOOLCHAIN="$GITHUB_WORKSPACE/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin"
         "$LLVM_TOOLCHAIN/llvm-objcopy" --only-keep-debug --compress-debug-sections=zlib librwkv_mobile.so "$GITHUB_WORKSPACE/symbols/android-arm64-v8a/librwkv_mobile.so.debug"
+        "$LLVM_TOOLCHAIN/llvm-objcopy" --only-keep-debug --compress-debug-sections=zlib librwkv_mtk_np7.so "$GITHUB_WORKSPACE/symbols/android-arm64-v8a/librwkv_mtk_np7.so.debug"
+        "$LLVM_TOOLCHAIN/llvm-objcopy" --only-keep-debug --compress-debug-sections=zlib librwkv_mtk_np9.so "$GITHUB_WORKSPACE/symbols/android-arm64-v8a/librwkv_mtk_np9.so.debug"
         "$LLVM_TOOLCHAIN/llvm-strip" --strip-debug --strip-unneeded librwkv_mobile.so
+        "$LLVM_TOOLCHAIN/llvm-strip" --strip-debug --strip-unneeded librwkv_mtk_np7.so
+        "$LLVM_TOOLCHAIN/llvm-strip" --strip-debug --strip-unneeded librwkv_mtk_np9.so
         "$LLVM_TOOLCHAIN/llvm-objcopy" --add-gnu-debuglink="$GITHUB_WORKSPACE/symbols/android-arm64-v8a/librwkv_mobile.so.debug" librwkv_mobile.so
+        "$LLVM_TOOLCHAIN/llvm-objcopy" --add-gnu-debuglink="$GITHUB_WORKSPACE/symbols/android-arm64-v8a/librwkv_mtk_np7.so.debug" librwkv_mtk_np7.so
+        "$LLVM_TOOLCHAIN/llvm-objcopy" --add-gnu-debuglink="$GITHUB_WORKSPACE/symbols/android-arm64-v8a/librwkv_mtk_np9.so.debug" librwkv_mtk_np9.so
         cd ..
         # mkdir build-debug && cd build-debug
-        # cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DENABLE_MTK_NP7_BACKEND=ON \
+        # cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKEND=ON -DENABLE_MTK_NP7_BACKEND=ON -DENABLE_MTK_NP9_BACKEND=ON \
         #   -DENABLE_TTS=ON -DENABLE_VISION=ON -DENABLE_WHISPER=ON -DBUILD_EXAMPLES=OFF -DENABLE_SERVER=OFF \
         #   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r25c \
         #   -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/android-ndk-r25c/build/cmake/android.toolchain.cmake -DCMAKE_BUILD_TYPE=Debug \
@@ -321,6 +327,8 @@ jobs:
         rm -rf package
         mkdir -p package
         cp build/librwkv_mobile.so package/librwkv_mobile.so
+        cp build/librwkv_mtk_np7.so package/librwkv_mtk_np7.so
+        cp build/librwkv_mtk_np9.so package/librwkv_mtk_np9.so
         pushd package
         zip -9 -y -r ../${{ env.PACKAGENAME }}.zip .
         popd

@@ -8,13 +8,84 @@
 
 #include "commondef.h"
 #include "runtime.h"
+#include "tensor.h"
 
 #define ENSURE_SUCCESS_OR_LOG_EXIT(x, msg) if (x != rwkvmobile::RWKV_SUCCESS) { std::cout << msg << std::endl; return 1; }
 
+static int run_evaluation_decode_only(
+    rwkvmobile::Runtime& runtime,
+    int model_id,
+    const std::string& source_text,
+    const std::string& target_text,
+    bool& correct,
+    float& logits_val,
+    std::string& output_text,
+    bool insert_bos_token
+) {
+    auto source_ids = runtime.tokenizer_encode(model_id, source_text);
+    auto target_ids = runtime.tokenizer_encode(model_id, target_text);
+    if (insert_bos_token) {
+        source_ids.insert(source_ids.begin(), 0);
+    }
+
+    rwkvmobile::Tensor1D logits;
+    int ret = runtime.clear_state(model_id);
+    if (ret != rwkvmobile::RWKV_SUCCESS) {
+        return ret;
+    }
+    for (int id : source_ids) {
+        ret = runtime.eval_logits(model_id, id, logits);
+        if (ret != rwkvmobile::RWKV_SUCCESS || logits.data_ptr == nullptr) {
+            return ret ? ret : rwkvmobile::RWKV_ERROR_RUNTIME;
+        }
+    }
+
+    correct = true;
+    logits_val = 0.0f;
+    std::vector<int> output_ids;
+    output_ids.reserve(target_ids.size());
+    for (size_t i = 0; i < target_ids.size(); ++i) {
+        if (logits.data_ptr == nullptr || logits.count == 0) {
+            return rwkvmobile::RWKV_ERROR_RUNTIME | rwkvmobile::RWKV_ERROR_INVALID_PARAMETERS;
+        }
+
+        int output_id = 0;
+        float max_val = rwkvmobile::tensor1d_get_f32(logits, 0);
+        for (size_t j = 1; j < logits.count; ++j) {
+            const float v = rwkvmobile::tensor1d_get_f32(logits, j);
+            if (v > max_val) {
+                max_val = v;
+                output_id = (int)j;
+            }
+        }
+
+        double sum = 0.0;
+        for (size_t j = 0; j < logits.count; ++j) {
+            sum += std::exp((double)rwkvmobile::tensor1d_get_f32(logits, j) - (double)max_val);
+        }
+        const int target_id = target_ids[i];
+        const double target_prob = std::exp((double)rwkvmobile::tensor1d_get_f32(logits, (size_t)target_id) - (double)max_val) / sum;
+        logits_val += (float)std::log(std::max(target_prob, 1e-45));
+
+        output_ids.push_back(output_id);
+        if (output_id != target_id) {
+            correct = false;
+        }
+        if (i + 1 < target_ids.size()) {
+            ret = runtime.eval_logits(model_id, target_id, logits);
+            if (ret != rwkvmobile::RWKV_SUCCESS || logits.data_ptr == nullptr) {
+                return ret ? ret : rwkvmobile::RWKV_ERROR_RUNTIME;
+            }
+        }
+    }
+    output_text = runtime.tokenizer_decode(model_id, output_ids);
+    return rwkvmobile::RWKV_SUCCESS;
+}
+
 int main(int argc, char **argv) {
     std::cout.setf(std::ios::unitbuf);
-    if (argc != 5) {
-        std::cerr << "Usage: " << argv[0] << " <tokenizer_path> <model_path> <backend> <text_path>\n";
+    if (argc < 5 || argc > 6) {
+        std::cerr << "Usage: " << argv[0] << " <tokenizer_path> <model_path> <backend> <text_path> [--decode-only]\n";
         return 1;
     }
 
@@ -22,6 +93,11 @@ int main(int argc, char **argv) {
     std::string model_path = argv[2];
     std::string backend = argv[3];
     std::string text_path = argv[4];
+    const bool decode_only = (argc == 6 && std::string(argv[5]) == "--decode-only");
+    if (argc == 6 && !decode_only) {
+        std::cerr << "Unknown argument: " << argv[5] << "\n";
+        return 1;
+    }
 
     rwkvmobile::Runtime runtime;
     int model_id = runtime.load_model(model_path, backend, tokenizer_path, nullptr); 
@@ -68,7 +144,10 @@ int main(int argc, char **argv) {
         bool correct = false;
         float logits_val = -1e9f;
         std::string output_text;
-        runtime.run_evaluation(model_id, prompt, target, correct, logits_val, output_text, true);
+        int ret = decode_only
+            ? run_evaluation_decode_only(runtime, model_id, prompt, target, correct, logits_val, output_text, true)
+            : runtime.run_evaluation(model_id, prompt, target, correct, logits_val, output_text, true);
+        ENSURE_SUCCESS_OR_LOG_EXIT(ret, "Evaluation failed");
         std::cout << output_text << std::endl;
 
         xcnt++;

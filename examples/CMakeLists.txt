@@ -21,6 +21,9 @@ target_link_libraries(mmlu PUBLIC rwkv_mobile_internal)
 add_executable(lambada lambada.cpp)
 target_link_libraries(lambada PUBLIC rwkv_mobile_internal)
 
+add_executable(lambada_logits_dump lambada_logits_dump.cpp)
+target_link_libraries(lambada_logits_dump PUBLIC rwkv_mobile_internal)
+
 add_executable(test_state_matching test_state_matching.cpp)
 target_link_libraries(test_state_matching PUBLIC rwkv_mobile_internal)
 

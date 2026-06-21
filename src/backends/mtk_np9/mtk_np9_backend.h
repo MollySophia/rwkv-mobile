@@ -1,5 +1,5 @@
-#ifndef MTK_NP7_BACKEND_H
-#define MTK_NP7_BACKEND_H
+#ifndef MTK_NP9_BACKEND_H
+#define MTK_NP9_BACKEND_H
 
 #include "backend.h"
 #include "mtk_rwkv_dlopen.h"
@@ -11,9 +11,9 @@
 
 namespace rwkvmobile {
 
-class mtk_np7_backend : public execution_provider {
+class mtk_np9_backend : public execution_provider {
 public:
-    ~mtk_np7_backend() {
+    ~mtk_np9_backend() {
         release_model();
         release();
     }

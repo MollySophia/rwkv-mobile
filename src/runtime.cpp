@@ -39,6 +39,10 @@
 #include "mtk_np7_backend.h"
 #endif
 
+#ifdef ENABLE_MTK_NP9
+#include "mtk_np9_backend.h"
+#endif
+
 #ifdef ENABLE_COREML
 #include "coreml_rwkv_backend.h"
 #endif
@@ -222,6 +226,8 @@ std::string backend_enum_to_str(int backend) {
             return "coreml";
         case RWKV_BACKEND_MLX:
             return "mlx";
+        case RWKV_BACKEND_MTK_NP9:
+            return "mtk_np9";
         default:
             return "unknown";
     }
@@ -244,6 +250,8 @@ int backend_str_to_enum(std::string backend) {
         return RWKV_BACKEND_COREML;
     } else if (backend == "mlx") {
         return RWKV_BACKEND_MLX;
+    } else if (backend == "mtk_np9") {
+        return RWKV_BACKEND_MTK_NP9;
     }
     return -1;
 }
@@ -374,6 +382,14 @@ int Runtime::load_model(std::string model_path, std::string backend_name, std::s
             [](execution_provider *p) { delete (mtk_np7_backend*)p; });
 #else
         LOGE("mtk_np7 backend is not supported on this platform\n");
+        return ret_model_id;
+#endif
+    } else if (backend_id == RWKV_BACKEND_MTK_NP9) {
+#ifdef ENABLE_MTK_NP9
+        model_instance->backend = std::unique_ptr<execution_provider, std::function<void(execution_provider*)>>(new mtk_np9_backend,
+            [](execution_provider *p) { delete (mtk_np9_backend*)p; });
+#else
+        LOGE("mtk_np9 backend is not supported on this platform\n");
         return ret_model_id;
 #endif
     } else if (backend_id == RWKV_BACKEND_COREML) {
@@ -610,6 +626,12 @@ int Runtime::get_available_backend_ids(std::vector<int> &backend_ids) {
 #ifdef ENABLE_MTK_NP7
     if (_soc_detect.get_platform_type() == PLATFORM_MEDIATEK) {
         backend_ids.push_back(RWKV_BACKEND_MTK_NP7);
+    }
+#endif
+
+#ifdef ENABLE_MTK_NP9
+    if (_soc_detect.get_platform_type() == PLATFORM_MEDIATEK) {
+        backend_ids.push_back(RWKV_BACKEND_MTK_NP9);
     }
 #endif
 

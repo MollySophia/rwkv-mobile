@@ -16,7 +16,8 @@ An inference runtime with multiple backends supported.
 - [x] ncnn: Initial support for rwkv v6/v7 unquantized models (suitable for running tiny models everywhere).
 - [x] Qualcomm Hexagon NPU: Based on Qualcomm's QNN SDK 2.42.0.
 - [x] MLX: Running RWKV on Apple Silicon devices using Apple's MLX framework.
-- [x] MediaTek Neuropilot7: Running RWKV on MediaTek NPU. Currently only supports Dimensity 9300 devices.
+- [x] MediaTek Neuropilot7: Running RWKV on Dimensity 9300 NPU.
+- [x] MediaTek Neuropilot9: Running RWKV on Dimensity 9500 NPU through Neuron Adapter/uSDK.
 - [x] CoreML: Running RWKV with Apple Neural Engine. Based on Apple's CoreML framework.
 - [ ] To be continued...
 
@@ -39,6 +40,8 @@ cmake .. -DENABLE_NCNN_BACKEND=ON -DENABLE_WEBRWKV_BACKEND=ON -DENABLE_QNN_BACKE
     -G Ninja
 ninja
 ```
+
+For Dimensity 9500/NP9 builds, use `-DENABLE_MTK_NP9_BACKEND=ON`. NP7 and NP9 can be enabled together; the MediaTek runtime archives are packaged as separate `librwkv_mtk_np7.so` and `librwkv_mtk_np9.so` libraries and loaded with `dlopen`. See [MTK_NP9_SUPPORT.md](MTK_NP9_SUPPORT.md) for the current NP9 integration notes.
 
 ## TODO:
 - [ ] Better tensor abstraction for different backends

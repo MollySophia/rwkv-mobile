@@ -23,6 +23,7 @@ option(RWKV_MOBILE_LLAMACPP_PORTABLE_X86 "Build the bundled llama.cpp x86 CPU ba
 option(ENABLE_QNN_BACKEND "Enable QNN backend" OFF)
 option(ENABLE_MNN_BACKEND "Enable MNN backend" ON)
 option(ENABLE_MTK_NP7_BACKEND "Enable MediaTek NP7 backend" OFF)
+option(ENABLE_MTK_NP9_BACKEND "Enable MediaTek NP9 backend" OFF)
 option(ENABLE_COREML_BACKEND "Enable CoreML backend" OFF)
 option(ENABLE_MLX_BACKEND "Enable MLX backend" OFF)
 
@@ -233,6 +234,14 @@ endif()
 
 if (ENABLE_MTK_NP7_BACKEND)
     set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS} src/backends/mtk_np7/mtk_np7_backend.cpp)
+endif()
+
+if (ENABLE_MTK_NP9_BACKEND)
+    set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS} src/backends/mtk_np9/mtk_np9_backend.cpp)
+endif()
+
+if (ENABLE_MTK_NP7_BACKEND OR ENABLE_MTK_NP9_BACKEND)
+    set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS} src/backends/mtk_common/mtk_rwkv_dlopen.cpp)
 endif()
 
 if (ENABLE_LLAMACPP_BACKEND)
@@ -671,15 +680,59 @@ if (ENABLE_MTK_NP7_BACKEND)
 
     target_compile_definitions(rwkv_mobile_internal PUBLIC ENABLE_MTK_NP7)
     target_include_directories(rwkv_mobile_internal PUBLIC
+        src/backends/mtk_common
         src/backends/mtk_np7
         src/backends/mtk_np7/include
     )
 
-    add_library(rwkv_mtk_prebuilt STATIC IMPORTED)
-    set_target_properties(rwkv_mtk_prebuilt PROPERTIES
+    add_library(rwkv_mtk_np7_archive STATIC IMPORTED)
+    set_target_properties(rwkv_mtk_np7_archive PROPERTIES
         IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/mtk_np7/prebuilt/${ANDROID_ABI}/librwkv_mtk.a"
     )
-    target_link_libraries(rwkv_mobile_internal PUBLIC rwkv_mtk_prebuilt)
+
+    add_library(rwkv_mtk_np7_shared SHARED src/backends/mtk_common/mtk_shared_anchor.cpp)
+    set_target_properties(rwkv_mtk_np7_shared PROPERTIES OUTPUT_NAME "rwkv_mtk_np7")
+    target_link_options(rwkv_mtk_np7_shared PRIVATE "-Wl,-Bsymbolic")
+    target_link_libraries(rwkv_mtk_np7_shared PRIVATE
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,rwkv_mtk_np7_archive>"
+        log
+        android
+        dl
+    )
+    add_dependencies(rwkv_mobile_internal rwkv_mtk_np7_shared)
+endif()
+
+if (ENABLE_MTK_NP9_BACKEND)
+    if (NOT ANDROID)
+        message(FATAL_ERROR "mtk_np9 backend is only supported on Android builds")
+    endif()
+
+    target_compile_definitions(rwkv_mobile_internal PUBLIC ENABLE_MTK_NP9)
+    target_include_directories(rwkv_mobile_internal PUBLIC
+        src/backends/mtk_common
+        src/backends/mtk_np9
+        src/backends/mtk_np9/include
+    )
+
+    add_library(rwkv_mtk_np9_archive STATIC IMPORTED)
+    set_target_properties(rwkv_mtk_np9_archive PROPERTIES
+        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/mtk_np9/prebuilt/${ANDROID_ABI}/librwkv_mtk.a"
+    )
+
+    add_library(rwkv_mtk_np9_shared SHARED src/backends/mtk_common/mtk_shared_anchor.cpp)
+    set_target_properties(rwkv_mtk_np9_shared PROPERTIES OUTPUT_NAME "rwkv_mtk_np9")
+    target_link_options(rwkv_mtk_np9_shared PRIVATE "-Wl,-Bsymbolic")
+    target_link_libraries(rwkv_mtk_np9_shared PRIVATE
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,rwkv_mtk_np9_archive>"
+        log
+        android
+        dl
+    )
+    add_dependencies(rwkv_mobile_internal rwkv_mtk_np9_shared)
+endif()
+
+if (ENABLE_MTK_NP7_BACKEND OR ENABLE_MTK_NP9_BACKEND)
+    target_link_libraries(rwkv_mobile_internal PUBLIC dl)
 endif()
 
 if (BUILD_EXAMPLES)
