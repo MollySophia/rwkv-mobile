@@ -35,15 +35,26 @@ public:
 
     int release_model() override;
     int release() override;
+    double get_prefill_speed() override {
+        return _prefill_speed;
+    }
+    double get_decode_speed() override {
+        return _decode_speed;
+    }
+    void reset_speed_stats() override {
+        _prefill_speed = -1;
+        _decode_speed = -1;
+    }
 
 private:
     MtkRwkvDlopen _library;
     void* _runtime = nullptr;
     std::vector<float> _logits_buffer;
     Tensor1D _logits_fp16_view;
+    double _prefill_speed = -1;
+    double _decode_speed = -1;
 };
 
 } // namespace rwkvmobile
 
 #endif
-

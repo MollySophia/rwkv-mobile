@@ -3478,7 +3478,11 @@ double Runtime::get_avg_prefill_speed(int model_id) {
     auto &model = _models.at(model_id);
 
     double speed_from_backend = model->backend ? model->backend->get_prefill_speed() : -1.0;
-    if (model->backend_name == "qnn") {
+    const bool prefer_backend_prefill_speed =
+        model->backend_name == "qnn" ||
+        model->backend_name == "mtk_np7" ||
+        model->backend_name == "mtk_np9";
+    if (prefer_backend_prefill_speed) {
         if (speed_from_backend > 0.0) {
             _prefill_speed = speed_from_backend;
             return speed_from_backend;

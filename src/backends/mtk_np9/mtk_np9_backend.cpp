@@ -7,6 +7,7 @@
 #include "include/rwkv_mtk.h"
 
 #include <filesystem>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -275,9 +276,15 @@ int mtk_np9_backend::eval(int id, Tensor1D & logits) {
     if (_runtime == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
+    auto start = std::chrono::high_resolution_clock::now();
     void* logits_ptr = mtk_api(_library).inference_once(_runtime, id);
+    auto end = std::chrono::high_resolution_clock::now();
     if (!logits_ptr) {
         return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+    }
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    if (duration_us > 0) {
+        _decode_speed = 1000000.0 / (double)duration_us;
     }
 
     // RWKV MTK runtime returns fp16 logits buffer.
@@ -297,9 +304,15 @@ int mtk_np9_backend::eval(std::vector<int> ids, Tensor1D & logits) {
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
     void* logits_ptr = mtk_api(_library).prefill(_runtime, ids.data(), ids.size());
+    auto end = std::chrono::high_resolution_clock::now();
     if (!logits_ptr) {
         return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+    }
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    if (duration_us > 0) {
+        _prefill_speed = (double)ids.size() * 1000000.0 / (double)duration_us;
     }
 
     _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
@@ -315,9 +328,19 @@ int mtk_np9_backend::eval_with_embeddings(const float *embeddings, int n_tokens,
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
     void* logits_ptr = mtk_api(_library).eval_with_embeddings(_runtime, embeddings, (size_t)n_tokens);
+    auto end = std::chrono::high_resolution_clock::now();
     if (!logits_ptr) {
         return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+    }
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    if (duration_us > 0) {
+        if (n_tokens > 1) {
+            _prefill_speed = (double)n_tokens * 1000000.0 / (double)duration_us;
+        } else {
+            _decode_speed = 1000000.0 / (double)duration_us;
+        }
     }
 
     _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
