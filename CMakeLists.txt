@@ -244,17 +244,18 @@ if (ENABLE_MTK_NP7_BACKEND OR ENABLE_MTK_NP9_BACKEND)
     set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS} src/backends/mtk_common/mtk_rwkv_dlopen.cpp)
 endif()
 
+if (ENABLE_VISION)
+    set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS}
+        src/multimodal/vision/vision_encoder.cpp
+        src/multimodal/vision/preprocessor.cpp
+    )
+endif()
+
 if (ENABLE_LLAMACPP_BACKEND)
     set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS}
         src/backends/llama_cpp/llama_cpp_backend.cpp
         src/embedding/rwkv_embedding.cpp
     )
-    if (ENABLE_VISION)
-        set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS}
-            src/multimodal/vision/vision_encoder.cpp
-            src/multimodal/vision/preprocessor.cpp
-        )
-    endif()
 
     if (ENABLE_WHISPER)
         set(RWKV_MOBILE_SRCS ${RWKV_MOBILE_SRCS}
@@ -595,6 +596,11 @@ if (ENABLE_MLX_BACKEND)
     target_link_libraries(rwkv_mobile_internal PUBLIC ${MLX_LIB_PATH} ${FOUNDATION_LIBRARY} ${METAL_FRAMEWORK} ${Accelerate_LIBRARY})
 endif()
 
+if (ENABLE_VISION)
+    target_include_directories(rwkv_mobile_internal PUBLIC src/multimodal/vision)
+    target_compile_definitions(rwkv_mobile_internal PUBLIC ENABLE_VISION)
+endif()
+
 if (ENABLE_LLAMACPP_BACKEND)
     if (APPLE AND GGML_ACCELERATE)
         if (ACCELERATE_FRAMEWORK)
@@ -620,11 +626,6 @@ if (ENABLE_LLAMACPP_BACKEND)
     if (GGML_VULKAN AND TARGET ggml-vulkan)
         add_compile_definitions(GGML_USE_VULKAN)
         set(LLAMACPP_EXTRA_LIBS ${LLAMACPP_EXTRA_LIBS} $<TARGET_OBJECTS:ggml-vulkan>)
-    endif()
-
-    if (ENABLE_VISION)
-        target_include_directories(rwkv_mobile_internal PUBLIC src/multimodal/vision)
-        target_compile_definitions(rwkv_mobile_internal PUBLIC ENABLE_VISION)
     endif()
 
     if (ENABLE_WHISPER)

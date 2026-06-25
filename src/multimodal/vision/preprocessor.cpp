@@ -518,6 +518,86 @@ void VisionEncoder::preprocess(const image_u8 &img, std::vector<image_f32> &res_
     }
 }
 
+void VisionEncoder::smart_resize_qwen_vl(int height, int width, int factor, int min_pixels, int max_pixels, int &resized_height, int &resized_width) {
+    if (height < factor || width < factor) {
+        const double scale = std::max(static_cast<double>(factor) / static_cast<double>(width),
+                                      static_cast<double>(factor) / static_cast<double>(height));
+        width = static_cast<int>(static_cast<double>(width) * scale);
+        height = static_cast<int>(static_cast<double>(height) * scale);
+    }
+
+    resized_height = std::max(static_cast<int>(std::round(static_cast<double>(height) / factor)) * factor, factor);
+    resized_width = std::max(static_cast<int>(std::round(static_cast<double>(width) / factor)) * factor, factor);
+
+    if (resized_height * resized_width > max_pixels) {
+        const double beta = std::sqrt(static_cast<double>(height) * static_cast<double>(width) / static_cast<double>(max_pixels));
+        resized_height = std::max(static_cast<int>(std::floor(static_cast<double>(height) / beta / factor)) * factor, factor);
+        resized_width = std::max(static_cast<int>(std::floor(static_cast<double>(width) / beta / factor)) * factor, factor);
+    } else if (resized_height * resized_width < min_pixels) {
+        const double beta = std::sqrt(static_cast<double>(min_pixels) / (static_cast<double>(height) * static_cast<double>(width)));
+        resized_height = static_cast<int>(std::ceil(static_cast<double>(height) * beta / factor)) * factor;
+        resized_width = static_cast<int>(std::ceil(static_cast<double>(width) * beta / factor)) * factor;
+    }
+}
+
+void VisionEncoder::preprocess_qwen_vl_patches(const image_u8 &img, std::vector<float> &patches, qwen_vl_grid &grid) {
+    constexpr int patch_size = 16;
+    constexpr int temporal_patch_size = 2;
+    constexpr int merge_size = 2;
+    constexpr int channels = 3;
+    constexpr int factor = patch_size * merge_size;
+
+    int target_h = 0;
+    int target_w = 0;
+    smart_resize_qwen_vl(img.ny, img.nx, factor, qwen_vl_min_pixels, qwen_vl_max_pixels, target_h, target_w);
+
+    grid.t = 1;
+    grid.h = target_h / patch_size;
+    grid.w = target_w / patch_size;
+
+    image_u8 resized_image;
+    bicubic_resize(img, resized_image, target_w, target_h);
+
+    image_f32 resized_f32;
+    rescale_image_u8_to_f32(&resized_image, &resized_f32, 0.00392156862745098);
+    image_f32 normalized;
+    normalize_image_f32(&resized_f32, &normalized, image_mean, image_std);
+
+    const int bh_count = grid.h / merge_size;
+    const int bw_count = grid.w / merge_size;
+    const int num_rows = grid.t * bh_count * bw_count * merge_size * merge_size;
+    const int patch_dim = channels * temporal_patch_size * patch_size * patch_size;
+    patches.assign(static_cast<size_t>(num_rows) * patch_dim, 0.0f);
+
+    size_t row = 0;
+    for (int t = 0; t < grid.t; t++) {
+        for (int bh = 0; bh < bh_count; bh++) {
+            for (int bw = 0; bw < bw_count; bw++) {
+                for (int m = 0; m < merge_size; m++) {
+                    for (int n = 0; n < merge_size; n++) {
+                        size_t col = 0;
+                        for (int c = 0; c < channels; c++) {
+                            for (int pt = 0; pt < temporal_patch_size; pt++) {
+                                (void)pt;
+                                for (int ph = 0; ph < patch_size; ph++) {
+                                    for (int pw = 0; pw < patch_size; pw++) {
+                                        const int y = (bh * merge_size + m) * patch_size + ph;
+                                        const int x = (bw * merge_size + n) * patch_size + pw;
+                                        const size_t src_index = static_cast<size_t>(channels) * (y * target_w + x) + c;
+                                        patches[row * patch_dim + col] = normalized.buf[src_index];
+                                        col++;
+                                    }
+                                }
+                            }
+                        }
+                        row++;
+                    }
+                }
+            }
+        }
+    }
+}
+
 bool VisionEncoder::image_u8_load_from_bytes(const unsigned char * bytes, size_t bytes_length, image_u8 &img) {
     int nx, ny, nc;
     auto * data = stbi_load_from_memory(bytes, bytes_length, &nx, &ny, &nc, 3);

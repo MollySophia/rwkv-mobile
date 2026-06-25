@@ -24,8 +24,8 @@ char msg0[300];
 int main(int argc, char **argv) {
     // set stdout to be unbuffered
     setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc != 7) {
-        std::cerr << "Usage: " << argv[0] << " <model_file> <encoder_file> <adapter_file> <tokenizer_file> <image_file> <backend>" << std::endl;
+    if (argc != 7 && argc != 8 && argc != 9) {
+        std::cerr << "Usage: " << argv[0] << " <model_file> <encoder_file> <adapter_file> <tokenizer_file> <image_file> <backend> [prompt] [hf]" << std::endl;
         return 1;
     }
 
@@ -39,14 +39,19 @@ int main(int argc, char **argv) {
     rwkvmobile_runtime_set_bos_token(runtime, model_id, "\x16");
     rwkvmobile_runtime_set_token_banned(runtime, model_id, {0}, 1);
     rwkvmobile_runtime_set_space_after_roles(runtime, model_id, 0);
+    bool hf_compare_mode = argc == 9 && std::string(argv[8]) == "hf";
+    if (hf_compare_mode) {
+        rwkvmobile_runtime_set_thinking_token(runtime, model_id, "");
+    }
 
     const char *unique_identifier = "abababababa";
     rwkvmobile_runtime_set_image_unique_identifier(runtime, unique_identifier);
 
-    snprintf(msg0, sizeof(msg0), "<%s>%s</%s>Recognize text", unique_identifier, argv[5], unique_identifier);
+    const char *prompt = argc >= 8 ? argv[7] : "Recognize text";
+    snprintf(msg0, sizeof(msg0), "<%s>%s</%s>%s", unique_identifier, argv[5], unique_identifier, prompt);
     const char *input_list[] = {msg0};
 
-    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, input_list, 1, 500, nullptr, false, false, true, FORCE_LANG_NONE);
+    rwkvmobile_runtime_eval_chat_with_history_async(runtime, model_id, input_list, 1, 64, nullptr, hf_compare_mode, false, FORCE_LANG_NONE, true);
 
     while (rwkvmobile_runtime_is_generating(runtime, model_id)) {
         custom_sleep(1);

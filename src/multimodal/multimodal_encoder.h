@@ -11,6 +11,8 @@ public:
     virtual ~MultimodalEncoder() = default;
     virtual int load_model(const std::string &model_path, const std::string &adapter_path) = 0;
     virtual bool encode(const std::string &path, std::vector<float> &embeddings, int &n_tokens, bool force_no_postnorm = false) = 0;
+    virtual std::vector<int> prefix_tokens() const { return {}; }
+    virtual std::vector<int> suffix_tokens() const { return {}; }
 };
 
 } // namespace rwkvmobile

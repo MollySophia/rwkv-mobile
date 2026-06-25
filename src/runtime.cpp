@@ -797,8 +797,38 @@ int Runtime::eval_logits_with_embeddings(int model_id, const float *embeddings, 
     if (model->backend == nullptr) {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
+    if (embeddings == nullptr || n_tokens <= 0) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    const int hidden_size = model->backend->get_hidden_size();
+    if (hidden_size <= 0) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
     auto start = std::chrono::high_resolution_clock::now();
-    auto ret = model->backend->eval_with_embeddings(embeddings, n_tokens, logits);
+    int ret = RWKV_SUCCESS;
+    int i = 0;
+    for (; i + _prefill_chunk_size <= n_tokens; i += _prefill_chunk_size) {
+        ret = model->backend->eval_with_embeddings(
+            embeddings + (size_t)i * (size_t)hidden_size,
+            _prefill_chunk_size,
+            logits
+        );
+        if (ret != RWKV_SUCCESS) {
+            return ret;
+        }
+    }
+    if (i < n_tokens) {
+        ret = model->backend->eval_with_embeddings(
+            embeddings + (size_t)i * (size_t)hidden_size,
+            n_tokens - i,
+            logits
+        );
+        if (ret != RWKV_SUCCESS) {
+            return ret;
+        }
+    }
     auto end = std::chrono::high_resolution_clock::now();
     const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     _record_speed_sample(*model, /*is_prefill=*/(n_tokens > 1), /*tokens=*/n_tokens, duration_us);
@@ -1311,12 +1341,30 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
                         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
                     }
                     auto end = std::chrono::high_resolution_clock::now();
-                    LOGI("siglip duration: %lld ms", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+                    LOGI("vision encode duration: %lld ms", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+                    auto prefix_tokens = model->multimodal_encoder->prefix_tokens();
+                    if (!prefix_tokens.empty()) {
+                        ret = eval_logits(model_id, prefix_tokens, logits);
+                        if (ret) {
+                            model->is_generating = false;
+                            LOGE("failed to eval image prefix tokens\n");
+                            return ret;
+                        }
+                    }
                     ret = eval_logits_with_embeddings(model_id, embeddings.data(), n_tokens, logits);
                     if (ret) {
                         model->is_generating = false;
                         LOGE("failed to eval logits with embeddings for image chunk\n");
                         return ret;
+                    }
+                    auto suffix_tokens = model->multimodal_encoder->suffix_tokens();
+                    if (!suffix_tokens.empty()) {
+                        ret = eval_logits(model_id, suffix_tokens, logits);
+                        if (ret) {
+                            model->is_generating = false;
+                            LOGE("failed to eval image suffix tokens\n");
+                            return ret;
+                        }
                     }
 #endif
                     ret = model->backend->register_state_checkpoint(node, chunk.tokens, logits);
@@ -2192,10 +2240,28 @@ int Runtime::set_audio_prompt(int model_id, std::string path) {
 
     Tensor1D logits;
 
-    int ret = eval_logits_with_embeddings(model_id, embeddings.data(), n_tokens, logits);
+    int ret;
+    auto prefix_tokens = model->multimodal_encoder->prefix_tokens();
+    if (!prefix_tokens.empty()) {
+        ret = eval_logits(model_id, prefix_tokens, logits);
+        if (ret) {
+            LOGE("%s failed to eval multimodal prefix tokens\n", __func__);
+            return ret;
+        }
+    }
+
+    ret = eval_logits_with_embeddings(model_id, embeddings.data(), n_tokens, logits);
     if (ret) {
         LOGE("%s failed to eval logits with embeddings\n", __func__);
         return ret;
+    }
+    auto suffix_tokens = model->multimodal_encoder->suffix_tokens();
+    if (!suffix_tokens.empty()) {
+        ret = eval_logits(model_id, suffix_tokens, logits);
+        if (ret) {
+            LOGE("%s failed to eval multimodal suffix tokens\n", __func__);
+            return ret;
+        }
     }
     model->backend->register_state_checkpoint(node, ids, logits);
     return RWKV_SUCCESS;
