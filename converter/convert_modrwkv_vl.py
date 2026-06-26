@@ -90,20 +90,33 @@ def _map_llm_key(key: str) -> str | None:
     mapped = mapped.replace(".w2.bias", ".w0.weight")
     mapped = mapped.replace(".a2.bias", ".a0.weight")
     mapped = mapped.replace(".v2.bias", ".v0.weight")
+
+    # In standard RWKV Eagle .pth format, block 0 uses ln0 (not pre_ln)
+    # as the pre-attention layer norm.
+    if mapped.startswith("blocks.0.pre_ln."):
+        mapped = "blocks.0.ln0." + mapped[len("blocks.0.pre_ln."):]
+
+    # Standard RWKV .pth stores lora-style weight keys without .weight suffix.
+    lora_weight_keys = (
+        ".att.w1.weight", ".att.w2.weight",
+        ".att.a1.weight", ".att.a2.weight",
+        ".att.v1.weight", ".att.v2.weight",
+        ".att.g1.weight", ".att.g2.weight",
+        ".att.w0.weight", ".att.a0.weight", ".att.v0.weight",
+    )
+    if mapped.endswith(lora_weight_keys):
+        mapped = mapped[:-len(".weight")]
+
     return mapped
 
 
 def _map_llm_tensor(source_key: str, mapped_key: str, tensor: torch.Tensor) -> torch.Tensor:
     del source_key
     lora_suffixes = (
-        ".att.w1.weight",
-        ".att.w2.weight",
-        ".att.a1.weight",
-        ".att.a2.weight",
-        ".att.v1.weight",
-        ".att.v2.weight",
-        ".att.g1.weight",
-        ".att.g2.weight",
+        ".att.w1", ".att.w2",
+        ".att.a1", ".att.a2",
+        ".att.v1", ".att.v2",
+        ".att.g1", ".att.g2",
     )
     if mapped_key.endswith(lora_suffixes):
         return tensor.transpose(0, 1).contiguous()
