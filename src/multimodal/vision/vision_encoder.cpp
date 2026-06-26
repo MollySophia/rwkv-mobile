@@ -229,7 +229,11 @@ bool VisionEncoder::encode(const std::string &path, std::vector<float> &embeddin
 
             vision_encoder_mnn_interpretor->runSession(vision_encoder_mnn_session);
             if (qwen_combined_model) {
-                outputTensor = vision_encoder_mnn_interpretor->getSessionOutput(vision_encoder_mnn_session, "image_embeddings");
+                const char *output_name = force_no_postnorm ? "image_embeddings" : "output_with_rwkv_norm";
+                outputTensor = vision_encoder_mnn_interpretor->getSessionOutput(vision_encoder_mnn_session, output_name);
+                if (outputTensor == nullptr) {
+                    outputTensor = vision_encoder_mnn_interpretor->getSessionOutput(vision_encoder_mnn_session, "image_embeddings");
+                }
                 if (outputTensor == nullptr) {
                     outputTensor = vision_encoder_mnn_interpretor->getSessionOutput(vision_encoder_mnn_session, "output");
                 }
@@ -260,7 +264,11 @@ bool VisionEncoder::encode(const std::string &path, std::vector<float> &embeddin
             delete adapterTensor;
 
             vision_adapter_mnn_interpretor->runSession(vision_adapter_mnn_session);
-            outputTensor = vision_adapter_mnn_interpretor->getSessionOutput(vision_adapter_mnn_session, "image_embeddings");
+            const char *output_name = force_no_postnorm ? "image_embeddings" : "output_with_rwkv_norm";
+            outputTensor = vision_adapter_mnn_interpretor->getSessionOutput(vision_adapter_mnn_session, output_name);
+            if (outputTensor == nullptr) {
+                outputTensor = vision_adapter_mnn_interpretor->getSessionOutput(vision_adapter_mnn_session, "image_embeddings");
+            }
             if (outputTensor == nullptr) {
                 outputTensor = vision_adapter_mnn_interpretor->getSessionOutput(vision_adapter_mnn_session, "output");
             }

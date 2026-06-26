@@ -287,6 +287,10 @@ class _VisionProjector(torch.nn.Module):
             num_deepstack=int(projector_config.get("num_deepstack") or 0),
             use_conv=bool(config.get("use_conv_in_projector", False)),
         )
+        self.rwkv_pre_norm = torch.nn.LayerNorm(
+            int(projector_config["project_dim"]),
+            eps=float(config.get("text_config", {}).get("norm_eps", 1e-5)),
+        )
         self._load_weights(model_dir)
         self.to(dtype=dtype)
         self.eval()
@@ -301,19 +305,37 @@ class _VisionProjector(torch.nn.Module):
                         encoder_state[key.removeprefix("model.encoder.")] = f.get_tensor(key)
                     elif key.startswith("model.proj."):
                         projector_state[key.removeprefix("model.proj.")] = f.get_tensor(key)
+                    elif key == "model.llm.layers.0.pre_norm.weight":
+                        projector_state["rwkv_pre_norm.weight"] = f.get_tensor(key)
+                    elif key == "model.llm.layers.0.pre_norm.bias":
+                        projector_state["rwkv_pre_norm.bias"] = f.get_tensor(key)
 
         missing, unexpected = self.encoder.load_state_dict(encoder_state, strict=False)
         if missing or unexpected:
             raise RuntimeError(f"Vision encoder weight mismatch: missing={missing}, unexpected={unexpected}")
-        missing, unexpected = self.proj.load_state_dict(projector_state, strict=False)
+        projector_only_state = {
+            key: value
+            for key, value in projector_state.items()
+            if not key.startswith("rwkv_pre_norm.")
+        }
+        missing, unexpected = self.proj.load_state_dict(projector_only_state, strict=False)
         if missing or unexpected:
             raise RuntimeError(f"Projector weight mismatch: missing={missing}, unexpected={unexpected}")
+        norm_state = {
+            key.removeprefix("rwkv_pre_norm."): value
+            for key, value in projector_state.items()
+            if key.startswith("rwkv_pre_norm.")
+        }
+        missing, unexpected = self.rwkv_pre_norm.load_state_dict(norm_state, strict=True)
+        if missing or unexpected:
+            raise RuntimeError(f"RWKV pre-norm weight mismatch: missing={missing}, unexpected={unexpected}")
 
     def forward(self, pixel_values: torch.Tensor, image_grid_thw: torch.Tensor) -> torch.Tensor:
         vision_output = self.encoder(pixel_values, image_grid_thw)
         vision_embeds = vision_output.pooler_output
         projected, _ = self.proj(vision_embeds, [])
-        return projected.reshape(-1, projected.shape[-1])
+        image_embeddings = projected.reshape(-1, projected.shape[-1])
+        return image_embeddings, self.rwkv_pre_norm(image_embeddings)
 
 
 class _QwenVisionEncoder(torch.nn.Module):
@@ -381,6 +403,10 @@ class _QwenVisionAdapter(torch.nn.Module):
             num_deepstack=int(projector_config.get("num_deepstack") or 0),
             use_conv=bool(config.get("use_conv_in_projector", False)),
         )
+        self.rwkv_pre_norm = torch.nn.LayerNorm(
+            int(projector_config["project_dim"]),
+            eps=float(config.get("text_config", {}).get("norm_eps", 1e-5)),
+        )
         self._load_weights(model_dir)
         self.to(dtype=dtype)
         self.eval()
@@ -392,14 +418,32 @@ class _QwenVisionAdapter(torch.nn.Module):
                 for key in f.keys():
                     if key.startswith("model.proj."):
                         projector_state[key.removeprefix("model.proj.")] = f.get_tensor(key)
+                    elif key == "model.llm.layers.0.pre_norm.weight":
+                        projector_state["rwkv_pre_norm.weight"] = f.get_tensor(key)
+                    elif key == "model.llm.layers.0.pre_norm.bias":
+                        projector_state["rwkv_pre_norm.bias"] = f.get_tensor(key)
 
-        missing, unexpected = self.proj.load_state_dict(projector_state, strict=False)
+        projector_only_state = {
+            key: value
+            for key, value in projector_state.items()
+            if not key.startswith("rwkv_pre_norm.")
+        }
+        missing, unexpected = self.proj.load_state_dict(projector_only_state, strict=False)
         if missing or unexpected:
             raise RuntimeError(f"Projector weight mismatch: missing={missing}, unexpected={unexpected}")
+        norm_state = {
+            key.removeprefix("rwkv_pre_norm."): value
+            for key, value in projector_state.items()
+            if key.startswith("rwkv_pre_norm.")
+        }
+        missing, unexpected = self.rwkv_pre_norm.load_state_dict(norm_state, strict=True)
+        if missing or unexpected:
+            raise RuntimeError(f"RWKV pre-norm weight mismatch: missing={missing}, unexpected={unexpected}")
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         projected, _ = self.proj(input, [])
-        return projected.reshape(-1, projected.shape[-1])
+        image_embeddings = projected.reshape(-1, projected.shape[-1])
+        return image_embeddings, self.rwkv_pre_norm(image_embeddings)
 
 
 def _parse_grid(value: str) -> tuple[int, int, int]:
@@ -430,12 +474,13 @@ def export_vision_onnx(args: argparse.Namespace) -> None:
     dummy_grid = torch.tensor([args.grid_thw], dtype=torch.int32)
 
     with torch.inference_mode():
-        output = model(dummy, dummy_grid)
+        output, output_with_rwkv_norm = model(dummy, dummy_grid)
     print(
         "Vision/projector shape:",
         f"pixel_values={tuple(dummy.shape)}",
         f"image_grid_thw={tuple(dummy_grid.shape)}",
         f"image_embeddings={tuple(output.shape)}",
+        f"output_with_rwkv_norm={tuple(output_with_rwkv_norm.shape)}",
     )
 
     torch.onnx.export(
@@ -443,13 +488,14 @@ def export_vision_onnx(args: argparse.Namespace) -> None:
         (dummy, dummy_grid),
         out,
         input_names=["pixel_values", "image_grid_thw"],
-        output_names=["image_embeddings"],
+        output_names=["image_embeddings", "output_with_rwkv_norm"],
         opset_version=args.opset,
         do_constant_folding=True,
         dynamic_axes={
             "pixel_values": {0: "num_patches"},
             "image_grid_thw": {0: "num_images"},
             "image_embeddings": {0: "num_image_tokens"},
+            "output_with_rwkv_norm": {0: "num_image_tokens"},
         },
     )
     print(f"Wrote ONNX to {out}")
@@ -503,23 +549,25 @@ def export_vision_split_onnx(args: argparse.Namespace) -> None:
     adapter = _QwenVisionAdapter(args.model_dir, dtype=dtype)
     dummy_adapter_input = torch.zeros_like(pooler_output)
     with torch.inference_mode():
-        image_embeddings = adapter(dummy_adapter_input)
+        image_embeddings, output_with_rwkv_norm = adapter(dummy_adapter_input)
     print(
         "Vision adapter shape:",
         f"input={tuple(dummy_adapter_input.shape)}",
         f"image_embeddings={tuple(image_embeddings.shape)}",
+        f"output_with_rwkv_norm={tuple(output_with_rwkv_norm.shape)}",
     )
     torch.onnx.export(
         adapter,
         (dummy_adapter_input,),
         adapter_out,
         input_names=["input"],
-        output_names=["image_embeddings"],
+        output_names=["image_embeddings", "output_with_rwkv_norm"],
         opset_version=args.opset,
         do_constant_folding=True,
         dynamic_axes={
             "input": {0: "num_merged_patches"},
             "image_embeddings": {0: "num_image_tokens"},
+            "output_with_rwkv_norm": {0: "num_image_tokens"},
         },
     )
     print(f"Wrote vision adapter ONNX to {adapter_out}")
@@ -633,7 +681,8 @@ def copy_runtime_metadata(model_dir: Path, out_dir: Path) -> None:
         "vision_encoder_input": "pixel_values",
         "vision_encoder_output": "pooler_output",
         "vision_adapter_input": "input",
-        "vision_adapter_output": "image_embeddings",
+        "vision_adapter_output": "output_with_rwkv_norm",
+        "vision_adapter_raw_output": "image_embeddings",
         "mobile_prefill_order": [
             "text_before_image",
             "vision_start_token",
