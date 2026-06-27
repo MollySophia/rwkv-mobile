@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <cstdlib>
+#include <fstream>
 
 namespace rwkvmobile {
 
@@ -326,7 +328,7 @@ void VisionEncoder::bicubic_resize(const image_u8& src, image_u8& dst, int targe
 
         double* k = &kk_horiz[xx * ksize_horiz];
         for (int32_t x = 0; x < xmax; ++x) {
-            double filter_x = (x + xmin - center + half_pixel) * ss;
+            double filter_x = (x + xmin - center) * ss;
             double w = cubic_weight(filter_x);
             k[x] = w;
             ww += w;
@@ -364,7 +366,7 @@ void VisionEncoder::bicubic_resize(const image_u8& src, image_u8& dst, int targe
 
         double* k = &kk_vert[yy * ksize_vert];
         for (int32_t y = 0; y < ymax; ++y) {
-            double filter_y = (y + ymin - center + half_pixel) * ss;
+            double filter_y = (y + ymin - center) * ss;
             double w = cubic_weight(filter_y);
             k[y] = w;
             ww += w;
@@ -550,6 +552,8 @@ void VisionEncoder::preprocess_qwen_vl_patches(const image_u8 &img, std::vector<
     int target_h = 0;
     int target_w = 0;
     smart_resize_qwen_vl(img.ny, img.nx, factor, qwen_vl_min_pixels, qwen_vl_max_pixels, target_h, target_w);
+    LOGI("Qwen-VL resize: original=%dx%d, target=%dx%d, min_pixels=%d, max_pixels=%d",
+         img.nx, img.ny, target_w, target_h, qwen_vl_min_pixels, qwen_vl_max_pixels);
 
     grid.t = 1;
     grid.h = target_h / patch_size;
@@ -594,6 +598,16 @@ void VisionEncoder::preprocess_qwen_vl_patches(const image_u8 &img, std::vector<
                     }
                 }
             }
+        }
+    }
+
+    if (const char *dump_path = std::getenv("RWKV_QWEN_VL_DUMP_PATCHES")) {
+        std::ofstream out(dump_path, std::ios::binary);
+        if (out.good()) {
+            out.write(reinterpret_cast<const char *>(patches.data()), static_cast<std::streamsize>(patches.size() * sizeof(float)));
+            LOGI("Qwen-VL dumped pixel_values to %s, floats=%zu", dump_path, patches.size());
+        } else {
+            LOGE("Qwen-VL failed to dump pixel_values to %s", dump_path);
         }
     }
 }
