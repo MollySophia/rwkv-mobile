@@ -7,6 +7,7 @@
 #include "include/rwkv_mtk.h"
 
 #include <filesystem>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -22,17 +23,22 @@ struct TypedMtkRwkvApi {
                             const RWKVRuntimeOptions& runtimeOptions);
     using ReleaseFn = void (*)(void* runtime);
     using InferenceOnceFn = void* (*)(void* runtime, int input_token);
+    using InferenceBatchFn = void* (*)(void* runtime, const int* input_tokens, size_t batch_size);
     using PrefillFn = void* (*)(void* runtime, const int* input_tokens, size_t num_tokens);
     using EvalWithEmbeddingsFn = void* (*)(void* runtime, const float* embeddings, size_t num_tokens);
     using ResetFn = void (*)(void* runtime);
     using GetStateSizeFn = size_t (*)(void* runtime, int layer);
     using GetStateFn = bool (*)(void* runtime, int layer, void* out, size_t out_size);
     using SetStateFn = bool (*)(void* runtime, int layer, const void* data, size_t size);
+    using GetStateSlotFn = bool (*)(void* runtime, int layer, int slot, void* out, size_t out_size);
+    using SetStateSlotFn = bool (*)(void* runtime, int layer, int slot, const void* data, size_t size);
+    using ZeroStateSlotFn = bool (*)(void* runtime, int slot);
 
     SetLogCallbackFn set_log_callback = nullptr;
     InitFn init = nullptr;
     ReleaseFn release = nullptr;
     InferenceOnceFn inference_once = nullptr;
+    InferenceBatchFn inference_batch = nullptr;
     PrefillFn prefill = nullptr;
     EvalWithEmbeddingsFn eval_with_embeddings = nullptr;
     ResetFn reset = nullptr;
@@ -45,6 +51,13 @@ struct TypedMtkRwkvApi {
     SetStateFn set_att_state = nullptr;
     SetStateFn set_wkv_state = nullptr;
     SetStateFn set_ffn_state = nullptr;
+    GetStateSlotFn get_att_state_slot = nullptr;
+    GetStateSlotFn get_wkv_state_slot = nullptr;
+    GetStateSlotFn get_ffn_state_slot = nullptr;
+    SetStateSlotFn set_att_state_slot = nullptr;
+    SetStateSlotFn set_wkv_state_slot = nullptr;
+    SetStateSlotFn set_ffn_state_slot = nullptr;
+    ZeroStateSlotFn zero_state_slot = nullptr;
 };
 
 template <typename Fn>
@@ -59,6 +72,7 @@ static TypedMtkRwkvApi mtk_api(MtkRwkvDlopen& library) {
         cast_symbol<TypedMtkRwkvApi::InitFn>(raw.init),
         cast_symbol<TypedMtkRwkvApi::ReleaseFn>(raw.release),
         cast_symbol<TypedMtkRwkvApi::InferenceOnceFn>(raw.inference_once),
+        cast_symbol<TypedMtkRwkvApi::InferenceBatchFn>(raw.inference_batch),
         cast_symbol<TypedMtkRwkvApi::PrefillFn>(raw.prefill),
         cast_symbol<TypedMtkRwkvApi::EvalWithEmbeddingsFn>(raw.eval_with_embeddings),
         cast_symbol<TypedMtkRwkvApi::ResetFn>(raw.reset),
@@ -71,6 +85,13 @@ static TypedMtkRwkvApi mtk_api(MtkRwkvDlopen& library) {
         cast_symbol<TypedMtkRwkvApi::SetStateFn>(raw.set_att_state),
         cast_symbol<TypedMtkRwkvApi::SetStateFn>(raw.set_wkv_state),
         cast_symbol<TypedMtkRwkvApi::SetStateFn>(raw.set_ffn_state),
+        cast_symbol<TypedMtkRwkvApi::GetStateSlotFn>(raw.get_att_state_slot),
+        cast_symbol<TypedMtkRwkvApi::GetStateSlotFn>(raw.get_wkv_state_slot),
+        cast_symbol<TypedMtkRwkvApi::GetStateSlotFn>(raw.get_ffn_state_slot),
+        cast_symbol<TypedMtkRwkvApi::SetStateSlotFn>(raw.set_att_state_slot),
+        cast_symbol<TypedMtkRwkvApi::SetStateSlotFn>(raw.set_wkv_state_slot),
+        cast_symbol<TypedMtkRwkvApi::SetStateSlotFn>(raw.set_ffn_state_slot),
+        cast_symbol<TypedMtkRwkvApi::ZeroStateSlotFn>(raw.zero_state_slot),
     };
 }
 
@@ -95,6 +116,7 @@ struct LoadedRMPackModel {
     int num_heads = 0;
     bool use_shared_weights = false;
     bool has_prefill = false;
+    std::vector<int> decode_batch_sizes;
     std::unique_ptr<RMPackReader> reader;
 
     void unmapAfterInit() {
@@ -108,6 +130,9 @@ struct LoadedRMPackModel {
         }
         for (int i = 0; i < n_chunks; ++i) {
             reader->unmapFile("decode_chunk" + std::to_string(i));
+            for (int bsz : decode_batch_sizes) {
+                reader->unmapFile("decode_bsz" + std::to_string(bsz) + "_chunk" + std::to_string(i));
+            }
             if (has_prefill) {
                 reader->unmapFile("prefill_chunk" + std::to_string(i));
             }
@@ -138,8 +163,13 @@ static LoadedRMPackModel loadFromRMPack(const std::string& rmpackPath) {
 
     out.n_chunks = cfg.value("n_chunks", 1);
     out.use_shared_weights = (cfg.value("use_shared_weights", 0) != 0);
+    out.decode_batch_sizes = cfg.value("decode_batch_sizes", std::vector<int>{});
+    std::sort(out.decode_batch_sizes.begin(), out.decode_batch_sizes.end());
+    out.decode_batch_sizes.erase(std::unique(out.decode_batch_sizes.begin(), out.decode_batch_sizes.end()), out.decode_batch_sizes.end());
 
     out.runtimeOptions.useModelBuffers = true;
+    out.runtimeOptions.vFirstOutputFirstChunkOnly =
+        (cfg.value("v_first_output_first_chunk_only", 0) != 0);
 
     // embedding
     requireFile(*out.reader, "embedding");
@@ -161,6 +191,35 @@ static LoadedRMPackModel loadFromRMPack(const std::string& rmpackPath) {
         requireFile(*out.reader, name);
         out.runtimeOptions.dlaBuffersDecode.push_back(out.reader->mmapFile(name));
         out.runtimeOptions.dlaBufferSizesDecode.push_back(out.reader->getFileSize(name));
+    }
+
+    for (int bsz : out.decode_batch_sizes) {
+        if (bsz <= 1) {
+            continue;
+        }
+        bool has_all_chunks = true;
+        for (int i = 0; i < out.n_chunks; ++i) {
+            const std::string name = "decode_bsz" + std::to_string(bsz) + "_chunk" + std::to_string(i);
+            if (!out.reader->hasFile(name)) {
+                has_all_chunks = false;
+                break;
+            }
+        }
+        if (!has_all_chunks) {
+            throw std::runtime_error("rmpack missing complete decode batch graph for bsz" + std::to_string(bsz));
+        }
+        out.runtimeOptions.dlaBuffersDecodeBatchSizes.push_back(bsz);
+        out.runtimeOptions.dlaBuffersDecodeBatch.emplace_back();
+        out.runtimeOptions.dlaBufferSizesDecodeBatch.emplace_back();
+        auto& buffers = out.runtimeOptions.dlaBuffersDecodeBatch.back();
+        auto& sizes = out.runtimeOptions.dlaBufferSizesDecodeBatch.back();
+        buffers.reserve(out.n_chunks);
+        sizes.reserve(out.n_chunks);
+        for (int i = 0; i < out.n_chunks; ++i) {
+            const std::string name = "decode_bsz" + std::to_string(bsz) + "_chunk" + std::to_string(i);
+            buffers.push_back(out.reader->mmapFile(name));
+            sizes.push_back(out.reader->getFileSize(name));
+        }
     }
 
     // prefill chunks (optional): only enable if all chunks exist
@@ -261,6 +320,19 @@ int mtk_np9_backend::load_model(std::string model_path, void * extra) {
         version     = 7;
         num_heads   = loaded.num_heads;
         supported_batch_sizes = {1};
+        if (mtk_api(_library).inference_batch != nullptr &&
+            mtk_api(_library).get_att_state_slot != nullptr &&
+            mtk_api(_library).set_att_state_slot != nullptr) {
+            for (int bsz : loaded.decode_batch_sizes) {
+                if (bsz > 1) {
+                    for (int i = 2; i <= bsz; ++i) {
+                        supported_batch_sizes.push_back(i);
+                    }
+                }
+            }
+            std::sort(supported_batch_sizes.begin(), supported_batch_sizes.end());
+            supported_batch_sizes.erase(std::unique(supported_batch_sizes.begin(), supported_batch_sizes.end()), supported_batch_sizes.end());
+        }
     } catch (const std::exception& e) {
         LOGE("[mtk_np9] Failed to load rmpack: %s\n", e.what());
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
@@ -316,6 +388,44 @@ int mtk_np9_backend::eval(std::vector<int> ids, Tensor1D & logits) {
     }
 
     _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
+    logits = _logits_fp16_view;
+    return RWKV_SUCCESS;
+}
+
+int mtk_np9_backend::eval_batch(std::vector<std::vector<int>> ids, Tensor1D & logits) {
+    if (_runtime == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    if (ids.empty()) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    for (const auto& seq : ids) {
+        if (seq.size() != 1) {
+            return RWKV_ERROR_UNSUPPORTED;
+        }
+    }
+    auto api = mtk_api(_library);
+    if (api.inference_batch == nullptr) {
+        return RWKV_ERROR_UNSUPPORTED;
+    }
+
+    std::vector<int> token_ids(ids.size());
+    for (size_t i = 0; i < ids.size(); ++i) {
+        token_ids[i] = ids[i][0];
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    void* logits_ptr = api.inference_batch(_runtime, token_ids.data(), token_ids.size());
+    auto end = std::chrono::high_resolution_clock::now();
+    if (!logits_ptr) {
+        return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+    }
+    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    if (duration_us > 0) {
+        _decode_speed = (double)ids.size() * 1000000.0 / (double)duration_us;
+    }
+
+    _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size * ids.size());
     logits = _logits_fp16_view;
     return RWKV_SUCCESS;
 }
@@ -436,6 +546,102 @@ int mtk_np9_backend::zero_state() {
         return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
     }
     mtk_api(_library).reset(_runtime);
+    return RWKV_SUCCESS;
+}
+
+int mtk_np9_backend::get_state_on_batch_slot(int slot, std::any &state) {
+    if (_runtime == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    if (slot < 0) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto api = mtk_api(_library);
+    if (slot == 0 && (api.get_att_state_slot == nullptr || api.get_wkv_state_slot == nullptr || api.get_ffn_state_slot == nullptr)) {
+        return get_state(state);
+    }
+    if (api.get_att_state_slot == nullptr || api.get_wkv_state_slot == nullptr || api.get_ffn_state_slot == nullptr) {
+        return RWKV_ERROR_UNSUPPORTED;
+    }
+
+    auto states_ptr = std::make_shared<std::vector<std::vector<uint8_t>>>();
+    states_ptr->resize((size_t)n_layers * 3);
+    for (int layer = 0; layer < n_layers; ++layer) {
+        const size_t att_sz = api.get_att_state_size(_runtime, layer);
+        const size_t wkv_sz = api.get_wkv_state_size(_runtime, layer);
+        const size_t ffn_sz = api.get_ffn_state_size(_runtime, layer);
+        if (att_sz == 0 || wkv_sz == 0 || ffn_sz == 0) {
+            return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
+        }
+
+        auto& att = (*states_ptr)[(size_t)layer * 3 + 0];
+        auto& wkv = (*states_ptr)[(size_t)layer * 3 + 1];
+        auto& ffn = (*states_ptr)[(size_t)layer * 3 + 2];
+        att.resize(att_sz);
+        wkv.resize(wkv_sz);
+        ffn.resize(ffn_sz);
+        if (!api.get_att_state_slot(_runtime, layer, slot, att.data(), att.size())) return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
+        if (!api.get_wkv_state_slot(_runtime, layer, slot, wkv.data(), wkv.size())) return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
+        if (!api.get_ffn_state_slot(_runtime, layer, slot, ffn.data(), ffn.size())) return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
+    }
+    state = states_ptr;
+    return RWKV_SUCCESS;
+}
+
+int mtk_np9_backend::set_state_on_batch_slot(int slot, std::any state) {
+    if (_runtime == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    if (slot < 0) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto api = mtk_api(_library);
+    if (slot == 0 && (api.set_att_state_slot == nullptr || api.set_wkv_state_slot == nullptr || api.set_ffn_state_slot == nullptr)) {
+        return set_state(state);
+    }
+    if (api.set_att_state_slot == nullptr || api.set_wkv_state_slot == nullptr || api.set_ffn_state_slot == nullptr) {
+        return RWKV_ERROR_UNSUPPORTED;
+    }
+    if (!state.has_value()) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+
+    std::shared_ptr<std::vector<std::vector<uint8_t>>> states_ptr;
+    try {
+        states_ptr = std::any_cast<std::shared_ptr<std::vector<std::vector<uint8_t>>>>(state);
+    } catch (const std::bad_any_cast&) {
+        try {
+            auto by_value = std::any_cast<std::vector<std::vector<uint8_t>>>(state);
+            states_ptr = std::make_shared<std::vector<std::vector<uint8_t>>>(std::move(by_value));
+        } catch (const std::bad_any_cast&) {
+            return RWKV_ERROR_INVALID_PARAMETERS;
+        }
+    }
+    if (!states_ptr || (int)states_ptr->size() != 3 * n_layers) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    for (int layer = 0; layer < n_layers; ++layer) {
+        const auto& att = (*states_ptr)[(size_t)layer * 3 + 0];
+        const auto& wkv = (*states_ptr)[(size_t)layer * 3 + 1];
+        const auto& ffn = (*states_ptr)[(size_t)layer * 3 + 2];
+        if (!api.set_att_state_slot(_runtime, layer, slot, att.data(), att.size())) return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
+        if (!api.set_wkv_state_slot(_runtime, layer, slot, wkv.data(), wkv.size())) return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
+        if (!api.set_ffn_state_slot(_runtime, layer, slot, ffn.data(), ffn.size())) return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
+    }
+    return RWKV_SUCCESS;
+}
+
+int mtk_np9_backend::zero_state_on_batch_slot(int slot) {
+    if (_runtime == nullptr) {
+        return RWKV_ERROR_RUNTIME | RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto api = mtk_api(_library);
+    if (api.zero_state_slot == nullptr) {
+        return slot == 0 ? zero_state() : RWKV_ERROR_UNSUPPORTED;
+    }
+    if (!api.zero_state_slot(_runtime, slot)) {
+        return RWKV_ERROR_BACKEND | RWKV_ERROR_RUNTIME;
+    }
     return RWKV_SUCCESS;
 }
 

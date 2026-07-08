@@ -2050,7 +2050,34 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         for (int j = 0; j < current_batch_size; j++) {
             active_decoded_idx[j] = (decoded_idx[j] == 0) ? eos_token_id : decoded_idx[j];
         }
-        ret = eval_logits_batch_decode(model_id, active_decoded_idx, logits);
+        if (current_batch_size == 1) {
+            Tensor1D single_logits;
+            ret = eval_logits(model_id, active_decoded_idx[0], single_logits);
+            if (ret) {
+                LOGE("chat_batch: single eval failed, ret=%d\n", ret);
+            }
+            if (!ret) {
+                ret = copy_logits_to_f32(single_logits, batched_logits_storage, num_vocab);
+                if (ret) {
+                    LOGE("chat_batch: copy single logits failed, ret=%d, dtype=%d, count=%zu\n",
+                        ret, (int)single_logits.dtype, single_logits.count);
+                }
+                logits = Tensor1D::make(batched_logits_storage.data(), TensorDType::F32, (size_t)num_vocab);
+            }
+        } else {
+            ret = eval_logits_batch_decode(model_id, active_decoded_idx, logits);
+            if (ret) {
+                LOGE("chat_batch: batch eval failed, ret=%d\n", ret);
+            } else {
+                ret = copy_logits_to_f32(logits, batched_logits_storage, num_vocab * current_batch_size);
+                if (ret) {
+                    LOGE("chat_batch: copy batch logits failed, ret=%d, dtype=%d, count=%zu, expected=%d\n",
+                        ret, (int)logits.dtype, logits.count, num_vocab * current_batch_size);
+                } else {
+                    logits = Tensor1D::make(batched_logits_storage.data(), TensorDType::F32, (size_t)num_vocab * current_batch_size);
+                }
+            }
+        }
         if (ret) {
             model->is_generating = false;
             LOGE("failed to eval logits\n");

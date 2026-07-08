@@ -93,6 +93,9 @@ target_link_libraries(long_context_loss PUBLIC rwkv_mobile_internal)
 add_executable(benchmark_app benchmark_app.cpp)
 target_link_libraries(benchmark_app PUBLIC rwkv_mobile_internal)
 
+add_executable(decode_profile decode_profile.cpp)
+target_link_libraries(decode_profile PUBLIC rwkv_mobile_internal)
+
 if (ENABLE_COREML_BACKEND)
     add_executable(test_coreml_async_prefill_chat test_coreml_async_prefill_chat.cpp)
     target_link_libraries(test_coreml_async_prefill_chat PUBLIC rwkv_mobile_internal)

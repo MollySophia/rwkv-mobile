@@ -27,6 +27,12 @@ typedef struct RWKVRuntimeOptions {
     // Decode DLA chunks (size must match n_chunks)
     std::vector<const void*> dlaBuffersDecode;
     std::vector<size_t> dlaBufferSizesDecode;
+    std::vector<int> dlaBuffersDecodeBatchSizes;
+    std::vector<std::vector<const void*>> dlaBuffersDecodeBatch;
+    std::vector<std::vector<size_t>> dlaBufferSizesDecodeBatch;
+
+    // RWKV-7 chunking mode: only chunk0 exports v_first; later chunks read chunk0's v_first.
+    bool vFirstOutputFirstChunkOnly = false;
 
     // Prefill DLA chunks (optional; size must match n_chunks if provided)
     std::vector<const void*> dlaBuffersPrefill;
@@ -58,6 +64,8 @@ void neuron_rwkv_release(void* runtime);
 
 void* neuron_rwkv_inference_once(void* runtime, const int input_token);
 
+extern "C" void* neuron_rwkv_inference_batch(void* runtime, const int* input_tokens, const size_t batch_size);
+
 void* neuron_rwkv_prefill(void* runtime, const int* input_tokens, const size_t num_tokens);
 
 // ===== Embedding-input inference =====
@@ -81,3 +89,12 @@ bool neuron_rwkv_get_ffn_state(void* runtime, const int layer, void* out, const 
 bool neuron_rwkv_set_att_state(void* runtime, const int layer, const void* data, const size_t size);
 bool neuron_rwkv_set_wkv_state(void* runtime, const int layer, const void* data, const size_t size);
 bool neuron_rwkv_set_ffn_state(void* runtime, const int layer, const void* data, const size_t size);
+
+extern "C" bool neuron_rwkv_get_att_state_slot(void* runtime, const int layer, const int slot, void* out, const size_t out_size);
+extern "C" bool neuron_rwkv_get_wkv_state_slot(void* runtime, const int layer, const int slot, void* out, const size_t out_size);
+extern "C" bool neuron_rwkv_get_ffn_state_slot(void* runtime, const int layer, const int slot, void* out, const size_t out_size);
+
+extern "C" bool neuron_rwkv_set_att_state_slot(void* runtime, const int layer, const int slot, const void* data, const size_t size);
+extern "C" bool neuron_rwkv_set_wkv_state_slot(void* runtime, const int layer, const int slot, const void* data, const size_t size);
+extern "C" bool neuron_rwkv_set_ffn_state_slot(void* runtime, const int layer, const int slot, const void* data, const size_t size);
+extern "C" bool neuron_rwkv_zero_state_slot(void* runtime, const int slot);

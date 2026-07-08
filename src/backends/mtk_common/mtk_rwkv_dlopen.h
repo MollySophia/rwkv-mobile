@@ -10,6 +10,7 @@ struct MtkRwkvApi {
     void* init = nullptr;
     void* release = nullptr;
     void* inference_once = nullptr;
+    void* inference_batch = nullptr;
     void* prefill = nullptr;
     void* eval_with_embeddings = nullptr;
     void* reset = nullptr;
@@ -22,6 +23,13 @@ struct MtkRwkvApi {
     void* set_att_state = nullptr;
     void* set_wkv_state = nullptr;
     void* set_ffn_state = nullptr;
+    void* get_att_state_slot = nullptr;
+    void* get_wkv_state_slot = nullptr;
+    void* get_ffn_state_slot = nullptr;
+    void* set_att_state_slot = nullptr;
+    void* set_wkv_state_slot = nullptr;
+    void* set_ffn_state_slot = nullptr;
+    void* zero_state_slot = nullptr;
 };
 
 class MtkRwkvDlopen {

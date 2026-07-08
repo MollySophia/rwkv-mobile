@@ -10,6 +10,11 @@
 
 #define ENSURE_SUCCESS_OR_LOG_EXIT(x, msg) if (x != rwkvmobile::RWKV_SUCCESS) { std::cout << msg << std::endl; return 1; }
 
+static void print_ret_and_log(const char *label, int ret) {
+    std::cout << label << " ret=" << ret << std::endl;
+    std::cout << rwkvmobile::logger_get_log() << std::endl;
+}
+
 int main(int argc, char **argv) {
     // set stdout to be unbuffered
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -24,6 +29,11 @@ int main(int argc, char **argv) {
     if (model_id < 0) return 1;
 
     int batch_size = atoi(argv[4]);
+    std::cout << "Loaded model_id=" << model_id << std::endl;
+    auto supported_batch_sizes = runtime.get_supported_batch_sizes(model_id);
+    std::cout << "Supported batch sizes:";
+    for (auto size : supported_batch_sizes) std::cout << " " << size;
+    std::cout << std::endl;
 
     if (argc == 6 && std::string(argv[5]) == "style_repro") {
         const std::string base_prompt = "用三句话介绍一下杭州西湖。";
@@ -76,7 +86,11 @@ int main(int argc, char **argv) {
         input_list_batch[i] = input_list;
     }
     std::cout << "Testing batch chat prompt: " << input_list[input_list.size()-1] << std::endl << std::endl;
-    ENSURE_SUCCESS_OR_LOG_EXIT(runtime.chat_batch(model_id, input_list_batch, 2000, batch_size, nullptr, false, false, true), "Failed to chat batch");
+    int batch_ret = runtime.chat_batch(model_id, input_list_batch, 2000, batch_size, nullptr, false, false, true);
+    if (batch_ret != rwkvmobile::RWKV_SUCCESS) {
+        print_ret_and_log("Failed to chat batch", batch_ret);
+        return 1;
+    }
     auto batch_response = runtime.get_response_buffer_content_batch(model_id);
     for (int i = 0; i < batch_size; i++) {
         std::cout << "Response " << i << ": " << batch_response[i] << std::endl << std::endl;
@@ -86,7 +100,11 @@ int main(int argc, char **argv) {
     input_list.push_back("Now repeat the number you just said.");
 
     std::cout << "Testing new chat prompt: " << input_list[input_list.size()-1] << std::endl << std::endl;
-    ENSURE_SUCCESS_OR_LOG_EXIT(runtime.chat(model_id, input_list, 2000, nullptr, false), "Failed to chat");
+    int chat_ret = runtime.chat(model_id, input_list, 2000, nullptr, false);
+    if (chat_ret != rwkvmobile::RWKV_SUCCESS) {
+        print_ret_and_log("Failed to chat", chat_ret);
+        return 1;
+    }
     std::cout << "Response: " << runtime.get_response_buffer_content(model_id) << std::endl;
 
     runtime.release();

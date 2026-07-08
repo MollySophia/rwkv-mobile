@@ -76,6 +76,20 @@ static bool load_symbol(void* handle, Fn& fn, const char* symbol, const char* pr
     return true;
 }
 
+template <typename Fn>
+static bool load_optional_symbol(void* handle, Fn& fn, const char* symbol, const char* pretty, const char* tag) {
+    dlerror();
+    void* ptr = dlsym(handle, symbol);
+    const char* err = dlerror();
+    if (ptr == nullptr || err != nullptr) {
+        LOGD("[%s] optional dlsym missing for %s (%s): %s\n", tag, pretty, symbol, err ? err : "symbol is null");
+        fn = nullptr;
+        return false;
+    }
+    fn = ptr;
+    return true;
+}
+
 } // namespace
 
 MtkRwkvDlopen::~MtkRwkvDlopen() {
@@ -144,6 +158,7 @@ int MtkRwkvDlopen::open(const char* tag, const char* env_var, const char* defaul
     ok &= load_symbol(_handle, _api.init, "_Z16neuron_rwkv_initPPvRK16RWKVModelOptionsRK18RWKVRuntimeOptions", "neuron_rwkv_init", _tag.c_str());
     ok &= load_symbol(_handle, _api.release, "_Z19neuron_rwkv_releasePv", "neuron_rwkv_release", _tag.c_str());
     ok &= load_symbol(_handle, _api.inference_once, "_Z26neuron_rwkv_inference_oncePvi", "neuron_rwkv_inference_once", _tag.c_str());
+    load_optional_symbol(_handle, _api.inference_batch, "neuron_rwkv_inference_batch", "neuron_rwkv_inference_batch", _tag.c_str());
     ok &= load_symbol(_handle, _api.prefill, "_Z19neuron_rwkv_prefillPvPKim", "neuron_rwkv_prefill", _tag.c_str());
     ok &= load_symbol(_handle, _api.eval_with_embeddings, "_Z32neuron_rwkv_eval_with_embeddingsPvPKfm", "neuron_rwkv_eval_with_embeddings", _tag.c_str());
     ok &= load_symbol(_handle, _api.reset, "_Z17neuron_rwkv_resetPv", "neuron_rwkv_reset", _tag.c_str());
@@ -156,6 +171,13 @@ int MtkRwkvDlopen::open(const char* tag, const char* env_var, const char* defaul
     ok &= load_symbol(_handle, _api.set_att_state, "_Z25neuron_rwkv_set_att_statePviPKvm", "neuron_rwkv_set_att_state", _tag.c_str());
     ok &= load_symbol(_handle, _api.set_wkv_state, "_Z25neuron_rwkv_set_wkv_statePviPKvm", "neuron_rwkv_set_wkv_state", _tag.c_str());
     ok &= load_symbol(_handle, _api.set_ffn_state, "_Z25neuron_rwkv_set_ffn_statePviPKvm", "neuron_rwkv_set_ffn_state", _tag.c_str());
+    load_optional_symbol(_handle, _api.get_att_state_slot, "neuron_rwkv_get_att_state_slot", "neuron_rwkv_get_att_state_slot", _tag.c_str());
+    load_optional_symbol(_handle, _api.get_wkv_state_slot, "neuron_rwkv_get_wkv_state_slot", "neuron_rwkv_get_wkv_state_slot", _tag.c_str());
+    load_optional_symbol(_handle, _api.get_ffn_state_slot, "neuron_rwkv_get_ffn_state_slot", "neuron_rwkv_get_ffn_state_slot", _tag.c_str());
+    load_optional_symbol(_handle, _api.set_att_state_slot, "neuron_rwkv_set_att_state_slot", "neuron_rwkv_set_att_state_slot", _tag.c_str());
+    load_optional_symbol(_handle, _api.set_wkv_state_slot, "neuron_rwkv_set_wkv_state_slot", "neuron_rwkv_set_wkv_state_slot", _tag.c_str());
+    load_optional_symbol(_handle, _api.set_ffn_state_slot, "neuron_rwkv_set_ffn_state_slot", "neuron_rwkv_set_ffn_state_slot", _tag.c_str());
+    load_optional_symbol(_handle, _api.zero_state_slot, "neuron_rwkv_zero_state_slot", "neuron_rwkv_zero_state_slot", _tag.c_str());
 
     if (!ok) {
         close();
