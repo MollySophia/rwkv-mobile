@@ -27,12 +27,6 @@ typedef struct RWKVRuntimeOptions {
     // Decode DLA chunks (size must match n_chunks)
     std::vector<const void*> dlaBuffersDecode;
     std::vector<size_t> dlaBufferSizesDecode;
-    std::vector<int> dlaBuffersDecodeBatchSizes;
-    std::vector<std::vector<const void*>> dlaBuffersDecodeBatch;
-    std::vector<std::vector<size_t>> dlaBufferSizesDecodeBatch;
-
-    // RWKV-7 chunking mode: only chunk0 exports v_first; later chunks read chunk0's v_first.
-    bool vFirstOutputFirstChunkOnly = false;
 
     // Prefill DLA chunks (optional; size must match n_chunks if provided)
     std::vector<const void*> dlaBuffersPrefill;
@@ -50,6 +44,15 @@ typedef struct RWKVRuntimeOptions {
 
     const void* embBuffer = nullptr;
     size_t embBufferSize = 0;
+
+    // Batch decode DLA chunks. Keep new fields appended to preserve the ABI of
+    // older librwkv_mtk_np9.so builds that read the prefix of this options struct.
+    std::vector<int> dlaBuffersDecodeBatchSizes;
+    std::vector<std::vector<const void*>> dlaBuffersDecodeBatch;
+    std::vector<std::vector<size_t>> dlaBufferSizesDecodeBatch;
+
+    // RWKV-7 chunking mode: only chunk0 exports v_first; later chunks read chunk0's v_first.
+    bool vFirstOutputFirstChunkOnly = false;
 } RWKVRuntimeOptions;
 
 // ===== Logging (optional) =====
