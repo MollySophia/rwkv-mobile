@@ -45,8 +45,8 @@ typedef struct RWKVRuntimeOptions {
     const void* embBuffer = nullptr;
     size_t embBufferSize = 0;
 
-    // Batch decode DLA chunks. Keep new fields appended to preserve the ABI of
-    // older librwkv_mtk_np9.so builds that read the prefix of this options struct.
+    // Batch decode DLA chunks. Keep future fields append-only to preserve the
+    // ABI of builds that read the prefix of this options struct.
     std::vector<int> dlaBuffersDecodeBatchSizes;
     std::vector<std::vector<const void*>> dlaBuffersDecodeBatch;
     std::vector<std::vector<size_t>> dlaBufferSizesDecodeBatch;
