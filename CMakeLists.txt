@@ -201,6 +201,7 @@ if (ENABLE_MNN_BACKEND)
         # TODO: fix iOS MNN_ARM82
         option(MNN_ARM82 "" OFF)
     endif()
+    option(MNN_SME2 "" OFF)
 
     if (ANDROID)
         option(MNN_SUPPORT_BF16 "" ON)
