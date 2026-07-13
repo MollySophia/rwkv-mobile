@@ -113,6 +113,7 @@ struct LoadedRMPackModel {
     RWKVModelOptions modelOptions{};
     RWKVRuntimeOptions runtimeOptions{};
     int n_chunks = 1;
+    int prefill_seq_len = 0;
     int num_heads = 0;
     bool use_shared_weights = false;
     bool has_prefill = false;
@@ -162,6 +163,7 @@ static LoadedRMPackModel loadFromRMPack(const std::string& rmpackPath) {
     out.num_heads = (int)(out.modelOptions.hiddenSize / head_size);
 
     out.n_chunks = cfg.value("n_chunks", 1);
+    out.prefill_seq_len = cfg.value("prefill_seq_len", 0);
     out.use_shared_weights = (cfg.value("use_shared_weights", 0) != 0);
     out.decode_batch_sizes = cfg.value("decode_batch_sizes", std::vector<int>{});
     std::sort(out.decode_batch_sizes.begin(), out.decode_batch_sizes.end());
@@ -316,6 +318,7 @@ int mtk_np9_backend::load_model(std::string model_path, void * extra) {
         hidden_size = (int)loaded.modelOptions.hiddenSize;
         vocab_size  = (int)loaded.modelOptions.vocabSize;
         n_layers    = (int)loaded.modelOptions.numLayer;
+        _prefill_seq_len = loaded.has_prefill ? loaded.prefill_seq_len : 0;
 
         version     = 7;
         num_heads   = loaded.num_heads;
@@ -376,15 +379,43 @@ int mtk_np9_backend::eval(std::vector<int> ids, Tensor1D & logits) {
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
 
-    auto start = std::chrono::high_resolution_clock::now();
-    void* logits_ptr = mtk_api(_library).prefill(_runtime, ids.data(), ids.size());
-    auto end = std::chrono::high_resolution_clock::now();
+    auto api = mtk_api(_library);
+    void* logits_ptr = nullptr;
+    const size_t full_tokens = (_prefill_seq_len > 1)
+        ? (ids.size() / (size_t)_prefill_seq_len) * (size_t)_prefill_seq_len
+        : 0;
+
+    if (full_tokens > 0) {
+        auto start = std::chrono::high_resolution_clock::now();
+        logits_ptr = api.prefill(_runtime, ids.data(), full_tokens);
+        auto end = std::chrono::high_resolution_clock::now();
+        if (!logits_ptr) {
+            return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+        }
+        const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        if (duration_us > 0) {
+            _prefill_speed = (double)full_tokens * 1000000.0 / (double)duration_us;
+        }
+    }
+
+    int64_t decode_duration_us = 0;
+    int decode_tokens = 0;
+    for (size_t i = full_tokens; i < ids.size(); ++i) {
+        auto start = std::chrono::high_resolution_clock::now();
+        logits_ptr = api.inference_once(_runtime, ids[i]);
+        auto end = std::chrono::high_resolution_clock::now();
+        if (!logits_ptr) {
+            return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+        }
+        decode_duration_us += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        decode_tokens++;
+    }
+
     if (!logits_ptr) {
         return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
     }
-    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-    if (duration_us > 0) {
-        _prefill_speed = (double)ids.size() * 1000000.0 / (double)duration_us;
+    if (decode_tokens > 0 && decode_duration_us > 0) {
+        _decode_speed = (double)decode_tokens * 1000000.0 / (double)decode_duration_us;
     }
 
     _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
@@ -438,19 +469,47 @@ int mtk_np9_backend::eval_with_embeddings(const float *embeddings, int n_tokens,
         return RWKV_ERROR_INVALID_PARAMETERS;
     }
 
-    auto start = std::chrono::high_resolution_clock::now();
-    void* logits_ptr = mtk_api(_library).eval_with_embeddings(_runtime, embeddings, (size_t)n_tokens);
-    auto end = std::chrono::high_resolution_clock::now();
+    auto api = mtk_api(_library);
+    void* logits_ptr = nullptr;
+    const int full_tokens = (_prefill_seq_len > 1)
+        ? (n_tokens / _prefill_seq_len) * _prefill_seq_len
+        : 0;
+
+    if (full_tokens > 0) {
+        auto start = std::chrono::high_resolution_clock::now();
+        logits_ptr = api.eval_with_embeddings(_runtime, embeddings, (size_t)full_tokens);
+        auto end = std::chrono::high_resolution_clock::now();
+        if (!logits_ptr) {
+            return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+        }
+        const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        if (duration_us > 0) {
+            _prefill_speed = (double)full_tokens * 1000000.0 / (double)duration_us;
+        }
+    }
+
+    int64_t decode_duration_us = 0;
+    int decode_tokens = 0;
+    for (int i = full_tokens; i < n_tokens; ++i) {
+        auto start = std::chrono::high_resolution_clock::now();
+        logits_ptr = api.eval_with_embeddings(
+            _runtime,
+            embeddings + (size_t)i * (size_t)hidden_size,
+            1
+        );
+        auto end = std::chrono::high_resolution_clock::now();
+        if (!logits_ptr) {
+            return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
+        }
+        decode_duration_us += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        decode_tokens++;
+    }
+
     if (!logits_ptr) {
         return RWKV_ERROR_EVAL | RWKV_ERROR_BACKEND;
     }
-    const int64_t duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-    if (duration_us > 0) {
-        if (n_tokens > 1) {
-            _prefill_speed = (double)n_tokens * 1000000.0 / (double)duration_us;
-        } else {
-            _decode_speed = 1000000.0 / (double)duration_us;
-        }
+    if (decode_tokens > 0 && decode_duration_us > 0) {
+        _decode_speed = (double)decode_tokens * 1000000.0 / (double)decode_duration_us;
     }
 
     _logits_fp16_view = Tensor1D::make(logits_ptr, TensorDType::F16, (size_t)vocab_size);
@@ -687,6 +746,7 @@ int mtk_np9_backend::release_model() {
         mtk_api(_library).release(_runtime);
         _runtime = nullptr;
     }
+    _prefill_seq_len = 0;
     return RWKV_SUCCESS;
 }
 

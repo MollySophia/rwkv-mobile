@@ -57,6 +57,7 @@ private:
     Tensor1D _logits_fp16_view;
     double _prefill_speed = -1;
     double _decode_speed = -1;
+    int _prefill_seq_len = 0;
 };
 
 } // namespace rwkvmobile

@@ -1,5 +1,6 @@
 #include <iostream>
 #include <chrono>
+#include <cstdlib>
 #include <random>
 #include <vector>
 
@@ -11,8 +12,8 @@
 int main(int argc, char **argv) {
     // set stdout to be unbuffered
     setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <model_file> <backend>" << std::endl;
+    if (argc != 3 && argc != 4) {
+        std::cerr << "Usage: " << argv[0] << " <model_file> <backend> [prompt_tokens]" << std::endl;
         return 1;
     }
 
@@ -22,10 +23,19 @@ int main(int argc, char **argv) {
     if (model_id < 0) return 1;
 
     int vocab_size = runtime.get_vocab_size(model_id);
-    std::vector<int> prompt_ids(512);
+    int prompt_tokens = 512;
+    if (argc == 4) {
+        prompt_tokens = std::atoi(argv[3]);
+        if (prompt_tokens <= 0) {
+            std::cerr << "prompt_tokens must be positive" << std::endl;
+            return 1;
+        }
+    }
+
+    std::vector<int> prompt_ids((size_t)prompt_tokens);
     rwkvmobile::Tensor1D logits;
 
-    for (int i = 0; i < 512; i++) {
+    for (int i = 0; i < prompt_tokens; i++) {
         prompt_ids[i] = rand() % vocab_size;
     }
 
@@ -43,6 +53,7 @@ int main(int argc, char **argv) {
 
     runtime.eval_logits(model_id, prompt_ids, logits);
 
+    std::cout << "Prompt tokens: " << prompt_tokens << std::endl;
     std::cout << "Prefill speed: " << runtime.get_avg_prefill_speed(model_id) << " tokens/s" << std::endl;
 
     for (int i = 0; i < 128; i++) {
