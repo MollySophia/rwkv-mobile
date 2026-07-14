@@ -3,7 +3,7 @@
 import struct
 import os
 import json
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 from pathlib import Path
 import argparse
 import torch
@@ -13,11 +13,11 @@ class RWKVModelPacker:
     ALIGNMENT = 4096  # 4KB对齐
 
     def __init__(self):
-        self.config: Dict[str, int] = {}
+        self.config: Dict[str, Any] = {}
         self.files: List[Tuple[str, int, int]] = []  # (filename, size, offset)
         self.binary_data: List[bytes] = []
 
-    def add_config(self, key: str, value: int):
+    def add_config(self, key: str, value: Any):
         self.config[key] = value
 
     def add_file(self, file_path: str, file_name: str):
@@ -110,12 +110,15 @@ def main():
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--input', type=str, required=True, help='input file')
     parser.add_argument('--output', type=str, required=True, help='output file')
+    parser.add_argument('--flower-template', action='store_true', help='enable User✿...✿\\nBot✿ chat template for this rmpack')
     args = parser.parse_args()
 
     packer = RWKVModelPacker()
     state = torch.load(args.input, map_location='cpu')
     num_heads, head_size, _ = state["blocks.0.att.time_state"].shape
     packer.add_config("hidden_size", num_heads * head_size)
+    if args.flower_template:
+        packer.add_config("flower_template", True)
     for k, v in state.items():
         assert "time_state" in k, "unsupported key in state pth file: " + k
         bytes_data = v.half().numpy().tobytes()

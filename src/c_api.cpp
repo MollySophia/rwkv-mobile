@@ -868,6 +868,15 @@ int rwkvmobile_runtime_set_response_role(rwkvmobile_runtime_t runtime, int model
     return RWKV_SUCCESS;
 }
 
+int rwkvmobile_runtime_set_flower_template(rwkvmobile_runtime_t runtime, int model_id, int flower_template) {
+    if (runtime == nullptr) {
+        return RWKV_ERROR_INVALID_PARAMETERS;
+    }
+    auto rt = static_cast<class Runtime *>(runtime);
+    rt->set_flower_template(model_id, (bool)flower_template);
+    return RWKV_SUCCESS;
+}
+
 int rwkvmobile_runtime_set_thinking_token(rwkvmobile_runtime_t runtime, int model_id, const char * thinking_token) {
     if (runtime == nullptr || thinking_token == nullptr) {
         return RWKV_ERROR_INVALID_PARAMETERS;
@@ -1357,6 +1366,7 @@ struct loaded_models_list rwkvmobile_runtime_get_loaded_models_info(rwkvmobile_r
         model->thinking_token = allocate_string(info.at("thinking_token"));
         model->is_generating = (info.at("is_generating") == "true") ? 1 : 0;
         model->vocab_size = std::stoi(info.at("vocab_size"));
+        model->flower_template = (info.at("flower_template") == "true") ? 1 : 0;
 
         index++;
     }

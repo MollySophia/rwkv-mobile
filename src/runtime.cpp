@@ -129,6 +129,46 @@ static void log_chat_inputs_once(int model_id, const ModelInstance &model, const
     }
 }
 
+static bool json_value_as_bool(const json &value) {
+    if (value.is_boolean()) {
+        return value.get<bool>();
+    }
+    if (value.is_number_integer()) {
+        return value.get<int>() != 0;
+    }
+    if (value.is_string()) {
+        auto str = value.get<std::string>();
+        std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return str == "true" || str == "1" || str == "yes" || str == "on";
+    }
+    return false;
+}
+
+static std::string chat_role_marker(const ModelInstance &model, const std::string &role) {
+    if (model.flower_template) {
+        return model.bos_token + role + model.eos_token;
+    }
+    return model.bos_token + role + ":";
+}
+
+static std::string suffix_after_last_chat_role_marker(const ModelInstance &model, const std::string &text, const std::string &role) {
+    const auto marker = chat_role_marker(model, role);
+    auto pos = text.rfind(marker);
+    if (pos != std::string::npos) {
+        return text.substr(pos + marker.size());
+    }
+    if (!model.flower_template) {
+        const auto legacy_marker = role + ":";
+        pos = text.rfind(legacy_marker);
+        if (pos != std::string::npos) {
+            return text.substr(pos + legacy_marker.size());
+        }
+    }
+    return "";
+}
+
 void Runtime::_record_speed_sample(ModelInstance& model, bool is_prefill, int tokens, int64_t duration_us) {
     if (tokens <= 0 || duration_us <= 0) {
         return;
@@ -433,6 +473,18 @@ int Runtime::load_model(std::string model_path, std::string backend_name, std::s
         LOGE("Failed to load model from: %s, errno = %d\n", model_path.c_str(), ret);
         return -ret;
     }
+    if (model_path.size() >= 7 && model_path.compare(model_path.size() - 7, 7, ".rmpack") == 0) {
+        try {
+            RMPackReader model_pack(model_path);
+            const auto &config = model_pack.getConfig();
+            if (config.contains("flower_template")) {
+                model_instance->flower_template = json_value_as_bool(config["flower_template"]);
+                LOGI("Loaded flower_template=%d from model rmpack config", model_instance->flower_template ? 1 : 0);
+            }
+        } catch (const std::exception &e) {
+            LOGE("Failed to read model rmpack config for flower_template: %s", e.what());
+        }
+    }
 
     int next_model_id = 0;
     while (_models.find(next_model_id) != _models.end()) {
@@ -679,6 +731,10 @@ int Runtime::load_initial_state(int model_id, std::string state_path) {
     std::vector<std::vector<half_float::half>> states(model->backend->n_layers);
     if (is_rmpack) {
         RMPackReader state_pack(state_path);
+        if (state_pack.getConfig().contains("flower_template")) {
+            model->flower_template = json_value_as_bool(state_pack.getConfig()["flower_template"]);
+            LOGI("Loaded flower_template=%d from state rmpack config", model->flower_template ? 1 : 0);
+        }
         int hidden_size_config = state_pack.getConfig()["hidden_size"];
         auto files = state_pack.getFiles();
         if (files.size() != model->backend->n_layers) {
@@ -909,9 +965,16 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
             content = replace_text(content, "\n\n", "\n");
         }
 
-        text += model->bos_token + role + ":" + padding + content;
+        if (model->flower_template) {
+            text += model->bos_token + role + model->eos_token + content;
+        } else {
+            text += model->bos_token + role + ":" + padding + content;
+        }
         if (i != inputs.size() - 1) {
             text += model->eos_token;
+            if (model->flower_template) {
+                text += "\n";
+            }
         }
         // LOGI("message[%zu]: role: \"%s\", content: \"%s\"", i, role.c_str(), escape_special_chars(content).c_str());
     }
@@ -921,7 +984,11 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
         std::string last_role = normalize_role(resolved_roles.back());
         LOGI("last_role: %s, adding generation prompt", last_role.c_str());
         if (last_role == model->user_role) {
-            text += model->bos_token + model->response_role + ":";
+            if (model->flower_template) {
+                text += "\n" + model->bos_token + model->response_role + model->eos_token;
+            } else {
+                text += model->bos_token + model->response_role + ":";
+            }
             if (enable_reasoning) {
                 if (model->thinking_token.empty()) {
                     LOGE("reasoning is enabled, but thinking tag string is empty. Avoid adding space after roles");
@@ -930,7 +997,11 @@ std::string Runtime::apply_chat_template(int model_id, std::vector<std::string> 
                 }
             }
         } else if (last_role == model->response_role) {
-            text += model->bos_token + model->user_role + ":";
+            if (model->flower_template) {
+                text += "\n" + model->bos_token + model->user_role + model->eos_token;
+            } else {
+                text += model->bos_token + model->user_role + ":";
+            }
         }
     }
     return text;
@@ -1422,7 +1493,7 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     } else {
         role_for_parsing = history_ends_with_user_message ? model->response_role : model->user_role;
     }
-    model->response_buffer = input_text.substr(input_text.rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());
+    model->response_buffer = suffix_after_last_chat_role_marker(*model, input_text, role_for_parsing);
     model->response_buffer_ids = model->tokenizer->encode(model->response_buffer);
     model->response_buffer_decoded_tokens = (int)model->response_buffer_ids.size();
     int ret;
@@ -1470,8 +1541,8 @@ int Runtime::chat(int model_id, std::vector<std::string> inputs,
     }
 
     int decoded_idx = 0;
-    bool thinking_end_tag_found = false;
     bool is_pseudo_thinking = enable_reasoning && model->response_buffer.find("</think>") != std::string::npos;
+    bool thinking_end_tag_found = is_pseudo_thinking;
     bool first_token_ban_thinking_tag = !enable_reasoning || is_pseudo_thinking || force_reasoning;
 
     for (int i = 0; i < max_length; i++) {
@@ -1717,7 +1788,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         } else {
             role_for_parsing = history_ends_with_user_message ? model->response_role : model->user_role;
         }
-        model->response_buffer_batch[batch_idx] = input_texts[batch_idx].substr(input_texts[batch_idx].rfind(role_for_parsing + ":") + (role_for_parsing + ":").size());
+        model->response_buffer_batch[batch_idx] = suffix_after_last_chat_role_marker(*model, input_texts[batch_idx], role_for_parsing);
         if (model->response_buffer_batch[batch_idx].empty()) {
             model->response_buffer_ids_batch[batch_idx].clear();
             model->response_buffer_decoded_tokens_batch[batch_idx] = 0;
@@ -1735,6 +1806,7 @@ int Runtime::chat_batch(int model_id, std::vector<std::vector<std::string>> inpu
         }
 
         is_pseudo_thinking_batch[batch_idx] = !enable_reasoning || (enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos);
+        thinking_end_tag_found_batch[batch_idx] = enable_reasoning && model->response_buffer_batch[batch_idx].find("</think>") != std::string::npos;
     }
 
     size_t common_prefix_len = 0;
@@ -3878,6 +3950,22 @@ void Runtime::set_space_after_roles(int model_id, bool space_after_roles) {
     model->space_after_roles = space_after_roles;
 }
 
+void Runtime::set_flower_template(int model_id, bool flower_template) {
+    if (_models.find(model_id) == _models.end()) {
+        return;
+    }
+    auto &model = _models.at(model_id);
+    model->flower_template = flower_template;
+}
+
+bool Runtime::get_flower_template(int model_id) {
+    if (_models.find(model_id) == _models.end()) {
+        return false;
+    }
+    auto &model = _models.at(model_id);
+    return model->flower_template;
+}
+
 std::vector<int> Runtime::tokenizer_encode(int model_id, std::string text) {
     if (_models.find(model_id) == _models.end()) {
         return {};
@@ -4140,6 +4228,7 @@ std::map<int, std::map<std::string, std::string>> Runtime::get_loaded_models_inf
         model_info["bos_token"] = model->bos_token;
         model_info["eos_token"] = model->eos_token;
         model_info["thinking_token"] = model->thinking_token;
+        model_info["flower_template"] = model->flower_template ? "true" : "false";
         model_info["is_generating"] = model->is_generating ? "true" : "false";
         model_info["vocab_size"] = model->backend ? std::to_string(model->backend->get_num_vocab()) : "0";
 

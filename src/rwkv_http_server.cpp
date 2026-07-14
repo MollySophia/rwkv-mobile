@@ -285,6 +285,7 @@ int RwkvHttpServer::start() {
         json response = {
             {"user_role", impl_->runtime->get_user_role(impl_->model_id)},
             {"assistant_role", impl_->runtime->get_response_role(impl_->model_id)},
+            {"flower_template", impl_->runtime->get_flower_template(impl_->model_id)},
             {"model", impl_->config.model_name}
         };
         res.set_content(response.dump(), "application/json; charset=utf-8");
@@ -304,9 +305,13 @@ int RwkvHttpServer::start() {
         if (body.contains("assistant_role") && body["assistant_role"].is_string()) {
             impl_->runtime->set_response_role(impl_->model_id, body["assistant_role"].get<std::string>());
         }
+        if (body.contains("flower_template") && body["flower_template"].is_boolean()) {
+            impl_->runtime->set_flower_template(impl_->model_id, body["flower_template"].get<bool>());
+        }
         json response = {
             {"user_role", impl_->runtime->get_user_role(impl_->model_id)},
             {"assistant_role", impl_->runtime->get_response_role(impl_->model_id)},
+            {"flower_template", impl_->runtime->get_flower_template(impl_->model_id)},
             {"model", impl_->config.model_name}
         };
         res.set_content(response.dump(), "application/json; charset=utf-8");

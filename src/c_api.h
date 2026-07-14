@@ -76,6 +76,7 @@ struct model_info {
     char * thinking_token;
     int is_generating;
     int vocab_size;
+    int flower_template;
 };
 
 struct loaded_models_list {
@@ -257,6 +258,8 @@ int rwkvmobile_runtime_set_user_role(rwkvmobile_runtime_t runtime, int model_id,
 int rwkvmobile_runtime_set_space_after_roles(rwkvmobile_runtime_t runtime, int model_id, int space_after_roles);
 
 int rwkvmobile_runtime_set_response_role(rwkvmobile_runtime_t runtime, int model_id, const char * response_role);
+
+int rwkvmobile_runtime_set_flower_template(rwkvmobile_runtime_t runtime, int model_id, int flower_template);
 
 int rwkvmobile_runtime_set_thinking_token(rwkvmobile_runtime_t runtime, int model_id, const char * thinking_token);
 

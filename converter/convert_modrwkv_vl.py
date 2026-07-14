@@ -490,6 +490,7 @@ def export_vision_onnx(args: argparse.Namespace) -> None:
         input_names=["pixel_values", "image_grid_thw"],
         output_names=["image_embeddings", "output_with_rwkv_norm"],
         opset_version=args.opset,
+        dynamo=False,
         do_constant_folding=True,
         dynamic_axes={
             "pixel_values": {0: "num_patches"},
@@ -537,6 +538,7 @@ def export_vision_split_onnx(args: argparse.Namespace) -> None:
         input_names=["pixel_values", "image_grid_thw"],
         output_names=["pooler_output"],
         opset_version=args.opset,
+        dynamo=False,
         do_constant_folding=True,
         dynamic_axes={
             "pixel_values": {0: "num_patches"},
@@ -563,6 +565,7 @@ def export_vision_split_onnx(args: argparse.Namespace) -> None:
         input_names=["input"],
         output_names=["image_embeddings", "output_with_rwkv_norm"],
         opset_version=args.opset,
+        dynamo=False,
         do_constant_folding=True,
         dynamic_axes={
             "input": {0: "num_merged_patches"},

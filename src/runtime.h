@@ -70,6 +70,7 @@ struct ModelInstance {
     std::vector<std::vector<int>> stop_token_seqs = {{261}, {28329, 11}, {28324, 11}, {28331, 11}, {5585}, {11, 24281, 59}};
     std::string thinking_token = "<think";
     bool space_after_roles = true;
+    bool flower_template = false;
 
     // Response buffer
     std::string response_buffer;
@@ -258,11 +259,13 @@ public:
     void set_bos_token(int model_id, std::string token);
     void set_eos_token(int model_id, std::string token);
     void set_space_after_roles(int model_id, bool space_after_roles);
+    void set_flower_template(int model_id, bool flower_template);
     std::string get_user_role(int model_id);
     std::string get_response_role(int model_id);
     std::string get_bos_token(int model_id);
     std::string get_eos_token(int model_id);
     bool get_space_after_roles(int model_id);
+    bool get_flower_template(int model_id);
 
     std::string apply_chat_template(int model_id, std::vector<std::string> inputs, bool enable_reasoning = false,
         bool add_generation_prompt = true, std::vector<std::string> roles_map = {}

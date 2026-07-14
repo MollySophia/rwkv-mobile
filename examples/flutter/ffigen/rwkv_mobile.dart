@@ -910,6 +910,20 @@ late final _rwkvmobile_runtime_set_response_rolePtr = _lookup<
     ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Pointer<ffi.Char> )>>('rwkvmobile_runtime_set_response_role');
 late final _rwkvmobile_runtime_set_response_role = _rwkvmobile_runtime_set_response_rolePtr.asFunction<int Function(rwkvmobile_runtime_t , int , ffi.Pointer<ffi.Char> )>();
 
+int rwkvmobile_runtime_set_flower_template(rwkvmobile_runtime_t runtime,
+int model_id,
+int flower_template,
+) {
+  return _rwkvmobile_runtime_set_flower_template(runtime,
+model_id,
+flower_template,
+);
+}
+
+late final _rwkvmobile_runtime_set_flower_templatePtr = _lookup<
+    ffi.NativeFunction<ffi.Int Function(rwkvmobile_runtime_t , ffi.Int , ffi.Int )>>('rwkvmobile_runtime_set_flower_template');
+late final _rwkvmobile_runtime_set_flower_template = _rwkvmobile_runtime_set_flower_templatePtr.asFunction<int Function(rwkvmobile_runtime_t , int , int )>();
+
 int rwkvmobile_runtime_set_thinking_token(rwkvmobile_runtime_t runtime,
 int model_id,
 ffi.Pointer<ffi.Char> thinking_token,
@@ -1538,6 +1552,9 @@ final class model_info extends ffi.Struct{
 
   @ffi.Int()
   external int vocab_size;
+
+  @ffi.Int()
+  external int flower_template;
 
 }
 
