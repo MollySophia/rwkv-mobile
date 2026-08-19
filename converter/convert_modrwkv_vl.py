@@ -129,8 +129,8 @@ def _patch_qwen3vl_vision_for_single_image_export(encoder: torch.nn.Module) -> N
     def rot_pos_emb_single(self, grid_thw: torch.Tensor) -> torch.Tensor:
         merge_size = int(self.spatial_merge_size)
         grid = grid_thw[0]
-        height = grid[1]
-        width = grid[2]
+        height = grid[1].to(torch.long)
+        width = grid[2].to(torch.long)
         device = self.pos_embed.weight.device
 
         merged_h = torch.div(height, merge_size, rounding_mode="floor")
@@ -150,13 +150,15 @@ def _patch_qwen3vl_vision_for_single_image_export(encoder: torch.nn.Module) -> N
     def fast_pos_embed_interpolate_single(self, grid_thw: torch.Tensor) -> torch.Tensor:
         merge_size = int(self.config.spatial_merge_size)
         grid = grid_thw[0]
-        height = grid[1]
-        width = grid[2]
+        height = grid[1].to(torch.long)
+        width = grid[2].to(torch.long)
         device = self.pos_embed.weight.device
         dtype = self.pos_embed.weight.dtype
 
-        h_range = torch.arange(height, device=device, dtype=dtype)
-        w_range = torch.arange(width, device=device, dtype=dtype)
+        # ONNX Range does not support float16. Keep the dynamic range integral
+        # and cast its result before interpolation math.
+        h_range = torch.arange(height, device=device).to(dtype)
+        w_range = torch.arange(width, device=device).to(dtype)
         h_denom = torch.clamp((height - 1).to(dtype), min=1)
         w_denom = torch.clamp((width - 1).to(dtype), min=1)
         h_idxs = h_range * (float(self.num_grid_per_side - 1) / h_denom)
@@ -225,10 +227,35 @@ def _patch_qwen3vl_vision_for_single_image_export(encoder: torch.nn.Module) -> N
         attn_output = attn_output.transpose(1, 2).reshape(seq_length, -1).contiguous()
         return self.proj(attn_output)
 
+    def encoder_forward_single(self, hidden_states, grid_thw, **kwargs):
+        del kwargs
+        if self.deepstack_visual_indexes:
+            raise ValueError("Single-image ONNX export does not support DeepStack vision features")
+
+        hidden_states = self.patch_embed(hidden_states)
+        hidden_states = hidden_states + self.fast_pos_embed_interpolate(grid_thw).to(hidden_states.dtype)
+        rotary_pos_emb = self.rot_pos_emb(grid_thw)
+
+        seq_len, _ = hidden_states.size()
+        hidden_states = hidden_states.reshape(seq_len, -1)
+        rotary_pos_emb = rotary_pos_emb.reshape(seq_len, -1)
+        emb = torch.cat((rotary_pos_emb, rotary_pos_emb), dim=-1)
+        position_embeddings = (emb.cos(), emb.sin())
+
+        for block in self.blocks:
+            hidden_states = block(
+                hidden_states,
+                cu_seqlens=None,
+                position_embeddings=position_embeddings,
+            )
+
+        return types.SimpleNamespace(pooler_output=self.merger(hidden_states))
+
     encoder.rot_pos_emb = types.MethodType(rot_pos_emb_single, encoder)
     encoder.fast_pos_embed_interpolate = types.MethodType(fast_pos_embed_interpolate_single, encoder)
     for block in encoder.blocks:
         block.attn.forward = types.MethodType(attention_forward_single, block.attn)
+    encoder.forward = types.MethodType(encoder_forward_single, encoder)
 
 
 def split_llm(args: argparse.Namespace) -> None:
@@ -259,16 +286,8 @@ def split_llm(args: argparse.Namespace) -> None:
 class _VisionProjector(torch.nn.Module):
     def __init__(self, model_dir: Path, dtype: torch.dtype):
         super().__init__()
-        sys.path.insert(0, str(model_dir))
-        try:
-            from modeling_modrwkv import VisualAdapter  # type: ignore
-            from transformers import Qwen3VLVisionModel
-            from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLVisionConfig
-        finally:
-            try:
-                sys.path.remove(str(model_dir))
-            except ValueError:
-                pass
+        from transformers import Qwen3VLVisionModel
+        from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLVisionConfig
 
         config = _load_json(model_dir / "config.json")
         vision_config = dict(config["vision_config"])
@@ -280,13 +299,7 @@ class _VisionProjector(torch.nn.Module):
 
         self.encoder = Qwen3VLVisionModel(qwen_vision_config)
         _patch_qwen3vl_vision_for_single_image_export(self.encoder)
-        self.proj = VisualAdapter(
-            encoder_dim=int(projector_config["encoder_dim"]),
-            project_dim=int(projector_config["project_dim"]),
-            hidden_dim=projector_config.get("hidden_dim"),
-            num_deepstack=int(projector_config.get("num_deepstack") or 0),
-            use_conv=bool(config.get("use_conv_in_projector", False)),
-        )
+        self.proj = _ConversionVisualAdapter(config)
         self.rwkv_pre_norm = torch.nn.LayerNorm(
             int(projector_config["project_dim"]),
             eps=float(config.get("text_config", {}).get("norm_eps", 1e-5)),
@@ -382,27 +395,68 @@ class _QwenVisionEncoder(torch.nn.Module):
         return pooler_output.reshape(-1, pooler_output.shape[-1])
 
 
+class _ConversionVisualAdapter(torch.nn.Module):
+    """Minimal mirror of the validated ModRWKV MLP visual projector.
+
+    Importing the checkpoint's full ``modeling_modrwkv`` module also imports
+    FLA and Triton, even though vision export only needs this small projector.
+    Keeping the supported shape explicit lets the converter run on macOS and
+    fail closed if a future checkpoint changes projector architecture.
+    """
+
+    def __init__(self, config: dict):
+        super().__init__()
+        projector_config = config["projector_config"]
+        encoder_dim = int(projector_config["encoder_dim"])
+        project_dim = int(projector_config["project_dim"])
+        hidden_dim = int(projector_config.get("hidden_dim") or project_dim * 4)
+        unsupported = {
+            "use_conv": bool(config.get("use_conv_in_projector", False)),
+            "kind": projector_config.get("kind", "mlp"),
+            "norm": projector_config.get("norm", "layernorm"),
+            "ffn": projector_config.get("ffn", "relu"),
+            "num_deepstack": int(projector_config.get("num_deepstack") or 0),
+            "extra_merge_size": int(projector_config.get("extra_merge_size") or 1),
+        }
+        expected = {
+            "use_conv": False,
+            "kind": "mlp",
+            "norm": "layernorm",
+            "ffn": "relu",
+            "num_deepstack": 0,
+            "extra_merge_size": 1,
+        }
+        if unsupported != expected:
+            raise ValueError(
+                "Unsupported visual projector for dependency-free conversion: "
+                f"expected={expected}, actual={unsupported}"
+            )
+
+        self.main = torch.nn.Module()
+        self.main.pre_norm = torch.nn.LayerNorm(project_dim)
+        self.main.mlp = torch.nn.Sequential(
+            torch.nn.Linear(encoder_dim, hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_dim, project_dim),
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        deepstack_features: list[torch.Tensor] | None = None,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        if deepstack_features:
+            raise ValueError("This MLP visual projector does not support DeepStack features")
+        x = self.main.mlp(x)
+        return x + self.main.pre_norm(x), []
+
+
 class _QwenVisionAdapter(torch.nn.Module):
     def __init__(self, model_dir: Path, dtype: torch.dtype):
         super().__init__()
-        sys.path.insert(0, str(model_dir))
-        try:
-            from modeling_modrwkv import VisualAdapter  # type: ignore
-        finally:
-            try:
-                sys.path.remove(str(model_dir))
-            except ValueError:
-                pass
-
         config = _load_json(model_dir / "config.json")
         projector_config = config["projector_config"]
-        self.proj = VisualAdapter(
-            encoder_dim=int(projector_config["encoder_dim"]),
-            project_dim=int(projector_config["project_dim"]),
-            hidden_dim=projector_config.get("hidden_dim"),
-            num_deepstack=int(projector_config.get("num_deepstack") or 0),
-            use_conv=bool(config.get("use_conv_in_projector", False)),
-        )
+        self.proj = _ConversionVisualAdapter(config)
         self.rwkv_pre_norm = torch.nn.LayerNorm(
             int(projector_config["project_dim"]),
             eps=float(config.get("text_config", {}).get("norm_eps", 1e-5)),

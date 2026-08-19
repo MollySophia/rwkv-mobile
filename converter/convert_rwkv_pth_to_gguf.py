@@ -380,27 +380,32 @@ class Model:
 
     def _set_vocab_rwkv_world(self):
         assert (self.vocab_path).is_file()
-        # vocab_size = 65536
-
-        tokens: list[bytes] = ['<s>'.encode("utf-8")]
-        toktypes: list[int] = [gguf.TokenType.CONTROL]
+        tokens: list[bytes] = []
+        toktypes: list[int] = []
 
         with open(self.vocab_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
-            vocab_size = len(lines) + 1
-            if vocab_size == 65530 or vocab_size == 65533:
-                vocab_size = 65536
+            vocab_size = int(self.hparams.get("vocab_size", len(lines)))
+            if len(lines) > vocab_size:
+                raise ValueError(
+                    f"Vocabulary has {len(lines)} entries but model embeddings have {vocab_size} rows"
+                )
             print(f"vocab_size: {vocab_size}")
             for line in lines:
                 parts = line.split(' ')
                 assert len(parts) >= 3
+                token_id = int(parts[0])
+                if token_id != len(tokens):
+                    raise ValueError(
+                        f"Vocabulary ids must be contiguous from zero: expected {len(tokens)}, got {token_id}"
+                    )
                 token, token_len = ast.literal_eval(' '.join(parts[1:-1])), int(parts[-1])
                 token = token.encode("utf-8") if isinstance(token, str) else token
                 assert isinstance(token, bytes)
                 assert len(token) == token_len, f"token: {token}, token_len: {token_len}, len(token): {len(token)}"
                 token_text: str = repr(token)[2:-1]  # "b'\xff'" -> "\xff"
                 tokens.append(token_text.encode("utf-8"))
-                toktypes.append(gguf.TokenType.NORMAL)
+                toktypes.append(gguf.TokenType.CONTROL if token_id == 0 else gguf.TokenType.NORMAL)
         remainder = vocab_size - len(tokens)
         if remainder >= 0:
             for i in range(len(tokens), vocab_size):
@@ -800,6 +805,7 @@ def main() -> None:
         "num_hidden_layers" : n_layer,
         "head_size" : n_embd // n_head,
         "hidden_size" : n_embd,
+        "vocab_size" : n_vocab,
         "layer_norm_epsilon" : 1e-5,
         "intermediate_size" : None,
     }
