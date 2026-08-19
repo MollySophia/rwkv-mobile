@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
     // set stdout to be unbuffered
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc < 7 || argc > 11) {
-        std::cerr << "Usage: " << argv[0] << " <model_file> <encoder_file> <adapter_file> <tokenizer_file> <image_file> <backend> [prompt] [reasoning] [max_tokens] [flower|flower_nothink]" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <model_file> <encoder_file> <adapter_file> <tokenizer_file> <image_file> <backend> [prompt] [reasoning] [max_tokens] [flower|flower_nothink|flower_think]" << std::endl;
         return 1;
     }
 
@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
     rwkvmobile_runtime_set_space_after_roles(runtime, model_id, 0);
     rwkvmobile_runtime_set_thinking_token(runtime, model_id, " <think>");
     std::string template_mode = argc >= 11 ? argv[10] : "";
-    bool flower_template = template_mode == "flower" || template_mode == "flower_nothink";
+    bool flower_template = template_mode == "flower" || template_mode == "flower_nothink" || template_mode == "flower_think";
     if (flower_template) {
         rwkvmobile_runtime_set_flower_template(runtime, model_id, 1);
         rwkvmobile_runtime_set_bos_token(runtime, model_id, "");
@@ -50,6 +50,8 @@ int main(int argc, char **argv) {
         rwkvmobile_runtime_set_thinking_token(runtime, model_id, "");
         if (template_mode == "flower_nothink") {
             rwkvmobile_runtime_set_thinking_token(runtime, model_id, "<think>\n</think>");
+        } else if (template_mode == "flower_think") {
+            rwkvmobile_runtime_set_thinking_token(runtime, model_id, "<think>");
         }
     }
 

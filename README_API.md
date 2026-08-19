@@ -111,6 +111,19 @@ Chat completion (OpenAI-compatible).
 | force_language | string | no | "zh" / "zh-CN" for Chinese, "en" / "en-US" / "en-GB" for English |
 | temperature, top_k, top_p, ... | - | no | Same as completions |
 
+`enable_reasoning` is an execution flag, not a model-capability probe. The
+native runtime does not infer configurable-thinking support from a model file
+name, vision encoder, or chat template. A catalog-owning caller must expose a
+Thinking control only for a model explicitly marked as supporting it, then set
+the model-local prefix through `rwkvmobile_runtime_set_thinking_token`.
+
+For the configurable Flower-template VL contract, the exact prefixes are
+`<think>` when Thinking is enabled and `<think>\n</think>` when it is disabled.
+Do not add a leading space when `space_after_roles` is false. Older VL models
+that do not declare this capability keep their existing fixed template behavior
+and must not be made configurable merely because they use a reasoning-shaped
+prompt envelope.
+
 **Response (non-stream):**
 ```json
 {
