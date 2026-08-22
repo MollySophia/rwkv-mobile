@@ -197,6 +197,42 @@ static NSString * state_mode_name(rwkv_coreml_state_mode state_mode) {
     return @"coreml";
 }
 
+static bool parse_compute_units(NSString *value, MLComputeUnits *compute_units_out) {
+    NSString *mode = trim_string(value);
+    if (mode == nil || mode.length == 0 || [mode isEqualToString:@"cpu-ne"]) {
+        if (compute_units_out) *compute_units_out = MLComputeUnitsCPUAndNeuralEngine;
+        return true;
+    }
+    if ([mode isEqualToString:@"cpu-gpu"]) {
+        if (compute_units_out) *compute_units_out = MLComputeUnitsCPUAndGPU;
+        return true;
+    }
+    if ([mode isEqualToString:@"all"]) {
+        if (compute_units_out) *compute_units_out = MLComputeUnitsAll;
+        return true;
+    }
+    if ([mode isEqualToString:@"cpu"]) {
+        if (compute_units_out) *compute_units_out = MLComputeUnitsCPUOnly;
+        return true;
+    }
+    COREML_LOGE(@"config.yaml invalid compute units: %@", mode);
+    return false;
+}
+
+static NSString * compute_units_name(MLComputeUnits compute_units) {
+    switch (compute_units) {
+        case MLComputeUnitsCPUOnly:
+            return @"cpu";
+        case MLComputeUnitsCPUAndGPU:
+            return @"cpu-gpu";
+        case MLComputeUnitsAll:
+            return @"all";
+        case MLComputeUnitsCPUAndNeuralEngine:
+            return @"cpu-ne";
+    }
+    return @"cpu-ne";
+}
+
 static int env_int_or_default(const char *name, int default_value, int min_value, int max_value) {
     const char *value = std::getenv(name);
     if (value == nullptr || value[0] == '\0') return default_value;
@@ -251,7 +287,14 @@ static MLModel * load_coreml_model_with_retry(
     return nil;
 }
 
-static bool parse_coreml_config(NSString *config_path, NSString **basename_out, int *num_chunks_out, rwkv_coreml_state_mode *state_mode_out) {
+static bool parse_coreml_config(
+    NSString *config_path,
+    NSString **basename_out,
+    int *num_chunks_out,
+    rwkv_coreml_state_mode *state_mode_out,
+    MLComputeUnits *decode_compute_units_out,
+    MLComputeUnits *prefill_compute_units_out
+) {
     NSError *error = nil;
     NSString *content = [NSString stringWithContentsOfFile:config_path encoding:NSUTF8StringEncoding error:&error];
     if (error || content == nil) {
@@ -262,6 +305,8 @@ static bool parse_coreml_config(NSString *config_path, NSString **basename_out, 
     int num_chunks = 0;
     // Legacy CoreML exports did not write state_mode; they used full Core ML state.
     rwkv_coreml_state_mode state_mode = RWKV_COREML_STATE_MODE_COREML;
+    MLComputeUnits decode_compute_units = MLComputeUnitsCPUAndNeuralEngine;
+    MLComputeUnits prefill_compute_units = MLComputeUnitsCPUAndNeuralEngine;
     NSArray<NSString *> *lines = [content componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
     for (NSString *line in lines) {
         NSString *trimmed = trim_string(line);
@@ -278,6 +323,14 @@ static bool parse_coreml_config(NSString *config_path, NSString **basename_out, 
             if (!parse_state_mode(value, &state_mode)) {
                 return false;
             }
+        } else if ([key isEqualToString:@"decode_compute_units"]) {
+            if (!parse_compute_units(value, &decode_compute_units)) {
+                return false;
+            }
+        } else if ([key isEqualToString:@"prefill_compute_units"]) {
+            if (!parse_compute_units(value, &prefill_compute_units)) {
+                return false;
+            }
         }
     }
     if (basename == nil || basename.length == 0) {
@@ -291,6 +344,8 @@ static bool parse_coreml_config(NSString *config_path, NSString **basename_out, 
     if (basename_out) *basename_out = basename;
     if (num_chunks_out) *num_chunks_out = num_chunks;
     if (state_mode_out) *state_mode_out = state_mode;
+    if (decode_compute_units_out) *decode_compute_units_out = decode_compute_units;
+    if (prefill_compute_units_out) *prefill_compute_units_out = prefill_compute_units;
     return true;
 }
 
@@ -606,13 +661,22 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model, 
         NSString *basename = nil;
         int num_chunks = 0;
         rwkv_coreml_state_mode state_mode = RWKV_COREML_STATE_MODE_COREML;
-        if (!parse_coreml_config(config_path, &basename, &num_chunks, &state_mode)) {
+        MLComputeUnits decode_compute_units = MLComputeUnitsCPUAndNeuralEngine;
+        MLComputeUnits prefill_compute_units = MLComputeUnitsCPUAndNeuralEngine;
+        if (!parse_coreml_config(
+                config_path,
+                &basename,
+                &num_chunks,
+                &state_mode,
+                &decode_compute_units,
+                &prefill_compute_units
+            )) {
             return -1;
         }
         ctx->state_mode = state_mode;
         const bool requested_async_prefill = load_prefill_async != 0;
-        COREML_LOGI(@"Initializing RWKV CoreML with model at %@, basename=%@, num_chunks=%d, state_mode=%@, requested_async_prefill=%d",
-              path_model_str, basename, num_chunks, state_mode_name(state_mode), requested_async_prefill ? 1 : 0);
+        COREML_LOGI(@"Initializing RWKV CoreML with model at %@, basename=%@, num_chunks=%d, state_mode=%@, decode_compute_units=%@, prefill_compute_units=%@, requested_async_prefill=%d",
+              path_model_str, basename, num_chunks, state_mode_name(state_mode), compute_units_name(decode_compute_units), compute_units_name(prefill_compute_units), requested_async_prefill ? 1 : 0);
         const int async_prefill_threshold_ms = async_prefill_decode_load_threshold_ms == 0
             ? kDefaultAsyncPrefillDecodeLoadThresholdMs
             : async_prefill_decode_load_threshold_ms;
@@ -621,11 +685,11 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model, 
 
         // select which device to run the Core ML model on
         MLModelConfiguration *config_decode = [[MLModelConfiguration alloc] init];
-        config_decode.computeUnits = MLComputeUnitsCPUAndNeuralEngine;
+        config_decode.computeUnits = decode_compute_units;
         config_decode.functionName = @"decode";
 
         MLModelConfiguration *config_prefill = [[MLModelConfiguration alloc] init];
-        config_prefill.computeUnits = MLComputeUnitsCPUAndNeuralEngine;
+        config_prefill.computeUnits = prefill_compute_units;
         config_prefill.functionName = @"prefill";
 
         ctx->num_chunks = num_chunks;
@@ -801,10 +865,10 @@ int rwkv_coreml_init(struct rwkv_coreml_context * ctx, const char * path_model, 
         if (async_prefill) {
             const std::string model_dir(path_model);
             const std::string basename_cstr([basename UTF8String]);
-            ctx->prefill_load_thread = std::thread([ctx, model_dir, basename_cstr, num_chunks]() {
+            ctx->prefill_load_thread = std::thread([ctx, model_dir, basename_cstr, num_chunks, prefill_compute_units]() {
                 @autoreleasepool {
                     MLModelConfiguration *config_prefill_bg = [[MLModelConfiguration alloc] init];
-                    config_prefill_bg.computeUnits = MLComputeUnitsCPUAndNeuralEngine;
+                    config_prefill_bg.computeUnits = prefill_compute_units;
                     config_prefill_bg.functionName = @"prefill";
                     NSString *path_model_str_bg = [[NSString alloc] initWithUTF8String:model_dir.c_str()];
                     NSString *basename_bg = [[NSString alloc] initWithUTF8String:basename_cstr.c_str()];

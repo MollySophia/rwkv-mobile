@@ -16,6 +16,22 @@ parser.add_argument('--lut8', action='store_true', help='Use lut8 palettization'
 parser.add_argument('--lut6', action='store_true', help='Use lut6 palettization')
 parser.add_argument('--lut4', action='store_true', help='Use lut4 palettization')
 parser.add_argument(
+    '--direct-int4-lut6-mix',
+    action='store_true',
+    help=(
+        'Use direct symmetric per-channel int4 for the large attention/FFN projections '
+        'and LUT6 for the remaining weights, including attention output'
+    ),
+)
+parser.add_argument(
+    '--compress-inplace',
+    action='store_true',
+    help=(
+        'Apply Core ML Tools weight compression in place to reduce peak host memory. '
+        'This changes conversion memory use, not the selected compression recipe.'
+    ),
+)
+parser.add_argument(
     '--omniquant-parameters',
     type=Path,
     help='Import OmniQuant per-channel int4 metadata for supported Linear layers and use --omniquant-fallback elsewhere',
@@ -38,6 +54,18 @@ parser.add_argument(
     default='wkv-coreml',
     help='Use Core ML StateType, expose all RWKV state as tensors, or keep only WKV as Core ML state',
 )
+parser.add_argument(
+    '--decode-compute-units',
+    choices=['cpu-ne', 'cpu-gpu', 'all', 'cpu'],
+    default='cpu-ne',
+    help='Core ML compute units used when loading the decode function',
+)
+parser.add_argument(
+    '--prefill-compute-units',
+    choices=['cpu-ne', 'cpu-gpu', 'all', 'cpu'],
+    default='cpu-ne',
+    help='Core ML compute units used when loading the prefill function',
+)
 parser_args = parser.parse_args()
 
 OMNIQUANT_BITWIDTH = 4
@@ -51,6 +79,13 @@ OMNIQUANT_MODULE_MAP = {
     'ffn.key.weight_quantizer': 'ffn.key',
     'ffn.value.weight_quantizer': 'ffn.value',
 }
+DIRECT_INT4_MODULE_SUFFIXES = (
+    'att.receptance',
+    'att.key',
+    'att.value',
+    'ffn.key',
+    'ffn.value',
+)
 active_omniquant_module_map = dict(OMNIQUANT_MODULE_MAP)
 if parser_args.att_output_fallback:
     active_omniquant_module_map.pop('attn.o_proj.weight_quantizer')
@@ -61,9 +96,12 @@ compression_modes = [
     parser_args.lut8,
     parser_args.lut6,
     parser_args.lut4,
+    parser_args.direct_int4_lut6_mix,
 ]
 if sum(bool(mode) for mode in compression_modes) > 1:
-    raise ValueError('Choose only one of --int8/--int4/--lut8/--lut6/--lut4.')
+    raise ValueError(
+        'Choose only one of --int8/--int4/--lut8/--lut6/--lut4/--direct-int4-lut6-mix.'
+    )
 if parser_args.omniquant_parameters is not None and any(compression_modes):
     raise ValueError('--omniquant-parameters already implies fallback compression; do not combine it with other compression flags.')
 if parser_args.omniquant_parameters is None:
@@ -152,6 +190,42 @@ def _compute_omniquant_int4_per_channel(
     return dequantized_weight.to(weight.dtype), scale
 
 
+def _compute_direct_int4_per_channel(
+    weight: torch.Tensor,
+    module_name: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if weight.ndim != 2:
+        raise ValueError(f'Expected a 2D Linear weight for {module_name}, got shape {tuple(weight.shape)}')
+
+    weight_fp32 = weight.detach().float()
+    xmax = torch.amax(weight_fp32, dim=1, keepdim=True)
+    xmin = torch.amin(weight_fp32, dim=1, keepdim=True)
+    abs_bound = torch.maximum(xmax.abs(), xmin.abs())
+    scale = (2.0 * abs_bound) / float(OMNIQUANT_QMAX - OMNIQUANT_QMIN)
+    scale = torch.clamp(scale, min=torch.finfo(weight_fp32.dtype).eps)
+
+    quantized_weight = torch.round(weight_fp32 / scale).clamp(OMNIQUANT_QMIN, OMNIQUANT_QMAX)
+    dequantized_weight = quantized_weight * scale
+    return dequantized_weight.to(weight.dtype), scale
+
+
+def _apply_direct_int4(
+    model: torch.nn.Module,
+    module_names: list[str],
+) -> list[str]:
+    _set_or_replace_buffer(model, '_COREML_/metadata_version', torch.tensor(1, dtype=torch.int32))
+    applied = []
+    for module_name in module_names:
+        submodule = model.get_submodule(module_name)
+        if not isinstance(submodule, torch.nn.Linear):
+            raise TypeError(f'Expected torch.nn.Linear for {module_name}, got {type(submodule)}')
+        dequantized_weight, scale = _compute_direct_int4_per_channel(submodule.weight.data, module_name)
+        submodule.weight.data.copy_(dequantized_weight)
+        _set_quantization_metadata(submodule, 'weight', OMNIQUANT_BITWIDTH, scale)
+        applied.append(module_name)
+    return applied
+
+
 def _apply_omniquant_import(
     model: torch.nn.Module,
     omni_params: dict,
@@ -210,6 +284,21 @@ model_args.MODEL_NAME = str(parser_args.model).replace('.pth', '')
 full_model = RWKV_RNN(model_args)
 MODEL_DEVICE = full_model.device
 args = full_model.args
+
+direct_int4_target_modules = []
+if parser_args.direct_int4_lut6_mix:
+    for module_name, module in full_model.named_modules():
+        if not isinstance(module, torch.nn.Linear):
+            continue
+        if any(module_name.endswith(f'.{suffix}') for suffix in DIRECT_INT4_MODULE_SUFFIXES):
+            direct_int4_target_modules.append(module_name)
+    direct_int4_target_modules.sort()
+    expected_direct_int4_modules = args.n_layer * len(DIRECT_INT4_MODULE_SUFFIXES)
+    if len(direct_int4_target_modules) != expected_direct_int4_modules:
+        raise ValueError(
+            f'Expected {expected_direct_int4_modules} direct-int4 modules, '
+            f'found {len(direct_int4_target_modules)}'
+        )
 
 layers_for_chunk = []
 assert parser_args.chunks > 0, "chunks must be >= 1"
@@ -297,6 +386,15 @@ if parser_args.omniquant_parameters is not None:
         }
         palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
         use_lut = True
+elif parser_args.direct_int4_lut6_mix:
+    palettization_config_dict = {
+        "global_config": {"n_bits": 6, "granularity": "per_grouped_channel", "group_size": 16},
+        "module_name_configs": {
+            module_name: None for module_name in direct_int4_target_modules
+        },
+    }
+    palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+    use_lut = True
 elif parser_args.int4:
     config = PostTrainingQuantizerConfig.from_dict(
         {
@@ -343,10 +441,10 @@ elif parser_args.lut4:
 
 if use_lut:
     palettizer = PostTrainingPalettizer(full_model, palettization_config)
-    full_model = palettizer.compress()
+    full_model = palettizer.compress(inplace=parser_args.compress_inplace)
 elif use_int:
     quantizer = PostTrainingQuantizer(full_model, config)
-    full_model = quantizer.compress()
+    full_model = quantizer.compress(inplace=parser_args.compress_inplace)
 
 if omniquant_parameters is not None:
     if parser_args.att_output_fallback:
@@ -363,6 +461,13 @@ if omniquant_parameters is not None:
         print('Warning: missing modules for OmniQuant import:', len(omniquant_stats['missing_module']))
     if omniquant_stats['invalid_module']:
         print('Warning: non-Linear OmniQuant targets skipped:', len(omniquant_stats['invalid_module']))
+elif parser_args.direct_int4_lut6_mix:
+    direct_int4_applied = _apply_direct_int4(full_model, direct_int4_target_modules)
+    print(
+        'Applied direct symmetric per-channel int4 metadata to',
+        len(direct_int4_applied),
+        'Linear layers; remaining weights use LUT6 fallback.'
+    )
 
 class PackedStateMixin:
     def _unpack_state(self, state_tokenshift, state_wkv):
@@ -460,6 +565,8 @@ def _build_output_name(mode_tag: str, chunk_idx: int = 0) -> str:
         output_name += f'-omni-int4{parser_args.omniquant_fallback}mix'
         if parser_args.att_output_fallback:
             output_name += f'-attout-{parser_args.omniquant_fallback}'
+    elif parser_args.direct_int4_lut6_mix:
+        output_name += '-direct-int4lut6mix-attout-lut6'
     elif parser_args.int4:
         output_name += '-int4'
     elif parser_args.int8:
@@ -486,6 +593,8 @@ def _build_combined_base_name() -> str:
         output_name += f'-omni-int4{parser_args.omniquant_fallback}mix'
         if parser_args.att_output_fallback:
             output_name += f'-attout-{parser_args.omniquant_fallback}'
+    elif parser_args.direct_int4_lut6_mix:
+        output_name += '-direct-int4lut6mix-attout-lut6'
     elif parser_args.int4:
         output_name += '-int4'
     elif parser_args.int8:
@@ -500,6 +609,10 @@ def _build_combined_base_name() -> str:
         output_name += '-tensorstate'
     elif parser_args.state_mode == 'wkv-coreml':
         output_name += '-wkvstate'
+    if parser_args.decode_compute_units != 'cpu-ne':
+        output_name += f'-decode-{parser_args.decode_compute_units.replace("-", "")}'
+    if parser_args.prefill_compute_units != 'cpu-ne':
+        output_name += f'-prefill-{parser_args.prefill_compute_units.replace("-", "")}'
     return output_name
 
 def _build_coreml_io(inputs, chunk_idx: int = 0, num_chunks: int = 1):
@@ -603,9 +716,16 @@ with open(output_dir / 'config.yaml', 'w', encoding='utf-8') as f:
     f.write(f'basename: {combined_base_name}\n')
     f.write(f'num_chunks: {parser_args.chunks}\n')
     f.write(f'state_mode: {parser_args.state_mode}\n')
+    f.write(f'decode_compute_units: {parser_args.decode_compute_units}\n')
+    f.write(f'prefill_compute_units: {parser_args.prefill_compute_units}\n')
     if parser_args.omniquant_parameters is not None:
         f.write(f'omniquant_fallback: {parser_args.omniquant_fallback}\n')
         f.write(f'att_output_fallback: {str(parser_args.att_output_fallback).lower()}\n')
+    elif parser_args.direct_int4_lut6_mix:
+        f.write('quantization: direct-int4lut6mix\n')
+        f.write('direct_int4_granularity: per_channel\n')
+        f.write('fallback: lut6\n')
+        f.write('att_output_fallback: true\n')
 
 def reset_state_buffers(model):
     for name, buffer in model.named_buffers():
