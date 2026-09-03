@@ -2,9 +2,14 @@
 #include <filesystem>
 #include <thread>
 #include <algorithm>
+#include <cerrno>
+#include <cstdlib>
 #include <cstring>
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__OHOS__)
 #include <unistd.h>
+#endif
+#if defined(__OHOS__)
+#include <hilog/log.h>
 #endif
 
 #include "backend.h"
@@ -21,6 +26,49 @@ namespace rwkvmobile {
 static constexpr uint32_t kReplayableStateMagic = 0x5350524c; // "LRPS"
 static constexpr uint32_t kReplayableStateVersion = 1;
 
+#if defined(__ANDROID__) || defined(__OHOS__)
+static bool configure_threadpool_cpuset(
+    ggml_threadpool_params & params,
+    int n_threads,
+    const char * value
+) {
+    if (!value || !*value || n_threads <= 0) {
+        return false;
+    }
+
+    bool parsed_mask[GGML_MAX_N_THREADS] = {};
+    int parsed_count = 0;
+    const char * cursor = value;
+    while (*cursor) {
+        errno = 0;
+        char * end = nullptr;
+        const long cpu = std::strtol(cursor, &end, 10);
+        if (errno != 0 || end == cursor || cpu < 0 ||
+            cpu >= GGML_MAX_N_THREADS || parsed_mask[cpu]) {
+            return false;
+        }
+        parsed_mask[cpu] = true;
+        ++parsed_count;
+
+        if (*end == '\0') {
+            cursor = end;
+            break;
+        }
+        if (*end != ',' || end[1] == '\0') {
+            return false;
+        }
+        cursor = end + 1;
+    }
+
+    if (parsed_count != n_threads) {
+        return false;
+    }
+    std::memcpy(params.cpumask, parsed_mask, sizeof(parsed_mask));
+    params.strict_cpu = true;
+    return true;
+}
+#endif
+
 static int make_logits_tensor_view(float * logits_out, size_t count, Tensor1D &logits) {
     if (!logits_out) {
         return RWKV_ERROR_EVAL;
@@ -30,7 +78,7 @@ static int make_logits_tensor_view(float * logits_out, size_t count, Tensor1D &l
 }
 
 void llama_cpp_backend::initialize_supported_batch_sizes() {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__OHOS__)
     supported_batch_sizes = {1};
 #else
     supported_batch_sizes.clear();
@@ -50,6 +98,19 @@ int llama_cpp_backend::init(void * extra) {
         while (log_msg.size() > 0 && log_msg[log_msg.size() - 1] == '\n') {
             log_msg = log_msg.substr(0, log_msg.size() - 1);
         }
+#if defined(__OHOS__)
+        // Harmony application stdout is not a reliable runtime evidence
+        // surface. Mirror llama.cpp placement and offload messages into
+        // HiLog so a device run can prove the selected backend.
+        OH_LOG_Print(
+            LOG_APP,
+            LOG_INFO,
+            0x0D11,
+            "RwkvLlamaBackend",
+            "%{public}s",
+            log_msg.c_str()
+        );
+#endif
         switch (level) {
             case GGML_LOG_LEVEL_ERROR:
                 LOGE("%s", log_msg.c_str());
@@ -103,17 +164,79 @@ int llama_cpp_backend::load_model(std::string model_path, void * extra) {
     ctx_params.n_ctx = n_ctx_per_seq * (uint32_t) kMaxBatchSlots;
     ctx_params.n_seq_max = kMaxBatchSlots;
     ctx_params.kv_unified = false;
+#if defined(__ANDROID__) || defined(__OHOS__)
+    if (const char * value = std::getenv("RWKV_LLAMACPP_UBATCH")) {
+        errno = 0;
+        char * end = nullptr;
+        const long requested = std::strtol(value, &end, 10);
+        if (errno == 0 && end != value && *end == '\0' &&
+            requested > 0 && requested <= 2048) {
+            ctx_params.n_ubatch = (uint32_t) requested;
+        } else {
+            LOGW("ignored invalid RWKV_LLAMACPP_UBATCH: %s", value);
+        }
+    }
+#endif
     ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
         return RWKV_ERROR_MODEL | RWKV_ERROR_IO;
     }
+#if defined(__ANDROID__) || defined(__OHOS__)
+    LOGI(
+        "llama.cpp context: n_ctx=%u n_batch=%u n_ubatch=%u",
+        llama_n_ctx(ctx), llama_n_batch(ctx), llama_n_ubatch(ctx)
+    );
+#if defined(__OHOS__)
+    OH_LOG_Print(
+        LOG_APP,
+        LOG_INFO,
+        0x0D11,
+        "RwkvLlamaBackend",
+        "llama.cpp context: n_ctx=%{public}u n_batch=%{public}u n_ubatch=%{public}u",
+        llama_n_ctx(ctx), llama_n_batch(ctx), llama_n_ubatch(ctx)
+    );
+#endif
+#endif
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__OHOS__)
     const long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
-    const int n_threads = online_cpus > 0 ? (int) online_cpus : (int) std::thread::hardware_concurrency();
+    int n_threads = online_cpus > 0 ? (int) online_cpus : (int) std::thread::hardware_concurrency();
+    if (const char *value = std::getenv("RWKV_LLAMACPP_THREADS")) {
+        const int requested = std::atoi(value);
+        if (requested > 0) {
+            n_threads = requested;
+        }
+    }
     if (n_threads > 0) {
         llama_set_n_threads(ctx, n_threads, n_threads);
         ggml_threadpool_params threadpool_params = ggml_threadpool_params_default(n_threads);
+        if (const char *cpu_set = std::getenv("RWKV_LLAMACPP_CPUSET")) {
+            if (configure_threadpool_cpuset(threadpool_params, n_threads, cpu_set)) {
+                LOGI("strict threadpool CPU set: %s", cpu_set);
+#if defined(__OHOS__)
+                OH_LOG_Print(
+                    LOG_APP,
+                    LOG_INFO,
+                    0x0D11,
+                    "RwkvLlamaBackend",
+                    "strict threadpool CPU set: %{public}s",
+                    cpu_set
+                );
+#endif
+            } else {
+                LOGW("ignored invalid RWKV_LLAMACPP_CPUSET for %d threads", n_threads);
+#if defined(__OHOS__)
+                OH_LOG_Print(
+                    LOG_APP,
+                    LOG_WARN,
+                    0x0D11,
+                    "RwkvLlamaBackend",
+                    "ignored invalid RWKV_LLAMACPP_CPUSET for %{public}d threads",
+                    n_threads
+                );
+#endif
+            }
+        }
         threadpool = ggml_threadpool_new(&threadpool_params);
         if (threadpool) {
             llama_attach_threadpool(ctx, threadpool, nullptr);

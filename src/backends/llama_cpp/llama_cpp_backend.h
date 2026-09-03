@@ -37,7 +37,7 @@ public:
 
     bool embedding_input_force_no_ln0() override { return true; }
 private:
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__OHOS__)
     static constexpr int kMaxBatchSlots = 1;
 #else
     static constexpr int kMaxBatchSlots = 16;

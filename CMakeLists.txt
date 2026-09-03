@@ -299,6 +299,15 @@ if (ENABLE_LLAMACPP_BACKEND)
     endif()
 
     FetchContent_MakeAvailable(llama_cpp)
+    if (CMAKE_SYSTEM_NAME STREQUAL "OHOS")
+        include(cmake/patch_llama_cpp_ohos_affinity.cmake)
+        rwkv_mobile_patch_llama_cpp_ohos_affinity(
+            "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-cpu/ggml-cpu.c"
+        )
+        # HarmonyOS' musl headers expose cpu_set_t, CPU_SET, and
+        # sched_setaffinity only under the GNU feature surface.
+        target_compile_definitions(ggml-cpu PRIVATE _GNU_SOURCE)
+    endif()
     target_compile_definitions(llama PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
     target_compile_definitions(ggml PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
     target_compile_definitions(ggml-base PUBLIC _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)

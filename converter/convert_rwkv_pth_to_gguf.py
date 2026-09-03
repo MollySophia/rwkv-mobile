@@ -380,8 +380,11 @@ class Model:
 
     def _set_vocab_rwkv_world(self):
         assert (self.vocab_path).is_file()
-        tokens: list[bytes] = []
-        toktypes: list[int] = []
+        # RWKV World reserves token id 0 as the shared BOS/EOS token. The
+        # canonical vocabulary file is intentionally one-based and starts at
+        # token id 1, so seed id 0 before validating the file's contiguous ids.
+        tokens: list[bytes] = [b"<s>"]
+        toktypes: list[int] = [gguf.TokenType.CONTROL]
 
         with open(self.vocab_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -397,7 +400,7 @@ class Model:
                 token_id = int(parts[0])
                 if token_id != len(tokens):
                     raise ValueError(
-                        f"Vocabulary ids must be contiguous from zero: expected {len(tokens)}, got {token_id}"
+                        f"Vocabulary ids must be contiguous after reserved id 0: expected {len(tokens)}, got {token_id}"
                     )
                 token, token_len = ast.literal_eval(' '.join(parts[1:-1])), int(parts[-1])
                 token = token.encode("utf-8") if isinstance(token, str) else token
@@ -405,7 +408,7 @@ class Model:
                 assert len(token) == token_len, f"token: {token}, token_len: {token_len}, len(token): {len(token)}"
                 token_text: str = repr(token)[2:-1]  # "b'\xff'" -> "\xff"
                 tokens.append(token_text.encode("utf-8"))
-                toktypes.append(gguf.TokenType.CONTROL if token_id == 0 else gguf.TokenType.NORMAL)
+                toktypes.append(gguf.TokenType.NORMAL)
         remainder = vocab_size - len(tokens)
         if remainder >= 0:
             for i in range(len(tokens), vocab_size):
