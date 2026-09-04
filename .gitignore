@@ -1,5 +1,6 @@
 build/
 build*/
+/b_*/
 .vscode/
 pubspec.lock
 .dart_tool/
